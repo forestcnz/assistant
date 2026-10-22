@@ -1,0 +1,87 @@
+name: Android build and release
+
+on:
+  push:
+    tags:
+      - '**'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Set up Java
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: '9.6.1'
+
+      - name: Build debug APK
+        run: gradle assembleDebug
+
+      - name: Prepare release files
+        id: prepare
+        shell: bash
+        run: |
+          mkdir -p dist
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            release_name="$GITHUB_REF_NAME"
+          else
+            release_name="manual-${GITHUB_RUN_NUMBER}"
+          fi
+          safe_release_name="${release_name//\//-}"
+          echo "artifact_name=assistant-${safe_release_name}" >> "$GITHUB_OUTPUT"
+          cp app/build/outputs/apk/debug/app-debug.apk "dist/assistant-${safe_release_name}-debug.apk"
+          cd dist
+          sha256sum *.apk > SHA256SUMS.txt
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.prepare.outputs.artifact_name }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            tag="$GITHUB_REF_NAME"
+            title="Android build ${tag}"
+          else
+            tag="build-${GITHUB_RUN_NUMBER}-${GITHUB_RUN_ATTEMPT}"
+            title="Android build ${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
+          fi
+          notes=$(cat <<EOF
+          Automated Android debug build for ${GITHUB_REF_NAME}.
+
+          - Commit: ${GITHUB_SHA}
+          - Version: $(grep '^appVersionName=' gradle.properties | cut -d= -f2) ($(grep '^appVersionCode=' gradle.properties | cut -d= -f2))
+          - APK is debug-signed. Installs from different CI runs may require uninstalling the previous build first because each runner uses its own debug signing key.
+          EOF
+          )
+          # 若同名 Release 已存在（例如重置历史后重推标签），先删除旧的空 Release，保证发布步骤可重复执行
+          gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --yes 2>/dev/null || true
+          gh release create "$tag" dist/* \
+            --title "$title" \
+            --notes "$notes" \
+            --target "$GITHUB_SHA"

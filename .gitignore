@@ -1,0 +1,31 @@
+# Gradle
+.gradle/
+build/
+
+# IDE
+.idea/
+*.iml
+captures/
+.externalNativeBuild/
+.cxx/
+
+# 本机环境
+local.properties
+AGENTS.md
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# 崩溃/临时日志
+hs_err_pid*.log
+*.log
+.kotlin/
+
+# 临时调试截图
+sdxn-*.png
+
+.opencode
+.agents
+tests
+.tasks

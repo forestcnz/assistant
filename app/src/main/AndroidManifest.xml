@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- 悬浮窗权限：任务运行时显示悬浮控制条（状态/停止按钮） -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+
+    <!-- 截屏（找图/找色依赖）：MediaProjection 需前台服务承载 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- 脚本运行期保活前台服务（specialUse） -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+
+    <application
+        android:name=".App"
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:theme="@style/Theme.ScriptJs">
+
+        <!-- 主界面：任务列表/编辑器 -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- 模板截取工具：截屏框选生成找图素材 -->
+        <activity
+            android:name=".TemplateCaptureActivity"
+            android:exported="false" />
+
+        <!-- 区域截图保存：由系统文件选择器确定 PNG 保存位置 -->
+        <activity
+            android:name=".ScreenshotExportActivity"
+            android:exported="false"
+            android:taskAffinity=""
+            android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
+        <!-- 悬浮工具的录屏授权在独立透明任务中完成，避免把主界面带到前台。 -->
+        <activity
+            android:name=".PickerCapturePermissionActivity"
+            android:exported="false"
+            android:taskAffinity=""
+            android:excludeFromRecents="true"
+            android:configChanges="orientation|screenSize|keyboardHidden|uiMode"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
+        <!-- 内置脚本编辑器 -->
+        <activity
+            android:name=".ScriptEditorActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
+
+        <!-- 无障碍服务：仅用于手势派发（坐标点击/滑动/手势），不做控件解析 -->
+        <service
+            android:name=".core.gesture.ScriptAccessibilityService"
+            android:exported="false"
+            android:label="@string/accessibility_service_label"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility_service_config" />
+        </service>
+
+        <!-- 任务 zip 分享：FileProvider -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
+        <!-- 脚本运行期保活前台服务：低优先级通知（任务名+能力自检+停止动作） -->
+        <service
+            android:name=".core.runner.ScriptForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="script_execution" />
+        </service>
+
+        <!-- 悬浮球启用期间保活；MuMu 等模拟器切换到后台时可能回收普通进程。 -->
+        <service
+            android:name=".core.floaty.FloatyForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="overlay_window" />
+        </service>
+
+        <!-- Shizuku UserService 不是 Android Service：Shizuku（shell 身份）会直接反射实例化
+             core.image.ShellUserService（必须继承 IBinder / AIDL Stub），因此无需在此声明。 -->
+
+        <!-- Shizuku：静默截屏（以 shell 身份执行 screencap）所需的服务提供者 -->
+        <provider
+            android:name="rikka.shizuku.ShizukuProvider"
+            android:authorities="${applicationId}.shizuku"
+            android:enabled="true"
+            android:exported="true"
+            android:multiprocess="false"
+            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
+
+        <!-- 截屏服务：持有 MediaProjection，为脚本找图提供屏幕帧 -->
+        <service
+            android:name=".core.recording.RecordingService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="user_initiated_touch_recording" />
+        </service>
+
+        <service
+            android:name=".core.image.ScreenCaptureService"
+            android:exported="false"
+            android:foregroundServiceType="mediaProjection" />
+    </application>
+
+</manifest>

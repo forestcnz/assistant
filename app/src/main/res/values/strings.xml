@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">雕雕助手</string>
+    <string name="accessibility_service_label">雕雕助手-手势服务</string>
+    <string name="accessibility_service_desc">用于执行脚本中的坐标点击、滑动与手势操作（仅派发手势，不读取控件内容）。</string>
+</resources>
