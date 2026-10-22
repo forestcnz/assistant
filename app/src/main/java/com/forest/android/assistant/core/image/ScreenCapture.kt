@@ -16,12 +16,11 @@ import java.util.concurrent.atomic.AtomicBoolean
 /**
  * 截屏入口：按「通道」选择截屏方式，并处理 MediaProjection 的授权桥接。
  *
- * 通道优先级（AUTO 模式）：**Root → Shizuku → MediaProjection**
+ * 通道优先级（AUTO 模式）：**Root → MediaProjection**
  * - Root：`su -c screencap`，静默无授权弹窗；
- * - Shizuku：以 shell 身份执行 `screencap`，同样免弹窗；
  * - MediaProjection：需用户授权一次，切屏/息屏后需重新授权。
  *
- * 显式指定 Root/Shizuku 但不可用时自动降级到 MediaProjection 并记录日志。
+ * 显式指定 Root 但不可用时自动降级到 MediaProjection 并记录日志。
  * 对应脚本 API：requestScreenCapture / captureScreen（docs/README.md 第 5.4 节）。
  */
 object ScreenCapture {
@@ -31,17 +30,14 @@ object ScreenCapture {
     private const val KEY_MODE = "mode"
 
     /** 截屏通道 */
-    enum class Channel { MEDIAPROJECTION, ROOT, SHIZUKU }
+    enum class Channel { MEDIAPROJECTION, ROOT }
 
     /** 通道模式：AUTO 自动探测，其余为手动指定 */
-    enum class Mode { AUTO, MEDIAPROJECTION, ROOT, SHIZUKU }
+    enum class Mode { AUTO, MEDIAPROJECTION, ROOT }
 
     /** 探测结果缓存：-1 未探测 / 0 不可用 / 1 可用 */
     @Volatile
     private var rootProbed = -1
-
-    @Volatile
-    private var shizukuProbed = -1
 
     private val mainHandler = Handler(Looper.getMainLooper())
 
@@ -99,7 +95,6 @@ object ScreenCapture {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit().putString(KEY_MODE, newMode.name).apply()
         rootProbed = -1
-        shizukuProbed = -1
         Log.i(TAG, "截屏通道模式已设为: " + newMode.name)
     }
 
@@ -111,25 +106,16 @@ object ScreenCapture {
         return rootProbed == 1
     }
 
-    /** Shizuku 是否可用（结果缓存） */
-    fun shizukuAvailable(forceRefresh: Boolean = false): Boolean {
-        if (forceRefresh || shizukuProbed < 0) {
-            shizukuProbed = if (SilentCapture.shizukuAvailable()) 1 else 0
-        }
-        return shizukuProbed == 1
-    }
-
     /**
-     * 静默通道（Root/Shizuku）是否可用：**只用缓存结果**，不触发探测。
-     * 供每秒刷新的界面轮询使用，避免在 UI 线程里跑 su/Shizuku 探测。
+     * Root 静默截屏是否可用：**只用缓存结果**，不触发探测。
+     * 供每秒刷新的界面轮询使用，避免在 UI 线程里跑 su 探测。
      */
-    fun silentAvailableCached(): Boolean = rootProbed == 1 || shizukuProbed == 1
+    fun silentAvailableCached(): Boolean = rootProbed == 1
 
     /** 后台预热静默通道探测结果（供界面 chip 正确显示「截屏可用」） */
-    fun probeSilentAsync(context: Context) {
+    fun probeSilentAsync() {
         Thread {
             rootAvailable(forceRefresh = true)
-            shizukuAvailable(forceRefresh = true)
         }.start()
     }
 
@@ -142,23 +128,12 @@ object ScreenCapture {
             Channel.MEDIAPROJECTION
         }
 
-        Mode.SHIZUKU -> if (shizukuAvailable()) {
-            Channel.SHIZUKU
-        } else {
-            Log.w(TAG, "已指定 Shizuku 截屏但不可用，降级到 MediaProjection")
-            Channel.MEDIAPROJECTION
-        }
-
         Mode.MEDIAPROJECTION -> Channel.MEDIAPROJECTION
 
-        Mode.AUTO -> when {
-            rootAvailable() -> Channel.ROOT
-            shizukuAvailable() -> Channel.SHIZUKU
-            else -> Channel.MEDIAPROJECTION
-        }
+        Mode.AUTO -> if (rootAvailable()) Channel.ROOT else Channel.MEDIAPROJECTION
     }
 
-    /** 当前通道是否需要用户授权弹窗（Root/Shizuku 为静默截屏） */
+    /** 当前通道是否需要用户授权弹窗（Root 为静默截屏） */
     fun needsAuthorization(context: Context): Boolean =
         activeChannel(context) == Channel.MEDIAPROJECTION
 
@@ -171,15 +146,12 @@ object ScreenCapture {
     fun captureAvailable(context: Context): Boolean =
         isReady() || activeChannel(context) != Channel.MEDIAPROJECTION
 
-    private fun captureSilently(context: Context, channel: Channel): Bitmap? = when (channel) {
-        Channel.ROOT -> SilentCapture.captureViaRoot(context)
-        Channel.SHIZUKU -> SilentCapture.captureViaShizuku(context)
-        else -> null
-    }
+    private fun captureSilently(context: Context, channel: Channel): Bitmap? =
+        if (channel == Channel.ROOT) SilentCapture.captureViaRoot(context) else null
 
     /**
      * 截取当前屏幕：
-     * - Root/Shizuku 通道：直接静默截屏（失败则尝试 MediaProjection 兜底）；
+     * - Root 通道：直接静默截屏（失败则尝试 MediaProjection 兜底）；
      * - MediaProjection 通道：取投影帧（等待刷新帧，避免拿到授权弹窗残留画面）。
      */
     fun capture(timeoutMs: Long = 2000, newerThanUptimeMs: Long = 0): Bitmap? {
@@ -214,7 +186,7 @@ object ScreenCapture {
 
     /**
      * 同步请求截屏能力（脚本线程调用）：
-     * - Root/Shizuku 通道：静默可用，直接返回 true（不弹窗）；
+     * - Root 通道：静默可用，直接返回 true（不弹窗）；
      * - MediaProjection 通道：弹系统授权窗 → 启动前台服务 → 等待投影就绪。
      */
     fun requestBlocking(timeoutSeconds: Long = 60): Boolean {
@@ -228,8 +200,8 @@ object ScreenCapture {
                     return true
                 }
                 Log.w(TAG, "静默通道 " + channel.name + " 实测失败，降级 MediaProjection")
-                // 注意：这里**不**把通道探测缓存置为不可用——实测失败常是瞬时问题
-                // （并发绑定 Shizuku UserService 竞争、系统繁忙），置为不可用会让静默通道
+                // 注意：这里**不**把通道探测缓存置为不可用——实测失败可能是瞬时问题
+                // （例如系统繁忙），置为不可用会让静默通道
                 // 直到下次重启应用都不再被采用，代价过大。本次调用按降级处理即可，
                 // 下次仍会重新尝试静默通道。
             }

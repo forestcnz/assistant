@@ -103,18 +103,6 @@
                 android:value="overlay_window" />
         </service>
 
-        <!-- Shizuku UserService 不是 Android Service：Shizuku（shell 身份）会直接反射实例化
-             core.image.ShellUserService（必须继承 IBinder / AIDL Stub），因此无需在此声明。 -->
-
-        <!-- Shizuku：静默截屏（以 shell 身份执行 screencap）所需的服务提供者 -->
-        <provider
-            android:name="rikka.shizuku.ShizukuProvider"
-            android:authorities="${applicationId}.shizuku"
-            android:enabled="true"
-            android:exported="true"
-            android:multiprocess="false"
-            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
-
         <!-- 截屏服务：持有 MediaProjection，为脚本找图提供屏幕帧 -->
         <service
             android:name=".core.recording.RecordingService"

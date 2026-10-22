@@ -7,7 +7,6 @@ import com.forest.android.assistant.core.editor.ApiDocs
 import com.forest.android.assistant.core.floaty.ConsoleOverlay
 import com.forest.android.assistant.core.floaty.FloatyManager
 import com.forest.android.assistant.core.gesture.AccessibilityGuard
-import com.forest.android.assistant.core.pack.EmbeddedTask
 import com.forest.android.assistant.core.engine.ScriptRunner
 
 /**
@@ -33,12 +32,5 @@ class App : Application() {
             }
         })
 
-        // 打包导出的 APK 自带内嵌任务：提取到任务目录，首次启动自动运行一次
-        val embedded = EmbeddedTask.installIfPresent(this)
-        if (embedded != null && EmbeddedTask.consumeFirstLaunch(this)) {
-            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                ScriptRunner.run(this, embedded)
-            }, 1500)
-        }
     }
 }

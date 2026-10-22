@@ -41,7 +41,6 @@ android {
 
     buildFeatures {
         compose = true
-        aidl = true          // Shizuku UserService 需要 AIDL 接口
     }
 }
 
@@ -64,14 +63,6 @@ dependencies {
 
     // 定时任务（WorkManager 到点拉起任务）
     implementation("androidx.work:work-runtime-ktx:2.10.5")
-
-    // 任务打包导出独立 APK：APK 重签名（纯 Java 库）
-    implementation("com.android.tools.build:apksig:8.7.3")
-    implementation("org.bouncycastle:bcprov-jdk18on:1.78.1")
-
-    // 静默截屏增强：Shizuku（可选，未安装时自动降级到 MediaProjection）
-    implementation("dev.rikka.shizuku:api:13.1.5")
-    implementation("dev.rikka.shizuku:provider:13.1.5")
 
     // OCR：MLKit 文字识别（中文模型内置，约 10MB；设计文档的备选方案，避免 PaddleOCR 15-20MB 模型）
     implementation("com.google.mlkit:text-recognition-chinese:16.0.1")

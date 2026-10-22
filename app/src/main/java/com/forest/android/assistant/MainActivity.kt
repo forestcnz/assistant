@@ -84,8 +84,6 @@ import com.forest.android.assistant.core.floaty.PickerOverlay
 import com.forest.android.assistant.core.gesture.AccessibilityGuard
 import com.forest.android.assistant.core.gesture.ScriptAccessibilityService
 import com.forest.android.assistant.core.image.ScreenCapture
-import com.forest.android.assistant.core.image.SilentCapture
-import com.forest.android.assistant.core.pack.ApkPackager
 import com.forest.android.assistant.core.recording.RecordingService
 import com.forest.android.assistant.core.recording.RecordingMode
 import com.forest.android.assistant.core.gesture.GestureClient
@@ -102,7 +100,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
-import rikka.shizuku.Shizuku
 
 /**
  * 主界面：权限状态 + 任务管理（新建/导入/编辑）+ 运行日志面板。
@@ -154,12 +151,6 @@ class MainActivity : ComponentActivity() {
     private var captureModeName by mutableStateOf("AUTO")
     private var captureChannelName by mutableStateOf("-")
     private var rootOk by mutableStateOf(false)
-    private var shizukuOk by mutableStateOf(false)
-
-    /** Shizuku 服务在运行但权限尚未授予：界面上给出「申请权限」入口 */
-    private var shizukuBinder by mutableStateOf(false)
-
-    private val REQUEST_SHIZUKU = 0x5A17
 
     /** 各任务的定时设置（列表展示用） */
     private var schedules by mutableStateOf(emptyMap<String, ScheduleManager.Schedule>())
@@ -278,14 +269,6 @@ class MainActivity : ComponentActivity() {
             ScreenCapture.onProjectionResult(result.resultCode, result.data)
         }
 
-    /** Shizuku 授权结果：授予后静默截屏立即生效，无需重启脚本 */
-    private val shizukuPermissionListener =
-        Shizuku.OnRequestPermissionResultListener { requestCode, grantResult ->
-            if (requestCode == REQUEST_SHIZUKU) {
-                applyShizukuResult(grantResult == android.content.pm.PackageManager.PERMISSION_GRANTED)
-            }
-        }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         pendingExportFile = savedInstanceState?.getString("pending_export_file")?.let(::File)
@@ -314,7 +297,7 @@ class MainActivity : ComponentActivity() {
                 while (true) {
                     a11yEnabled = isAccessibilityEnabled()
                     overlayGranted = FloatyManager.hasOverlayPermission(this@MainActivity)
-                    // 静默通道（Root/Shizuku）可用时无需录屏授权即视为「截屏可用」
+                    // Root 静默截屏可用时无需录屏授权即视为「截屏可用」
                     captureReady = ScreenCapture.isReady() || ScreenCapture.silentAvailableCached()
                     // 文件扫描与定时配置读取不占用主线程，避免列表滚动时卡顿。
                     val snapshot = withContext(Dispatchers.IO) {
@@ -336,9 +319,7 @@ class MainActivity : ComponentActivity() {
         // 悬浮窗默认开启：已授权则自动显示悬浮球；未授权则首次自动引导去授权
         autoEnableFloaty()
         // 静默通道探测放到后台线程：完成后 chip 立即显示「截屏 ✓」
-        ScreenCapture.probeSilentAsync(this)
-        // Shizuku 服务可能在应用启动后才被拉起：回到界面时重新挂监听并刷新可用性
-        Shizuku.addRequestPermissionResultListener(shizukuPermissionListener)
+        ScreenCapture.probeSilentAsync()
         // 每次回到本界面重新绑定截屏授权：脚本请求时若界面不在前台，先把自己拉到前台再弹窗
         ScreenCapture.bind(this) { intent ->
             if (!lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
@@ -354,7 +335,6 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
-        Shizuku.removeRequestPermissionResultListener(shizukuPermissionListener)
         ScreenCapture.unbind(this)
         super.onDestroy()
     }
@@ -516,10 +496,6 @@ class MainActivity : ComponentActivity() {
                     menuTask = null
                     assetsTask = name
                     assets = TaskManager.imageInfos(this, name)
-                },
-                onExportApk = {
-                    menuTask = null
-                    exportApk(name)
                 },
                 onHistory = {
                     menuTask = null
@@ -764,7 +740,6 @@ class MainActivity : ComponentActivity() {
         onDelete: () -> Unit,
         onManageAssets: () -> Unit,
         onSchedule: () -> Unit,
-        onExportApk: () -> Unit,
         onExportZip: () -> Unit,
         onHistory: () -> Unit
     ) {
@@ -783,7 +758,6 @@ class MainActivity : ComponentActivity() {
                     ToolRow("素材管理", "预览、导入与整理图片", R.drawable.ic_tool_color, onManageAssets)
                     HorizontalDivider(Modifier.padding(vertical = 8.dp))
                     ToolRow("导出 ZIP", "分享脚本、素材与配置", R.drawable.ic_export, onExportZip)
-                    ToolRow("导出独立 APK", "生成包含该任务的安装包", R.drawable.ic_export, onExportApk)
                 }
             },
             confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } }
@@ -1076,7 +1050,7 @@ class MainActivity : ComponentActivity() {
                 }
                 PermissionRow(
                     title = "截屏",
-                    desc = if (captureReady) "找图、取色与文字识别可用" else "可选择录屏授权或 Root / Shizuku",
+                    desc = if (captureReady) "找图、取色与文字识别可用" else "可选择录屏授权或 Root",
                     ok = captureReady,
                     okText = "可用",
                     actionText = "设置通道",
@@ -1275,10 +1249,10 @@ class MainActivity : ComponentActivity() {
             ToolsCard(launcherEnabled)
             WorkCard(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(bottom = 6.dp)) {
-                    SectionTitle("截屏通道", "Root/Shizuku 静默截屏优先")
+                    SectionTitle("截屏通道", "Root 静默截屏优先")
                     ToolRow(
                         "截屏通道设置",
-                        "选择自动、Root、Shizuku 或录屏授权",
+                        "选择自动、Root 或录屏授权",
                         R.drawable.ic_tool_shot
                     ) { openCaptureDialog() }
                 }
@@ -1456,29 +1430,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /** 导出独立 APK：后台打包（注入脚本与素材 + 重签名），进度写入运行日志 */
-    private fun exportApk(taskName: String) {
-        Toast.makeText(this, "开始打包：$taskName", Toast.LENGTH_SHORT).show()
-        lifecycleScope.launch {
-            val result = withContext(Dispatchers.IO) {
-                ApkPackager.packageTask(this@MainActivity, taskName) { line ->
-                    ScriptRunner.appendLog("打包: $line")
-                }
-            }
-            if (result != null) {
-                val message = "APK: " + result.apk.absolutePath +
-                        "\n大小: " + (result.sizeBytes / 1024 / 1024) + " MB"
-                android.app.AlertDialog.Builder(this@MainActivity)
-                    .setTitle("导出成功")
-                    .setMessage(message)
-                    .setPositiveButton("知道了", null)
-                    .show()
-            } else {
-                Toast.makeText(this@MainActivity, "打包失败，详见运行日志", Toast.LENGTH_LONG).show()
-            }
-        }
-    }
-
     /** 打开截屏通道对话框：后台探测可用性，避免主线程阻塞 */
     private fun openCaptureDialog() {
         captureDialog = true
@@ -1488,14 +1439,10 @@ class MainActivity : ComponentActivity() {
             val probe = withContext(Dispatchers.IO) {
                 CaptureProbe(
                     root = ScreenCapture.rootAvailable(forceRefresh = true),
-                    shizuku = ScreenCapture.shizukuAvailable(forceRefresh = true),
-                    binder = SilentCapture.shizukuBinderAlive(),
                     channel = ScreenCapture.activeChannel(this@MainActivity).name
                 )
             }
             rootOk = probe.root
-            shizukuOk = probe.shizuku
-            shizukuBinder = probe.binder
             captureChannelName = probe.channel
         }
     }
@@ -1503,42 +1450,8 @@ class MainActivity : ComponentActivity() {
     /** 通道探测结果（后台线程 → UI 状态） */
     private data class CaptureProbe(
         val root: Boolean,
-        val shizuku: Boolean,
-        val binder: Boolean,
         val channel: String
     )
-
-    /** 申请 Shizuku 权限（结果走 [shizukuPermissionListener] 回调） */
-    private fun requestShizukuPermission() {
-        when {
-            !shizukuBinder -> {
-                Toast.makeText(this, "Shizuku 服务未运行，请先启动 Shizuku", Toast.LENGTH_LONG).show()
-                ScriptRunner.appendLog("Shizuku 服务未运行：请先启动 Shizuku（root 设备可直接在 Shizuku 内启动）", 'W')
-            }
-            SilentCapture.requestShizukuPermission(REQUEST_SHIZUKU) -> {
-                Toast.makeText(this, "已弹出 Shizuku 授权请求", Toast.LENGTH_SHORT).show()
-            }
-            else -> {
-                // 已被拒绝过：Shizuku 不再弹窗，需到 Shizuku 应用内授权
-                Toast.makeText(this, "请在 Shizuku 应用内为本应用授权", Toast.LENGTH_LONG).show()
-                ScriptRunner.appendLog("Shizuku 权限此前被拒绝，请到 Shizuku 应用内 → 已授权应用 → 本应用 手动授权", 'W')
-            }
-        }
-    }
-
-    /** Shizuku 授权结果：刷新通道状态（授权成功后静默截屏立即可用） */
-    private fun applyShizukuResult(granted: Boolean) {
-        shizukuOk = granted
-        ScreenCapture.shizukuAvailable(forceRefresh = true)
-        captureChannelName = ScreenCapture.activeChannel(this).name
-        if (granted) {
-            ScriptRunner.appendLog("Shizuku 权限已授予：静默截屏可用（实际通道 " + captureChannelName + "）")
-            Toast.makeText(this, "Shizuku 已授权", Toast.LENGTH_SHORT).show()
-        } else {
-            ScriptRunner.appendLog("Shizuku 权限被拒绝：将降级 MediaProjection", 'W')
-            Toast.makeText(this, "Shizuku 授权被拒绝", Toast.LENGTH_SHORT).show()
-        }
-    }
 
     /** 应用通道模式并刷新显示 */
     private fun applyCaptureMode(mode: ScreenCapture.Mode) {
@@ -1548,7 +1461,7 @@ class MainActivity : ComponentActivity() {
         openCaptureDialog()
     }
 
-    /** 截屏通道设置对话框：Root/Shizuku 为静默截屏，均不可用时降级 MediaProjection */
+    /** 截屏通道设置对话框：Root 为静默截屏，不可用时降级 MediaProjection */
     @Composable
     private fun CaptureChannelDialog(
         onDismiss: () -> Unit,
@@ -1561,13 +1474,11 @@ class MainActivity : ComponentActivity() {
                 Column {
                     Text("模式：$captureModeName    实际通道：$captureChannelName", style = MaterialTheme.typography.bodyMedium)
                     Text(
-                        "Root：" + (if (rootOk) "可用" else "不可用") +
-                                "    Shizuku：" + (if (shizukuOk) "可用"
-                                else if (shizukuBinder) "未授权" else "不可用"),
+                        "Root：" + (if (rootOk) "可用" else "不可用"),
                         style = MaterialTheme.typography.bodySmall
                     )
                     Text(
-                        "Root/Shizuku 为静默截屏（无需授权弹窗）；均不可用时使用 MediaProjection（需授权一次）",
+                        "Root 为静默截屏（无需授权弹窗）；不可用时使用 MediaProjection（需授权一次）",
                         style = MaterialTheme.typography.bodySmall,
                         modifier = Modifier.padding(top = 6.dp)
                     )
@@ -1575,8 +1486,7 @@ class MainActivity : ComponentActivity() {
                         listOf(
                             ScreenCapture.Mode.AUTO to "自动",
                             ScreenCapture.Mode.MEDIAPROJECTION to "投影",
-                            ScreenCapture.Mode.ROOT to "Root",
-                            ScreenCapture.Mode.SHIZUKU to "Shizuku"
+                            ScreenCapture.Mode.ROOT to "Root"
                         ).forEach { (m, label) ->
                             TextButton(onClick = { onSelect(m) }) {
                                 Text(
@@ -1590,11 +1500,6 @@ class MainActivity : ComponentActivity() {
                         TextButton(onClick = {
                             Thread { ScreenCapture.requestBlocking() }.start()
                         }) { Text("立即授权/测试截屏") }
-                        if (!shizukuOk) {
-                            TextButton(onClick = { requestShizukuPermission() }) {
-                                Text("申请 Shizuku 权限", style = MaterialTheme.typography.bodySmall)
-                            }
-                        }
                     }
                 }
             },

@@ -71,7 +71,7 @@ class ScriptForegroundService : Service() {
     /** 通知内容含任务名与能力自检结果（无障碍 / 截屏） */
     private fun buildNotification(taskName: String): Notification {
         val a11y = if (GestureClient.available()) "无障碍✓" else "无障碍✗"
-        val capture = if (ScreenCapture.isReady()) "截屏✓" else "截屏✗"
+        val capture = if (ScreenCapture.isReady() || ScreenCapture.silentAvailableCached()) "截屏✓" else "截屏✗"
         val stopIntent = PendingIntent.getService(
             this,
             1,

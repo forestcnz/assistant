@@ -366,7 +366,7 @@ object ScriptRunner {
     /**
      * 定时任务到点运行前的能力预置：
      * 1) 无障碍未开启 → 记录指引并尝试自动打开无障碍设置页（后台可能被系统拦截）；
-     * 2) 无截屏能力（未授权录屏且无 Root/Shizuku 静默通道）→ 记录指引，
+     * 2) 无截屏能力（未授权录屏且无 Root 静默通道）→ 记录指引，
      *    脚本内 requestScreenCapture() 会直接返回 false，据此跳过找图/找色步骤。
      */
     private fun preflightCapabilities(context: Context) {
@@ -385,7 +385,7 @@ object ScriptRunner {
         val mediaProjectionOnly =
             ScreenCapture.activeChannel(context) == ScreenCapture.Channel.MEDIAPROJECTION
         if (mediaProjectionOnly && !ScreenCapture.isReady()) {
-            addLog('W', "前置检查：无截屏能力（未授权录屏且无 Root/Shizuku 静默通道）")
+            addLog('W', "前置检查：无截屏能力（未授权录屏且无 Root 静默通道）")
             addLog('W', "脚本内 requestScreenCapture() 将直接返回 false，请跳过找图/找色步骤")
         } else {
             addLog('I', "前置检查：截屏能力就绪")
@@ -460,9 +460,9 @@ object ScriptRunner {
             requestScreenCapture = {
                 // 定时任务在后台运行：系统限制后台弹授权窗，直接降级并给出指引，
                 // 避免脚本阻塞等待一个不会出现的弹窗（脚本据此跳过找图/找色步骤）
-                if (isScheduled && !ScreenCapture.isReady()) {
+                if (isScheduled && (app == null || !ScreenCapture.captureAvailable(app))) {
                     addLog('W', "截屏不可用：定时任务在后台无法弹出录屏授权窗，已跳过申请")
-                    addLog('W', "请在应用内手动授权录屏，或改用 Root/Shizuku 静默截屏；脚本请跳过找图/找色步骤")
+                    addLog('W', "请在应用内手动授权录屏，或改用 Root 静默截屏；脚本请跳过找图/找色步骤")
                     false
                 } else {
                     val ok = ScreenCapture.requestBlocking()
@@ -470,7 +470,7 @@ object ScriptRunner {
                     ok
                 }
             },
-            screenCaptureReady = { ScreenCapture.isReady() },
+            screenCaptureReady = { app?.let(ScreenCapture::captureAvailable) ?: false },
             captureScreen = { captureScreenForScript(app) }
         )
     }
