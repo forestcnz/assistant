@@ -386,6 +386,61 @@ object TaskManager {
         }
     }
 
+    /**
+     * 重命名前的脚本引用预览：先算好 task.js 里需要改的行，供确认后再落盘。
+     * 目标名非法或已存在时返回 null（与 [renameImage] 的校验一致）。
+     */
+    fun previewImageRename(context: Context, taskName: String, file: File, rawName: String): ImageRenamePreview? {
+        val resolved = resolveImageName(file, rawName) ?: return null
+        if (resolved == file.name) return null
+        val target = File(file.parentFile, resolved)
+        if (target.exists()) return null
+        val script = scriptFile(context, taskName).takeIf { it.isFile }
+        val plan = script?.let { ScriptRefSync.plan(it.readText(), file.name, resolved) }
+        return ImageRenamePreview(file, resolved, target, script, plan)
+    }
+
+    /** 重命名素材并同步脚本引用；成功返回新文件，失败返回 null */
+    fun renameImageWithScript(context: Context, taskName: String, preview: ImageRenamePreview): File? {
+        val target = renameImage(preview.file, preview.newName) ?: return null
+        val plan = preview.plan
+        if (plan != null && plan.hasChanges) {
+            try {
+                preview.scriptFile?.writeText(plan.updated)
+            } catch (e: Exception) {
+                // 脚本写失败：把素材名改回去，保持引用与文件一致
+                target.renameTo(preview.file)
+                return null
+            }
+        }
+        return target
+    }
+
+    /** 素材重命名预览：新文件名、脚本文件与引用替换方案（plan 为空表示无需同步） */
+    data class ImageRenamePreview(
+        val file: File,
+        val newName: String,
+        val target: File,
+        val scriptFile: File?,
+        val plan: ScriptRefSync.Plan?
+    ) {
+        fun hasScriptChanges(): Boolean = plan?.hasChanges == true
+    }
+
+    /** 解析最终文件名：非法或未变化返回 null */
+    private fun resolveImageName(file: File, rawName: String): String? {
+        val name = rawName.trim().replace('/', '_').replace('\\', '_')
+        if (name.isBlank() || name.length > 60) return null
+        val oldExt = file.extension
+        val newExt = name.substringAfterLast('.', "")
+        val finalName = when {
+            newExt.equals(oldExt, ignoreCase = true) -> name
+            newExt.isBlank() -> "$name.$oldExt"
+            else -> name
+        }
+        return if (finalName == file.name) null else finalName
+    }
+
     /** 生成不冲突的素材文件名（如 tpl_161530.png） */
     fun suggestImageName(context: Context, taskName: String): String {
         val dir = imagesDir(context, taskName)

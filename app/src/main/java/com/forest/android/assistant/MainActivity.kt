@@ -132,6 +132,8 @@ class MainActivity : ComponentActivity() {
     private var previewBitmap by mutableStateOf<android.graphics.Bitmap?>(null)
     private var previewLoadJob: kotlinx.coroutines.Job? = null
     private var renameAsset by mutableStateOf<TaskManager.ImageInfo?>(null)
+    /** 素材重命名的脚本引用预览（确认后才会落盘） */
+    private var renamePreview by mutableStateOf<TaskManager.ImageRenamePreview?>(null)
 
     /** 定时任务编辑状态 */
     private var scheduleEditing by mutableStateOf<String?>(null)
@@ -571,11 +573,35 @@ class MainActivity : ComponentActivity() {
                 info = info,
                 onDismiss = { renameAsset = null },
                 onConfirm = { newName ->
-                    val renamed = TaskManager.renameImage(info.file, newName)
                     renameAsset = null
                     val task = assetsTask
-                    if (renamed != null && task != null) {
-                        Toast.makeText(this, "已重命名为 " + renamed.name, Toast.LENGTH_SHORT).show()
+                    if (task == null) return@RenameAssetDialog
+                    val preview = TaskManager.previewImageRename(this, task, info.file, newName)
+                    if (preview == null) {
+                        Toast.makeText(this, "重命名失败（名称非法、已存在或未修改）", Toast.LENGTH_SHORT).show()
+                    } else {
+                        // 先预览需要修改的脚本行，确认后再改文件
+                        renamePreview = preview
+                    }
+                }
+            )
+        }
+
+        renamePreview?.let { preview ->
+            val task = assetsTask
+            RenameRefPreviewDialog(
+                preview = preview,
+                onDismiss = { renamePreview = null },
+                onConfirm = {
+                    renamePreview = null
+                    if (task == null) return@RenameRefPreviewDialog
+                    val renamed = TaskManager.renameImageWithScript(this, task, preview)
+                    if (renamed != null) {
+                        val synced = preview.plan?.replacementCount ?: 0
+                        val tip = if (synced > 0) "已重命名为 ${renamed.name}，同步脚本 $synced 处引用"
+                        else "已重命名为 ${renamed.name}"
+                        Toast.makeText(this, tip, Toast.LENGTH_SHORT).show()
+                        ScriptRunner.appendLog(tip)
                         assets = TaskManager.imageInfos(this, task)
                     } else {
                         Toast.makeText(this, "重命名失败（名称非法或已存在）", Toast.LENGTH_SHORT).show()
@@ -993,6 +1019,64 @@ class MainActivity : ComponentActivity() {
             },
             confirmButton = {
                 TextButton(onClick = { onConfirm(name) }, enabled = name.isNotBlank()) { Text("保存") }
+            },
+            dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
+        )
+    }
+
+    /**
+     * 素材重命名的脚本引用预览：只列出 task.js 中需要修改的行（旧 → 新）。
+     * 无引用时仅提示「不会修改脚本」，确认后直接改名。
+     */
+    @Composable
+    private fun RenameRefPreviewDialog(
+        preview: TaskManager.ImageRenamePreview,
+        onDismiss: () -> Unit,
+        onConfirm: () -> Unit
+    ) {
+        val plan = preview.plan
+        AlertDialog(
+            onDismissRequest = onDismiss,
+            title = { Text("重命名为 ${preview.newName}") },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    if (plan == null || !plan.hasChanges) {
+                        Text(
+                            "脚本 task.js 中没有引用「${preview.file.name}」，只改文件名。",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    } else {
+                        Text(
+                            "脚本中有 ${plan.replacementCount} 处引用，涉及 ${plan.changedLineCount} 行（确认后一并修改）：",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        plan.changes.forEach { change ->
+                            Column(Modifier.padding(top = 10.dp)) {
+                                Text(
+                                    "第 ${change.lineNumber} 行" + if (change.replacements > 1) "（${change.replacements} 处）" else "",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                Text(
+                                    "- " + change.before.trim(),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontFamily = FontFamily.Monospace,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    "+ " + change.after.trim(),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = onConfirm) {
+                    Text(if (plan != null && plan.hasChanges) "改名并同步脚本" else "改名")
+                }
             },
             dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
         )
