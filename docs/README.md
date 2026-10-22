@@ -53,3 +53,8 @@ node tools/package-tasks.js "C:\Users\Administrator\Desktop\tasks" "build\我的
 ## 发布
 
 推送 Git tag 会自动构建 APK 并创建 GitHub Release，APK 文件名和制品名包含 tag。
+
+## 相关文档
+
+- [设备认证（ECDSA 许可证）设计方案](device-auth-ecdsa.md)：一机一证的设备码、许可证格式、签发与校验流程。
+- [性能优化方案与行为一致性验收](performance-optimization-plan.md)。
