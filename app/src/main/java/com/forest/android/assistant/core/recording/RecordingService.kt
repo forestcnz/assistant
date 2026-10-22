@@ -61,7 +61,8 @@ class RecordingService : Service() {
             startNotification()
             check(!ScriptRunner.state.value.running) { "请先停止正在运行的任务" }
             check(GestureClient.available()) { "请先开启无障碍服务" }
-            task = RecordingTask(this, requireNotNull(intent?.getStringExtra("name")), intent.getIntExtra("cropSize", 100),
+            task = RecordingTask(this, requireNotNull(intent?.getStringExtra("name")),
+                intent.getIntExtra("cropWidth", 100), intent.getIntExtra("cropHeight", 100),
                 RecordingMode.valueOf(intent.getStringExtra("mode") ?: RecordingMode.COORDINATE.name))
             FloatyManager.hideLauncher()
             PickerOverlay.hide()
@@ -134,7 +135,7 @@ class RecordingService : Service() {
                     searchRegion = pageRegion
                     contextPath = saveRegion(pageRegion, true)
                     if (input.kind != RecordedOperation.Kind.SWIPE) {
-                        val region = RecordedCrop.around(input.points.first(), current.cropSize, screen.width, screen.height)
+                        val region = RecordedCrop.around(input.points.first(), current.cropWidth, current.cropHeight, screen.width, screen.height)
                         crop = region
                         imagePath = saveRegion(region, false)
                     }
@@ -277,12 +278,13 @@ class RecordingService : Service() {
         @Volatile var active = false
             private set
 
-        fun start(context: Context, name: String, cropSize: Int, mode: RecordingMode) {
+        fun start(context: Context, name: String, cropWidth: Int, cropHeight: Int, mode: RecordingMode) {
             check(!active) { "已有录制正在进行" }
             active = true
             try {
                 ContextCompat.startForegroundService(context, Intent(context, RecordingService::class.java)
-                    .putExtra("name", name).putExtra("cropSize", cropSize).putExtra("mode", mode.name))
+                    .putExtra("name", name).putExtra("cropWidth", cropWidth)
+                    .putExtra("cropHeight", cropHeight).putExtra("mode", mode.name))
             } catch (e: Exception) {
                 active = false
                 throw e

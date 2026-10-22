@@ -48,6 +48,20 @@ class RecordingScriptTest {
         assertEquals(RecordedCrop(0, 0, 60, 80), RecordedCrop.around(RecordedPoint(0, 0), 100, 60, 80))
     }
 
+    @Test fun rectangularCropKeepsBothDimensionsAndTapOffsetAtScreenEdge() {
+        val point = RecordedPoint(5, 1595)
+        val crop = RecordedCrop.around(point, 500, 200, 900, 1600)
+        assertEquals(RecordedCrop(0, 1400, 500, 200), crop)
+        assertEquals(RecordedCrop(0, 0, 60, 80),
+            RecordedCrop.around(RecordedPoint(0, 0), 500, 200, 60, 80))
+
+        val script = RecordingScript.generate(900, 1600, listOf(RecordedOperation(
+            RecordedOperation.Kind.CLICK, listOf(point), 80,
+            image = "images/step_001.png", crop = crop
+        )), RecordingMode.IMAGE)
+        assertTrue(script.contains("point1.x + (-245), point1.y + (95)"))
+    }
+
     @Test fun returningSwipeIsNotMistakenForClick() {
         val points = listOf(RecordedPoint(10, 10), RecordedPoint(200, 200), RecordedPoint(10, 10))
         assertEquals(RecordedOperation.Kind.SWIPE, RecordedOperation.classify(points, 400, 8, 500))

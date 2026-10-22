@@ -88,15 +88,32 @@ object RecordingSetupOverlay {
         modes.addView(coordinate, RadioGroup.LayoutParams(0, -2, 1f))
         modes.addView(image, RadioGroup.LayoutParams(0, -2, 1f))
         card.addView(modes)
-        val crop = EditText(app).apply {
-            setSingleLine(true)
-            inputType = android.text.InputType.TYPE_CLASS_NUMBER
-            setText("100")
-            textSize = 14f
-            setTextColor(TEXT)
-            hint = "点击截图边长（默认 100）"
+        val cropFields = LinearLayout(app).apply {
+            orientation = LinearLayout.HORIZONTAL
         }
-        card.addView(crop, LinearLayout.LayoutParams(-1, dp(44)))
+        fun addCropField(label: String): EditText {
+            val field = EditText(app).apply {
+                setSingleLine(true)
+                inputType = android.text.InputType.TYPE_CLASS_NUMBER
+                setText("100")
+                setSelectAllOnFocus(true)
+                textSize = 14f
+                setTextColor(TEXT)
+            }
+            cropFields.addView(LinearLayout(app).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(TextView(app).apply {
+                    text = label
+                    textSize = 12f
+                    setTextColor(SUBTLE)
+                })
+                addView(field, LinearLayout.LayoutParams(-1, dp(44)))
+            }, LinearLayout.LayoutParams(0, -2, 1f))
+            return field
+        }
+        val cropWidth = addCropField("截图宽度（20～500）")
+        val cropHeight = addCropField("截图高度（20～500）")
+        card.addView(cropFields, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(6) })
         card.addView(TextView(app).apply {
             text = "将显示录制悬浮条；点击开始后在当前应用真实执行操作。每步保留 600×600 页面范围。"
             textSize = 12f
@@ -114,14 +131,15 @@ object RecordingSetupOverlay {
 
         start.setOnClickListener {
             val taskName = name.text.toString().trim()
-            val cropSize = crop.text.toString().toIntOrNull()
+            val width = cropWidth.text.toString().toIntOrNull()
+            val height = cropHeight.text.toString().toIntOrNull()
             when {
                 taskName.isBlank() || taskName.length > 50 || taskName == "." || taskName == ".." || taskName.any { it == '/' || it == '\\' || it.isISOControl() } ->
                     Toast.makeText(app, "任务名称无效（最多 50 个字符，不能包含路径符号）", Toast.LENGTH_LONG).show()
                 TaskManager.taskDir(app, taskName).exists() ->
                     Toast.makeText(app, "该任务名称已存在，请换一个名称", Toast.LENGTH_LONG).show()
-                cropSize == null || cropSize !in 20..500 ->
-                    Toast.makeText(app, "截图边长须为 20～500 像素", Toast.LENGTH_LONG).show()
+                width == null || width !in 20..500 || height == null || height !in 20..500 ->
+                    Toast.makeText(app, "截图宽度和高度均须为 20～500 像素", Toast.LENGTH_LONG).show()
                 RecordingService.active -> Toast.makeText(app, "已有录制正在进行", Toast.LENGTH_LONG).show()
                 ScriptRunner.state.value.running -> Toast.makeText(app, "请先停止正在运行的任务", Toast.LENGTH_LONG).show()
                 !GestureClient.available() -> Toast.makeText(app, "请先开启无障碍服务，再从悬浮窗开始录制", Toast.LENGTH_LONG).show()
@@ -132,7 +150,8 @@ object RecordingSetupOverlay {
                         val ready = withContext(Dispatchers.IO) { ScreenCapture.requestBlocking() }
                         if (ready) {
                             try {
-                                RecordingService.start(app, taskName, cropSize, if (modes.checkedRadioButtonId == image.id) RecordingMode.IMAGE else RecordingMode.COORDINATE)
+                                RecordingService.start(app, taskName, width, height,
+                                    if (modes.checkedRadioButtonId == image.id) RecordingMode.IMAGE else RecordingMode.COORDINATE)
                                 hide()
                                 scope.cancel()
                             } catch (e: Exception) {
@@ -159,7 +178,7 @@ object RecordingSetupOverlay {
             gravity = Gravity.CENTER
             softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
         }
-        // The overlay must accept keyboard input for task-name and crop-size fields.
+        // The overlay must accept keyboard input for task name and screenshot dimensions.
         params.flags = params.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()
         windowManager = wm
         window = card

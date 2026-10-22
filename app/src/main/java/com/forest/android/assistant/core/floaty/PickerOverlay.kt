@@ -265,8 +265,8 @@ object PickerOverlay {
         private val onResult: (String) -> Unit
     ) : View(context) {
 
-        /** 当前模式：可在拾取层内就地切换，无需退回悬浮球 */
-        private var mode: Mode = initialMode
+        /** 当前拾取模式由工具入口确定 */
+        private val mode: Mode = initialMode
 
         private val density = resources.displayMetrics.density
 
@@ -313,8 +313,8 @@ object PickerOverlay {
         /** 取消按钮区域（右上角） */
         private val cancelRect = RectF()
 
-        /** 模式切换按钮区域（右上角，取消左侧） */
-        private val switchRect = RectF()
+        /** 当前模式标签区域（右上角，取消左侧） */
+        private val modeRect = RectF()
 
         private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             textSize = 14f * density
@@ -374,18 +374,18 @@ object PickerOverlay {
             canvas.drawLine(px, py + gap, px, py + arm, crossPaint)
             canvas.drawCircle(px, py, 10f * density, crossPaint)
 
-            // 右上角按钮：模式切换 + 取消
+            // 右上角显示当前模式和取消按钮
             val btnW = 64f * density
             val btnH = 34f * density
             val btnGap = 8f * density
             cancelRect.set(width - btnW - 16f * density, 16f * density, width - 16f * density, 16f * density + btnH)
-            switchRect.set(cancelRect.left - btnW - btnGap, 16f * density, cancelRect.left - btnGap, 16f * density + btnH)
-            val switchLabel = if (mode == Mode.POINT) "取色" else "取坐标"
-            canvas.drawRoundRect(switchRect, 8f * density, 8f * density, panelPaint)
+            modeRect.set(cancelRect.left - btnW - btnGap, 16f * density, cancelRect.left - btnGap, 16f * density + btnH)
+            val modeLabel = if (mode == Mode.POINT) "取坐标" else "取色"
+            canvas.drawRoundRect(modeRect, 8f * density, 8f * density, panelPaint)
             canvas.drawText(
-                switchLabel,
-                switchRect.centerX() - textPaint.measureText(switchLabel) / 2,
-                switchRect.centerY() + 5f * density,
+                modeLabel,
+                modeRect.centerX() - textPaint.measureText(modeLabel) / 2,
+                modeRect.centerY() + 5f * density,
                 textPaint
             )
             canvas.drawRoundRect(cancelRect, 8f * density, 8f * density, panelPaint)
@@ -522,26 +522,8 @@ object PickerOverlay {
                         PickerOverlay.hide()
                         return true
                     }
-                    if (switchRect.contains(event.x, event.y)) {
+                    if (modeRect.contains(event.x, event.y)) {
                         consumedByButton = true
-                        val nextMode = when (mode) {
-                            Mode.POINT -> Mode.COLOR
-                            Mode.COLOR -> Mode.SCREENSHOT
-                            Mode.SCREENSHOT -> Mode.POINT
-                        }
-                        if (nextMode == Mode.SCREENSHOT) {
-                            PickerOverlay.hide()
-                            PickerOverlay.show(context, Mode.SCREENSHOT)
-                            return true
-                        }
-                        mode = nextMode
-                        hasColor = false
-                        captureMissing = false
-                        hasSelection = false
-                        isSelecting = false
-                        isCapturing = false
-                        if (mode == Mode.COLOR) sample()
-                        invalidate()
                         return true
                     }
                     if (mode == Mode.SCREENSHOT) {

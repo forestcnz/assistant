@@ -8,10 +8,13 @@ enum class RecordingMode(val label: String) { COORDINATE("坐标"), IMAGE("图�
 
 data class RecordedCrop(val left: Int, val top: Int, val width: Int, val height: Int) {
     companion object {
-        fun around(point: RecordedPoint, size: Int, screenWidth: Int, screenHeight: Int): RecordedCrop {
-            require(size > 0 && screenWidth > 0 && screenHeight > 0)
-            val width = size.coerceAtMost(screenWidth)
-            val height = size.coerceAtMost(screenHeight)
+        fun around(point: RecordedPoint, size: Int, screenWidth: Int, screenHeight: Int): RecordedCrop =
+            around(point, size, size, screenWidth, screenHeight)
+
+        fun around(point: RecordedPoint, cropWidth: Int, cropHeight: Int, screenWidth: Int, screenHeight: Int): RecordedCrop {
+            require(cropWidth > 0 && cropHeight > 0 && screenWidth > 0 && screenHeight > 0)
+            val width = cropWidth.coerceAtMost(screenWidth)
+            val height = cropHeight.coerceAtMost(screenHeight)
             return RecordedCrop(
                 (point.x - width / 2).coerceIn(0, screenWidth - width),
                 (point.y - height / 2).coerceIn(0, screenHeight - height), width, height

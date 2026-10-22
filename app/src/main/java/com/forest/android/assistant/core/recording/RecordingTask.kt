@@ -9,7 +9,7 @@ import org.json.JSONObject
 import java.io.File
 
 /** 每个成功步骤立即落盘，进程意外退出后已录制的任务仍然存在。 */
-class RecordingTask(context: Context, val name: String, val cropSize: Int, val mode: RecordingMode) {
+class RecordingTask(context: Context, val name: String, val cropWidth: Int, val cropHeight: Int, val mode: RecordingMode) {
     private val directory = TaskManager.taskDir(context, name)
     val steps = mutableListOf<RecordedOperation>()
     var width = 0
@@ -18,7 +18,7 @@ class RecordingTask(context: Context, val name: String, val cropSize: Int, val m
     init {
         require(name.isNotBlank() && name.length <= 50 && name != "." && name != ".." &&
             name.none { it == '/' || it == '\\' || it.isISOControl() }) { "任务名称不合法" }
-        require(cropSize in 20..500) { "截图尺寸需为 20～500 像素" }
+        require(cropWidth in 20..500 && cropHeight in 20..500) { "截图宽度和高度均需为 20～500 像素" }
         check(!directory.exists() && directory.mkdirs()) { "任务已存在或无法创建目录" }
         check(File(directory, "images").mkdirs()) { "无法创建素材目录" }
     }
@@ -59,10 +59,11 @@ class RecordingTask(context: Context, val name: String, val cropSize: Int, val m
             })
         }
         atomicWrite("recording.json", JSONObject().apply {
-            put("version", 2)
+            put("version", 3)
             put("mode", mode.name.lowercase())
             put("screenSize", JSONArray(listOf(width, height)))
-            put("cropSize", cropSize)
+            put("cropWidth", cropWidth)
+            put("cropHeight", cropHeight)
             put("searchRegionSize", 600)
             put("operations", operations)
         }.toString(2))
