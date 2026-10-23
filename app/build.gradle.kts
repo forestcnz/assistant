@@ -18,12 +18,13 @@ android {
         versionName = providers.gradleProperty("appVersionName").orElse("1.1.4").get()
     }
 
-    // CI 提供 RELEASE_KEYSTORE_PATH 等环境变量时使用正式签名；未提供时复用 debug 签名，
-    // 保证 assembleRelease 在任何环境都能产出可安装的 APK（签名密钥不同，跨机器安装需先卸载）
+    // 正式签名密钥不入库（仓库是公开的）。CI 由 workflow 从 RELEASE_KEYSTORE_BASE64 解码成文件，
+    // 再通过 RELEASE_KEYSTORE_PATH / RELEASE_KEYSTORE_PASSWORD / RELEASE_KEY_ALIAS / RELEASE_KEY_PASSWORD 传入；
+    // 本地没有这些变量时回退到 debug 签名，保证任何环境都能产出可安装的 APK
     val releaseKeystorePath = providers.environmentVariable("RELEASE_KEYSTORE_PATH").orNull
     signingConfigs {
         if (!releaseKeystorePath.isNullOrBlank()) {
-            create("releaseEnv") {
+            create("release") {
                 storeFile = file(releaseKeystorePath)
                 storePassword = providers.environmentVariable("RELEASE_KEYSTORE_PASSWORD").orNull
                 keyAlias = providers.environmentVariable("RELEASE_KEY_ALIAS").orNull
@@ -42,7 +43,7 @@ android {
             signingConfig = if (releaseKeystorePath.isNullOrBlank()) {
                 signingConfigs.getByName("debug")
             } else {
-                signingConfigs.getByName("releaseEnv")
+                signingConfigs.getByName("release")
             }
         }
     }
