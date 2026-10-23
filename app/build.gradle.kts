@@ -15,7 +15,7 @@ android {
         targetSdk = 35
         testInstrumentationRunner = "com.forest.android.assistant.core.image.ImageApiInstrumentation"
         versionCode = providers.gradleProperty("appVersionCode").orElse("1").get().toInt()
-        versionName = providers.gradleProperty("appVersionName").orElse("1.1.3").get()
+        versionName = providers.gradleProperty("appVersionName").orElse("1.1.4").get()
     }
 
     // CI 提供 RELEASE_KEYSTORE_PATH 等环境变量时使用正式签名；未提供时复用 debug 签名，
