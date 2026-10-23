@@ -15,6 +15,7 @@ import com.forest.android.assistant.core.floaty.FloatyManager
 import com.forest.android.assistant.MainActivity
 import com.forest.android.assistant.ScreenshotExportActivity
 import com.forest.android.assistant.core.engine.ScriptRunner
+import com.forest.android.assistant.core.ocr.OcrScriptChecks
 import com.forest.android.assistant.core.task.TaskManager
 import java.io.File
 
@@ -22,11 +23,13 @@ import java.io.File
 class ImageApiInstrumentation : Instrumentation() {
     private var onlyBurst = false
     private var onlyLoop = false
+    private var onlyOcr = false
 
     override fun onCreate(arguments: Bundle?) {
         super.onCreate(arguments)
         onlyBurst = arguments?.getString("onlyBurst") == "true"
         onlyLoop = arguments?.getString("onlyLoop") == "true"
+        onlyOcr = arguments?.getString("onlyOcr") == "true"
         Log.i(TAG, "Instrumentation onCreate; starting test thread")
         start()
     }
@@ -37,6 +40,13 @@ class ImageApiInstrumentation : Instrumentation() {
         Log.i(TAG, "Instrumentation base onStart returned")
         val result = Bundle()
         try {
+            if (onlyOcr) {
+                report("OCR normalized contains script API")
+                OcrScriptChecks.run(targetContext)
+                result.putString("stream", "OCR 宽松包含匹配脚本回归通过")
+                finish(Activity.RESULT_OK, result)
+                return
+            }
             if (onlyLoop) {
                 report("Real screenshot loop keeps run bar visible")
                 testRealScreenshotLoopKeepsRunBarVisible()

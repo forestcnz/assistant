@@ -4,7 +4,8 @@ import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -16,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.AlertDialog
@@ -33,6 +35,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -45,6 +48,7 @@ import com.forest.android.assistant.core.editor.ApiDocs
 import com.forest.android.assistant.core.editor.Edits
 import com.forest.android.assistant.core.editor.JsHighlighter
 import com.forest.android.assistant.core.editor.LineIndex
+import com.forest.android.assistant.core.editor.ScriptExamplesDialog
 import com.forest.android.assistant.core.engine.ScriptRunner
 import com.forest.android.assistant.core.task.TaskManager
 import com.forest.android.assistant.ui.ScriptTheme
@@ -126,6 +130,10 @@ class ScriptEditorActivity : ComponentActivity() {
     @OptIn(ExperimentalMaterial3Api::class)
     @Composable
     private fun EditorScreen() {
+        var apiHelp by remember { mutableStateOf<ApiDocs.Item?>(null) }
+        var showExamples by remember { mutableStateOf(false) }
+        var pendingReplacement by remember { mutableStateOf<Pair<String, String>?>(null) }
+        val keyboard = LocalSoftwareKeyboardController.current
         Scaffold(
             containerColor = MaterialTheme.colorScheme.background,
             topBar = {
@@ -143,6 +151,10 @@ class ScriptEditorActivity : ComponentActivity() {
                         }
                     },
                     actions = {
+                        TextButton(onClick = {
+                            keyboard?.hide()
+                            showExamples = true
+                        }, enabled = contentLoaded) { Text("示例") }
                         TextButton(onClick = { showClearDialog = true }, enabled = contentLoaded && content.text.isNotEmpty()) {
                             Text("清空", color = MaterialTheme.colorScheme.error)
                         }
@@ -180,7 +192,8 @@ class ScriptEditorActivity : ComponentActivity() {
 
                 SuggestionBar(
                     prefix = JsHighlighter.wordBefore(content.text, content.selection.start)?.first,
-                    onPick = { snippet -> insertAtCursor(snippet) }
+                    onPick = { snippet -> insertAtCursor(snippet) },
+                    onInspect = { apiHelp = it }
                 )
 
                 Box(
@@ -234,6 +247,57 @@ class ScriptEditorActivity : ComponentActivity() {
                 }
             }
         }
+        if (showExamples) {
+            ScriptExamplesDialog(
+                onDismiss = { showExamples = false },
+                onInsert = { code, completeScript ->
+                    insertAtCursor(code, completeWord = false, block = completeScript)
+                    showExamples = false
+                },
+                onReplace = { title, code ->
+                    showExamples = false
+                    if (content.text.isBlank()) replaceWithExample(code)
+                    else pendingReplacement = title to code
+                }
+            )
+        }
+        pendingReplacement?.let { (title, code) ->
+            AlertDialog(
+                onDismissRequest = { pendingReplacement = null },
+                title = { Text("替换当前脚本？") },
+                text = { Text("将当前编辑内容替换为「$title」。点击顶部“保存”后才会写入脚本文件；返回或切到后台不会保存本次替换。") },
+                confirmButton = {
+                    TextButton(onClick = {
+                        replaceWithExample(code)
+                        pendingReplacement = null
+                    }) { Text("确认替换") }
+                },
+                dismissButton = { TextButton(onClick = { pendingReplacement = null }) { Text("取消") } }
+            )
+        }
+        apiHelp?.let { item ->
+            AlertDialog(
+                onDismissRequest = { apiHelp = null },
+                title = { Text(item.name) },
+                text = {
+                    Column(
+                        modifier = Modifier.verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Text(item.signature, fontFamily = FontFamily.Monospace)
+                        Text(item.doc)
+                        Text(item.snippet, fontFamily = FontFamily.Monospace)
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        insertAtCursor(item.snippet)
+                        apiHelp = null
+                    }) { Text("插入示例") }
+                },
+                dismissButton = { TextButton(onClick = { apiHelp = null }) { Text("关闭") } }
+            )
+        }
         if (showClearDialog) {
             AlertDialog(
                 onDismissRequest = { showClearDialog = false },
@@ -256,11 +320,18 @@ class ScriptEditorActivity : ComponentActivity() {
     }
 
     /** API 补全条：仅在输入了标识符前缀时出现，避免误触把片段插入脚本 */
+    @OptIn(ExperimentalFoundationApi::class)
     @Composable
-    private fun SuggestionBar(prefix: String?, onPick: (String) -> Unit) {
+    private fun SuggestionBar(prefix: String?, onPick: (String) -> Unit, onInspect: (ApiDocs.Item) -> Unit) {
         if (prefix.isNullOrBlank()) return
         val items = remember(prefix) { ApiDocs.suggestions(prefix, limit = 8) }
         if (items.isEmpty()) return
+        Text(
+            "API 补全：点击插入 · 长按查看用法",
+            modifier = Modifier.padding(horizontal = 12.dp),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -275,7 +346,11 @@ class ScriptEditorActivity : ComponentActivity() {
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier
-                        .clickable { onPick(item.snippet) }
+                        .combinedClickable(
+                            onClick = { onPick(item.snippet) },
+                            onLongClickLabel = "查看用法",
+                            onLongClick = { onInspect(item) }
+                        )
                         .background(MaterialTheme.colorScheme.primaryContainer, MaterialTheme.shapes.extraSmall)
                         .padding(horizontal = 12.dp, vertical = 10.dp)
                 )
@@ -283,17 +358,30 @@ class ScriptEditorActivity : ComponentActivity() {
         }
     }
 
-    /** 在光标处插入片段（若光标处已有同名前缀则替换掉前缀） */
-    private fun insertAtCursor(snippet: String) {
+    /** 补全替换前缀；示例按普通插入处理选区，完整脚本两侧补换行。 */
+    private fun insertAtCursor(snippet: String, completeWord: Boolean = true, block: Boolean = false) {
         val text = content.text
-        val cursor = content.selection.start.coerceIn(0, text.length)
-        val word = JsHighlighter.wordBefore(text, cursor)
+        val cursor = content.selection.min.coerceIn(0, text.length)
+        val end = content.selection.max.coerceIn(cursor, text.length)
+        val word = if (completeWord && content.selection.collapsed) JsHighlighter.wordBefore(text, cursor) else null
         val start = word?.second ?: cursor
-        val newText = text.substring(0, start) + snippet + text.substring(cursor)
-        val newCursor = start + snippet.length
+        val insertion = if (block) {
+            (if (start > 0 && text[start - 1] != '\n') "\n" else "") + snippet.trimEnd() + "\n"
+        } else snippet
+        val newText = text.substring(0, start) + insertion + text.substring(end)
+        val newCursor = start + insertion.length
         content = TextFieldValue(newText, TextRange(newCursor))
         dirty = true
         contentVersion++
+    }
+
+    private fun replaceWithExample(code: String) {
+        content = TextFieldValue(code.trimEnd() + "\n", TextRange(0))
+        dirty = true
+        contentVersion++
+        requiresExplicitSave = true
+        errorLine = 0
+        errorHint = null
     }
 
     /** 后台串行保存快照；旧请求不能覆盖更新的保存请求。 */

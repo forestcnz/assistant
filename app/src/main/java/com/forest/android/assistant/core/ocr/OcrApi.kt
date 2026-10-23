@@ -139,6 +139,15 @@ object OcrApi {
         return if (findAll) matched else matched.take(1)
     }
 
+    /**
+     * 清理空白、标点和符号后按行做包含匹配（忽略大小写、统一全角字符）。
+     * 返回识别顺序中的首个匹配，保留原始文本和坐标；空查询不触发识别。
+     */
+    fun findContains(bitmap: Bitmap, text: String, region: IntArray?): Item? {
+        if (OcrTextMatcher.normalize(text).isEmpty()) return null
+        return OcrTextMatcher.findContains(recognize(bitmap, region), text)
+    }
+
     private fun clampRegion(region: IntArray?, w: Int, h: Int): Rect? {
         if (region == null || region.size < 4) return null
         val x = region[0].coerceIn(0, w - 1)

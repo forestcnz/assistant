@@ -8,7 +8,7 @@ import java.io.File
  * 脚本 API 定义（相当于设计里的 :api-docs 模块）：
  * - 为编辑器提供补全候选与签名提示；
  * - 生成 `script-js.d.ts` 声明文件，便于在编辑器/外部 IDE 中查阅类型与签名。
- * 内容与 docs/README.md 第 5 章保持一致。
+ * OCR 用法见 docs/README.md。
  */
 object ApiDocs {
 
@@ -19,7 +19,8 @@ object ApiDocs {
         val name: String,
         val signature: String,
         val snippet: String,
-        val doc: String
+        val doc: String,
+        val declaration: String? = null
     )
 
     val items: List<Item> = listOf(
@@ -110,12 +111,24 @@ object ApiDocs {
         ),
 
         // —— ocr ——
-        Item("ocr.init", "ocr.init(engine?)", "ocr.init();", "初始化 OCR 引擎（默认 mlkit）"),
-        Item("ocr.ready", "ocr.ready()", "ocr.ready()", "引擎是否已初始化"),
-        Item("ocr.recognize", "ocr.recognize(image, options?)", "ocr.recognize(captureScreen())", "识别全部文字，返回 OcrItem[]"),
-        Item("ocr.recognizeText", "ocr.recognizeText(image, options?)", "ocr.recognizeText(captureScreen())", "仅返回拼接文本"),
-        Item("ocr.findText", "ocr.findText(image, text, options?)", "ocr.findText(captureScreen(), \"立即购买\")", "找指定文字，返回 OcrItem/null"),
-        Item("ocr.findAllText", "ocr.findAllText(image, text, options?)", "ocr.findAllText(captureScreen(), \"运行\")", "全部匹配的 OcrItem[]"),
+        Item("ocr.init", "ocr.init(engine?)", "ocr.init();", "初始化 OCR 引擎（默认 mlkit）",
+            "init(engine?: string): boolean;"),
+        Item("ocr.ready", "ocr.ready()", "ocr.ready()", "引擎是否已初始化",
+            "ready(): boolean;"),
+        Item("ocr.recognize", "ocr.recognize(image, options?)", "ocr.recognize(captureScreen())", "识别全部文字，返回 OcrItem[]；options.region 为 [x, y, width, height]",
+            "recognize(image: any, options?: OcrOptions): OcrItem[];"),
+        Item("ocr.recognizeText", "ocr.recognizeText(image, options?)", "ocr.recognizeText(captureScreen())", "仅返回按行拼接的原始文本；支持 options.region",
+            "recognizeText(image: any, options?: OcrOptions): string;"),
+        Item("ocr.findText", "ocr.findText(image, text, options?)", "ocr.findText(captureScreen(), \"立即购买\")", "找指定文字：精确匹配优先，否则包含匹配，忽略大小写；返回 OcrItem/null，支持 options.region",
+            "findText(image: any, text: string, options?: OcrOptions): OcrItem | null;"),
+        Item(
+            "ocr.findTextContains", "ocr.findTextContains(image, text, options?)",
+            "ocr.findTextContains(captureScreen(), \"立即购买\")",
+            "忽略空格、换行、标点和符号，统一全角字符并忽略大小写后按行包含匹配。例如「立 即·购 买」可匹配「立即购买」。只保留中文、字母和数字；返回首个匹配行的原始 OcrItem，无匹配或清理后查询为空时返回 null，不跨行拼接。options.region 为 [x, y, width, height]。",
+            "findTextContains(image: any, text: string, options?: OcrOptions): OcrItem | null;"
+        ),
+        Item("ocr.findAllText", "ocr.findAllText(image, text, options?)", "ocr.findAllText(captureScreen(), \"运行\")", "精确匹配优先，否则返回包含匹配的 OcrItem[]；支持 options.region",
+            "findAllText(image: any, text: string, options?: OcrOptions): OcrItem[];"),
 
         // —— adapter ——
         Item("adapter.setDesignSize", "adapter.setDesignSize(w, h)", "adapter.setDesignSize(1080, 1920);", "声明设计基准分辨率"),
@@ -146,15 +159,16 @@ object ApiDocs {
         null
     }
 
-    private fun buildDts(): String = buildString {
+    internal fun buildDts(): String = buildString {
         appendLine("// ddhelp 脚本 API 声明（自动生成，勿手改）")
-        appendLine("// 与 docs/README.md 第 5 章 API 手册对齐")
+        appendLine("// OCR 用法见 docs/README.md")
         appendLine()
         appendLine("interface Point { x: number; y: number; }")
         appendLine("interface Rect { left: number; top: number; right: number; bottom: number; }")
-        appendLine("interface OcrItem { text: string; bounds: Rect; confidence: number; }")
+        appendLine("interface OcrItem extends Rect { text: string; bounds: Rect; confidence: number; centerX(): number; centerY(): number; }")
+        appendLine("interface OcrOptions { region?: [number, number, number, number]; }")
         appendLine()
-        items.forEach { item ->
+        items.filter { '.' !in it.name }.forEach { item ->
             appendLine("/** ${item.doc} */")
             appendLine(dtsSignature(item))
         }
@@ -177,7 +191,8 @@ object ApiDocs {
         appendLine("};")
         appendLine("declare const ocr: {")
         items.filter { it.name.startsWith("ocr.") }.forEach {
-            appendLine("    ${it.name.removePrefix("ocr.")}: (...args: any[]) => any;")
+            appendLine("    /** ${it.doc} */")
+            appendLine("    ${it.declaration ?: "${it.name.removePrefix("ocr.")}: (...args: any[]) => any;"}")
         }
         appendLine("};")
         appendLine("declare const auto: { service: boolean; waitFor: (timeoutMs?: number) => boolean; };")
