@@ -15,7 +15,7 @@ android {
         targetSdk = 35
         testInstrumentationRunner = "com.forest.android.assistant.core.image.ImageApiInstrumentation"
         versionCode = providers.gradleProperty("appVersionCode").orElse("1").get().toInt()
-        versionName = providers.gradleProperty("appVersionName").orElse("1.1.2").get()
+        versionName = providers.gradleProperty("appVersionName").orElse("1.1.3").get()
     }
 
     buildTypes {
