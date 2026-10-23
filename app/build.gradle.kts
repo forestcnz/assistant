@@ -18,6 +18,20 @@ android {
         versionName = providers.gradleProperty("appVersionName").orElse("1.1.3").get()
     }
 
+    // CI 提供 RELEASE_KEYSTORE_PATH 等环境变量时使用正式签名；未提供时复用 debug 签名，
+    // 保证 assembleRelease 在任何环境都能产出可安装的 APK（签名密钥不同，跨机器安装需先卸载）
+    val releaseKeystorePath = providers.environmentVariable("RELEASE_KEYSTORE_PATH").orNull
+    signingConfigs {
+        if (!releaseKeystorePath.isNullOrBlank()) {
+            create("releaseEnv") {
+                storeFile = file(releaseKeystorePath)
+                storePassword = providers.environmentVariable("RELEASE_KEYSTORE_PASSWORD").orNull
+                keyAlias = providers.environmentVariable("RELEASE_KEY_ALIAS").orNull
+                keyPassword = providers.environmentVariable("RELEASE_KEY_PASSWORD").orNull
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
@@ -25,6 +39,11 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            signingConfig = if (releaseKeystorePath.isNullOrBlank()) {
+                signingConfigs.getByName("debug")
+            } else {
+                signingConfigs.getByName("releaseEnv")
+            }
         }
     }
 

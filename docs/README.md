@@ -15,9 +15,10 @@ Android 自动化脚本工具，包名：`com.forest.android.assistant`。
 
 ```bash
 gradle assembleDebug
+gradle assembleRelease
 ```
 
-APK：`app/build/outputs/apk/debug/app-debug.apk`。
+APK：`app/build/outputs/apk/debug/app-debug.apk`、`app/build/outputs/apk/release/app-release.apk`。
 
 ## 使用
 
@@ -52,7 +53,12 @@ node tools/package-tasks.js "C:\Users\Administrator\Desktop\tasks" "build\我的
 
 ## 发布
 
-推送 Git tag 会自动构建 APK 并创建 GitHub Release，APK 文件名和制品名包含 tag。
+推送 Git tag 会自动构建 debug 与 release 两个 APK 并创建 GitHub Release，APK 文件名和制品名包含 tag：
+
+- `<tag>-debug.apk`：debug 构建，使用 debug 签名。不同 CI 运行使用各自生成的签名密钥，覆盖安装前可能需要先卸载旧版本。
+- `<tag>-release.apk`：release 构建（当前未开启代码混淆）。
+
+release 包在仓库配置了 `RELEASE_KEYSTORE_PATH`、`RELEASE_KEYSTORE_PASSWORD`、`RELEASE_KEY_ALIAS`、`RELEASE_KEY_PASSWORD` 这四个 secret/环境变量时使用正式签名，否则回退到 debug 签名以保证流水线始终产出可安装的 APK。本地同样可以配置这些环境变量后用 `gradle assembleRelease` 打正式签名包。
 
 ## 相关文档
 
