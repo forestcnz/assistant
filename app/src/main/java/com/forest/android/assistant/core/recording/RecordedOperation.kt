@@ -6,6 +6,8 @@ data class RecordedPoint(val x: Int, val y: Int)
 
 enum class RecordingMode(val label: String) { COORDINATE("坐标"), IMAGE("图片") }
 
+const val DEFAULT_SEARCH_REGION_SIZE = 600
+
 data class RecordedCrop(val left: Int, val top: Int, val width: Int, val height: Int) {
     companion object {
         fun around(point: RecordedPoint, size: Int, screenWidth: Int, screenHeight: Int): RecordedCrop =
@@ -52,9 +54,16 @@ data class RecordedOperation(
 
 /** 只使用项目已支持的 API；findImage 返回模板中心，而不是左上角。 */
 object RecordingScript {
-    fun generate(width: Int, height: Int, steps: List<RecordedOperation>, mode: RecordingMode = RecordingMode.COORDINATE): String = buildString {
+    fun generate(
+        width: Int,
+        height: Int,
+        steps: List<RecordedOperation>,
+        mode: RecordingMode = RecordingMode.COORDINATE,
+        searchRegionWidth: Int = DEFAULT_SEARCH_REGION_SIZE,
+        searchRegionHeight: Int = DEFAULT_SEARCH_REGION_SIZE
+    ): String = buildString {
         appendLine("// 操作录制 · 屏幕 ${width}×${height}，坐标单位为实际像素")
-        appendLine("// 回放方式：${mode.label}；点击找图仅搜索录制位置附近的 600×600 范围。")
+        appendLine("// 回放方式：${mode.label}；点击找图仅搜索各步骤记录的页面范围。")
         appendLine("// 请在相同分辨率、方向及起始界面运行。sleep 为上一步完成后的等待。")
         appendLine("auto.waitFor();")
         appendLine("adapter.reset();")
@@ -68,8 +77,8 @@ object RecordingScript {
                 RecordedOperation.Kind.SWIPE -> "滑动"
             }} · 与上一步起点间隔 ${step.intervalMs} ms · 持续 ${step.durationMs} ms")
             if (step.delayMs > 0) appendLine("sleep(${step.delayMs});")
-            val region = step.searchRegion ?: RecordedCrop.around(point, 600, width, height)
-            appendLine("// 600×600 页面范围：[左, 上, 宽, 高]，超出屏幕时已向内调整。")
+            val region = step.searchRegion ?: RecordedCrop.around(point, searchRegionWidth, searchRegionHeight, width, height)
+            appendLine("// ${region.width}×${region.height} 页面范围：[左, 上, 宽, 高]，超出屏幕时已向内调整。")
             appendLine("var region$n = [${region.left}, ${region.top}, ${region.width}, ${region.height}];")
             step.contextImage?.let { appendLine("// 页面范围截图：$it") }
             val action = when (step.kind) {

@@ -16,6 +16,7 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.RadioButton
 import android.widget.RadioGroup
+import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import com.forest.android.assistant.core.engine.ScriptRunner
@@ -91,16 +92,16 @@ object RecordingSetupOverlay {
         val cropFields = LinearLayout(app).apply {
             orientation = LinearLayout.HORIZONTAL
         }
-        fun addCropField(label: String): EditText {
+        fun addSizeField(row: LinearLayout, label: String, defaultValue: Int): EditText {
             val field = EditText(app).apply {
                 setSingleLine(true)
                 inputType = android.text.InputType.TYPE_CLASS_NUMBER
-                setText("100")
+                setText(defaultValue.toString())
                 setSelectAllOnFocus(true)
                 textSize = 14f
                 setTextColor(TEXT)
             }
-            cropFields.addView(LinearLayout(app).apply {
+            row.addView(LinearLayout(app).apply {
                 orientation = LinearLayout.VERTICAL
                 addView(TextView(app).apply {
                     text = label
@@ -111,11 +112,15 @@ object RecordingSetupOverlay {
             }, LinearLayout.LayoutParams(0, -2, 1f))
             return field
         }
-        val cropWidth = addCropField("截图宽度（20～500）")
-        val cropHeight = addCropField("截图高度（20～500）")
+        val cropWidth = addSizeField(cropFields, "截图宽度（20～500）", 100)
+        val cropHeight = addSizeField(cropFields, "截图高度（20～500）", 100)
         card.addView(cropFields, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(6) })
+        val regionFields = LinearLayout(app).apply { orientation = LinearLayout.HORIZONTAL }
+        val searchRegionWidth = addSizeField(regionFields, "页面范围宽度（像素）", DEFAULT_SEARCH_REGION_SIZE)
+        val searchRegionHeight = addSizeField(regionFields, "页面范围高度（像素）", DEFAULT_SEARCH_REGION_SIZE)
+        card.addView(regionFields, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(6) })
         card.addView(TextView(app).apply {
-            text = "将显示录制悬浮条；点击开始后在当前应用真实执行操作。每步保留 600×600 页面范围。"
+            text = "点击开始后在当前应用真实执行操作。每步按设定的页面范围截图并用于找图；范围须覆盖截图尺寸，超出屏幕时自动调整。"
             textSize = 12f
             setTextColor(SUBTLE)
         }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(6) })
@@ -133,6 +138,8 @@ object RecordingSetupOverlay {
             val taskName = name.text.toString().trim()
             val width = cropWidth.text.toString().toIntOrNull()
             val height = cropHeight.text.toString().toIntOrNull()
+            val regionWidth = searchRegionWidth.text.toString().toIntOrNull()
+            val regionHeight = searchRegionHeight.text.toString().toIntOrNull()
             when {
                 taskName.isBlank() || taskName.length > 50 || taskName == "." || taskName == ".." || taskName.any { it == '/' || it == '\\' || it.isISOControl() } ->
                     Toast.makeText(app, "任务名称无效（最多 50 个字符，不能包含路径符号）", Toast.LENGTH_LONG).show()
@@ -140,6 +147,10 @@ object RecordingSetupOverlay {
                     Toast.makeText(app, "该任务名称已存在，请换一个名称", Toast.LENGTH_LONG).show()
                 width == null || width !in 20..500 || height == null || height !in 20..500 ->
                     Toast.makeText(app, "截图宽度和高度均须为 20～500 像素", Toast.LENGTH_LONG).show()
+                regionWidth == null || regionWidth <= 0 || regionHeight == null || regionHeight <= 0 ->
+                    Toast.makeText(app, "页面范围宽度和高度均须为正整数像素", Toast.LENGTH_LONG).show()
+                regionWidth < width || regionHeight < height ->
+                    Toast.makeText(app, "页面范围宽度和高度不能小于对应的截图尺寸", Toast.LENGTH_LONG).show()
                 RecordingService.active -> Toast.makeText(app, "已有录制正在进行", Toast.LENGTH_LONG).show()
                 ScriptRunner.state.value.running -> Toast.makeText(app, "请先停止正在运行的任务", Toast.LENGTH_LONG).show()
                 !GestureClient.available() -> Toast.makeText(app, "请先开启无障碍服务，再从悬浮窗开始录制", Toast.LENGTH_LONG).show()
@@ -151,7 +162,8 @@ object RecordingSetupOverlay {
                         if (ready) {
                             try {
                                 RecordingService.start(app, taskName, width, height,
-                                    if (modes.checkedRadioButtonId == image.id) RecordingMode.IMAGE else RecordingMode.COORDINATE)
+                                    if (modes.checkedRadioButtonId == image.id) RecordingMode.IMAGE else RecordingMode.COORDINATE,
+                                    regionWidth, regionHeight)
                                 hide()
                                 scope.cancel()
                             } catch (e: Exception) {
@@ -178,12 +190,14 @@ object RecordingSetupOverlay {
             gravity = Gravity.CENTER
             softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
         }
-        // The overlay must accept keyboard input for task name and screenshot dimensions.
+        // Keep all fields reachable on small screens and while the keyboard is open.
+        val scroll = ScrollView(app).apply { addView(card) }
+        // The overlay must accept keyboard input for task name and recording dimensions.
         params.flags = params.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()
         windowManager = wm
-        window = card
+        window = scroll
         try {
-            wm.addView(card, params)
+            wm.addView(scroll, params)
         } catch (e: Exception) {
             window = null
             windowManager = null
