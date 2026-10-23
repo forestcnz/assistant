@@ -1212,6 +1212,9 @@ class MainActivity : ComponentActivity() {
                 ToolRow("取颜色", "拾取屏幕颜色，生成找色代码", R.drawable.ic_tool_color) {
                     showPicker(PickerOverlay.Mode.COLOR)
                 }
+                ToolRow("选择范围", "框选屏幕区域，生成范围代码", R.drawable.ic_tool_region) {
+                    showPicker(PickerOverlay.Mode.REGION)
+                }
                 ToolRow("区域截图", "框选、命名并保存屏幕区域", R.drawable.ic_tool_shot) {
                     showPicker(PickerOverlay.Mode.SCREENSHOT)
                 }
@@ -1329,7 +1332,7 @@ class MainActivity : ComponentActivity() {
     private fun ToolsTab(launcherEnabled: Boolean) {
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            PageHeading("随手工具", "取点、取色、截图，让脚本编写更轻松。")
+            PageHeading("随手工具", "取点、取色、选范围、截图，让脚本编写更轻松。")
             ToolsCard(launcherEnabled)
             WorkCard(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(bottom = 6.dp)) {
@@ -1600,7 +1603,7 @@ class MainActivity : ComponentActivity() {
         ConsoleOverlay.toggle(this)
     }
 
-    /** 打开坐标拾取器/取色器（需要悬浮窗权限；取色还需截屏授权） */
+    /** 打开屏幕拾取工具（需要悬浮窗权限；取色和截图还需截屏授权） */
     private fun showPicker(mode: PickerOverlay.Mode) {
         if (!overlayGranted) {
             FloatyManager.requestOverlayPermission(this)
