@@ -1,0 +1,71 @@
+name: Bump app version
+description: 按 patch/minor 规则递增 gradle.properties 里的 appVersionName，并同步 appVersionCode
+
+inputs:
+  mode:
+    description: '递增模式：patch（X.Y.Z -> X.Y.Z+1）或 minor（X.Y.Z -> X.Y+1.0）'
+    required: true
+
+outputs:
+  old:
+    description: 旧版本号
+    value: ${{ steps.bump.outputs.old }}
+  new:
+    description: 新版本号
+    value: ${{ steps.bump.outputs.new }}
+  code:
+    description: 新 appVersionCode
+    value: ${{ steps.bump.outputs.code }}
+
+runs:
+  using: composite
+  steps:
+    - name: Bump version
+      id: bump
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        mode="${{ inputs.mode }}"
+        props_file=gradle.properties
+        gradle_file=app/build.gradle.kts
+
+        old_name=$(grep -E '^appVersionName=' "$props_file" | head -n1 | cut -d= -f2- | tr -d '[:space:]')
+        if [[ ! "$old_name" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+          echo "Unsupported appVersionName format: '$old_name' (expected X.Y.Z)" >&2
+          exit 1
+        fi
+        major="${BASH_REMATCH[1]}"
+        minor="${BASH_REMATCH[2]}"
+        patch="${BASH_REMATCH[3]}"
+
+        case "$mode" in
+          patch)
+            new_name="${major}.${minor}.$((patch + 1))"
+            ;;
+          minor)
+            new_name="${major}.$((minor + 1)).0"
+            ;;
+          *)
+            echo "Unsupported mode: '$mode' (expected patch or minor)" >&2
+            exit 1
+            ;;
+        esac
+
+        old_code=$(grep -E '^appVersionCode=' "$props_file" | head -n1 | cut -d= -f2- | tr -d '[:space:]')
+        old_code=${old_code:-0}
+        new_code=$((old_code + 1))
+
+        sed -i -E "s/^appVersionName=.*$/appVersionName=${new_name}/" "$props_file"
+        sed -i -E "s/^appVersionCode=.*$/appVersionCode=${new_code}/" "$props_file"
+
+        # 同步 app/build.gradle.kts 里 versionName 的兜底默认值，避免两处不一致
+        sed -i -E "s/(gradleProperty\(\"appVersionName\"\)\.orElse\(\")[^\"]*(\")/\1${new_name}\2/" "$gradle_file"
+
+        {
+          echo "old=${old_name}"
+          echo "new=${new_name}"
+          echo "code=${new_code}"
+        } >> "$GITHUB_OUTPUT"
+
+        echo "Bump version (${mode}): ${old_name} (${old_code}) -> ${new_name} (${new_code})"

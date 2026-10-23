@@ -1,0 +1,56 @@
+name: Bump version on dev -> master merge
+
+# dev 通过 PR 合并进 master 后，minor 位 +1（中间位）：1.1.2 -> 1.2.0
+on:
+  pull_request:
+    types:
+      - closed
+    branches:
+      - master
+  # 也允许在 Actions 页面手动触发一次（便于首次验证）
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: bump-version-master
+  cancel-in-progress: false
+
+jobs:
+  bump-version:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.merged == true &&
+       github.event.pull_request.head.ref == 'dev')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out master
+        uses: actions/checkout@v6
+        with:
+          ref: master
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Bump minor version
+        id: bump
+        uses: ./.github/actions/bump-version
+        with:
+          mode: minor
+
+      - name: Commit and push
+        shell: bash
+        env:
+          OLD_VERSION: ${{ steps.bump.outputs.old }}
+          NEW_VERSION: ${{ steps.bump.outputs.new }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add gradle.properties app/build.gradle.kts
+          git commit -m "Bump version to ${NEW_VERSION} [skip version bump]" \
+            -m "Automated minor bump from ${OLD_VERSION} to ${NEW_VERSION} after merging dev into master (PR #${PR_NUMBER:-manual})."
+          git push origin HEAD:master

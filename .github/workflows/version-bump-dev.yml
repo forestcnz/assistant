@@ -1,0 +1,55 @@
+name: Bump version on dev push
+
+# 每次向 dev 分支推送代码后，patch 位 +1：1.1.1 -> 1.1.2
+on:
+  push:
+    branches:
+      - dev
+  # 也允许在 Actions 页面手动触发一次（便于首次验证）
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# 串行化，避免并发推送导致提交冲突
+concurrency:
+  group: bump-version-dev
+  cancel-in-progress: false
+
+jobs:
+  bump-version:
+    # 用 GITHUB_TOKEN 推送的提交不会再次触发 push 工作流，这里再加一层兜底；
+    # 另外支持在提交信息里写 [skip version bump] 手动跳过本次自增。
+    if: >-
+      github.actor != 'github-actions[bot]' &&
+      !contains(github.event.head_commit.message, '[skip version bump]')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out dev
+        uses: actions/checkout@v6
+        with:
+          ref: dev
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Bump patch version
+        id: bump
+        uses: ./.github/actions/bump-version
+        with:
+          mode: patch
+
+      - name: Commit and push
+        shell: bash
+        env:
+          OLD_VERSION: ${{ steps.bump.outputs.old }}
+          NEW_VERSION: ${{ steps.bump.outputs.new }}
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add gradle.properties app/build.gradle.kts
+          git commit -m "Bump version to ${NEW_VERSION} [skip version bump]" \
+            -m "Automated dev patch bump from ${OLD_VERSION} to ${NEW_VERSION}."
+          git push origin HEAD:dev
