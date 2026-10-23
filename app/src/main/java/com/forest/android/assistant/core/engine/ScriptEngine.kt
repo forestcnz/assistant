@@ -343,6 +343,11 @@ object ScriptEngine {
             val all = (args.getOrNull(6) as? Number)?.toInt() == 1
             OcrApi.find(bmp, text, regionOf(args, 2), all).map { ocrItem(it) }
         }
+        guard("__ocr_find_contains") { args ->
+            val bmp = ImageApi.image((args.getOrNull(0) as? Number)?.toInt()) ?: return@guard emptyList<Any>()
+            val text = args.getOrNull(1)?.toString() ?: return@guard emptyList<Any>()
+            OcrApi.findContains(bmp, text, regionOf(args, 2))?.let { ocrItem(it) } ?: emptyList<Any>()
+        }
 
         // —— adapter 分辨率适配（API 第 6 节）——
         guard("__adapter_set") { args ->
@@ -830,6 +835,12 @@ var ocr = {
         var r = __regionArgs(options);
         var raw = __ocr_find(__img(image), String(text), r[0], r[1], r[2], r[3], 0);
         return (raw && raw.length) ? __ocrItem(raw[0]) : null;
+    },
+    // 清理空格、标点和符号后包含匹配，返回首个匹配行的原始文字与坐标。
+    findTextContains: function(image, text, options) {
+        var r = __regionArgs(options);
+        var raw = __ocr_find_contains(__img(image), text == null ? "" : String(text), r[0], r[1], r[2], r[3]);
+        return (raw && raw.length) ? __ocrItem(raw) : null;
     },
     findAllText: function(image, text, options) {
         var r = __regionArgs(options);
