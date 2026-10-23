@@ -28,7 +28,7 @@ import android.widget.TextView
  * 贴边后空闲球半隐藏：约一半探出屏外，点击先弹出完整显示，再次点击才展开面板；
  * 半隐藏位置会持久化，重启后保持贴边形态。
  *
- * 展开的面板按「任务 / 工具」分区：任务列表可滚动，工具区提供坐标拾取、取色器、悬浮日志，
+ * 展开的面板按「任务 / 工具」分区：任务列表可滚动，工具区提供取点、取色、选范围、截图、日志和录制，
  * 底部提供「关闭悬浮窗」入口（关闭后可在 App「工具」页重新开启）。
  * 对应设计 docs/README.md 第 4.5 节「悬浮与调试工具」。
  */
@@ -746,7 +746,7 @@ object FloatyManager {
     /**
      * 展开/收起面板（每次展开重新读取任务列表与运行状态）。
      * 布局：卡片式，自上而下 = 头部（选择任务 + 关闭） / 任务列表（双列紧凑格子，可滚动） /
-     * 工具图标行（4 个均分图标按钮） / 运行中任务显示「■ 停止当前任务」 / 底部「✕ 关闭悬浮窗」。
+     * 工具图标区（两行，每行 3 个按钮） / 运行中任务显示「■ 停止当前任务」 / 底部「✕ 关闭悬浮窗」。
      * 宽度不超过 284dp，按内容高度在屏幕正中显示。
      * 面板展开期间悬浮球暂时隐藏（避免遮挡），收起面板时自动恢复。
      * 按住面板标题栏（「≡ 选择任务」区域）可整体拖动面板，✕ 按钮与列表滚动不受影响。
@@ -850,33 +850,46 @@ object FloatyManager {
             )
         )
 
-        // —— 底部：工具图标行（4 个均分图标按钮，无文字） ——
+        // —— 底部：工具图标区（两行三列，保留足够的触摸区域） ——
         panel.addView(divider(context))
         val tools = LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
+            orientation = LinearLayout.VERTICAL
             // 左右内边距 8dp 对称（每个按钮 marginEnd 6dp + 行末 padding 2dp）
             setPadding((8 * d).toInt(), (8 * d).toInt(), (2 * d).toInt(), (6 * d).toInt())
         }
-        tools.addView(toolIconButton(context, com.forest.android.assistant.R.drawable.ic_tool_point, "取坐标") {
-            hideTaskPanel()
-            PickerOverlay.show(context, PickerOverlay.Mode.POINT)
-        })
-        tools.addView(toolIconButton(context, com.forest.android.assistant.R.drawable.ic_tool_color, "取色") {
-            hideTaskPanel()
-            PickerOverlay.show(context, PickerOverlay.Mode.COLOR)
-        })
-        tools.addView(toolIconButton(context, com.forest.android.assistant.R.drawable.ic_tool_shot, "截图") {
-            hideTaskPanel()
-            PickerOverlay.show(context, PickerOverlay.Mode.SCREENSHOT)
-        })
-        tools.addView(toolIconButton(context, com.forest.android.assistant.R.drawable.ic_tool_log, "日志") {
-            hideTaskPanel()
-            ConsoleOverlay.toggle(context)
-        })
-        tools.addView(toolIconButton(context, com.forest.android.assistant.R.drawable.ic_record, "录制操作") {
-            hideTaskPanel()
-            com.forest.android.assistant.core.recording.RecordingSetupOverlay.show(context)
-        })
+        val toolButtons = listOf(
+            toolIconButton(context, com.forest.android.assistant.R.drawable.ic_tool_point, "取坐标") {
+                hideTaskPanel()
+                PickerOverlay.show(context, PickerOverlay.Mode.POINT)
+            },
+            toolIconButton(context, com.forest.android.assistant.R.drawable.ic_tool_color, "取色") {
+                hideTaskPanel()
+                PickerOverlay.show(context, PickerOverlay.Mode.COLOR)
+            },
+            toolIconButton(context, com.forest.android.assistant.R.drawable.ic_tool_region, "选择范围") {
+                hideTaskPanel()
+                PickerOverlay.show(context, PickerOverlay.Mode.REGION)
+            },
+            toolIconButton(context, com.forest.android.assistant.R.drawable.ic_tool_shot, "截图") {
+                hideTaskPanel()
+                PickerOverlay.show(context, PickerOverlay.Mode.SCREENSHOT)
+            },
+            toolIconButton(context, com.forest.android.assistant.R.drawable.ic_tool_log, "日志") {
+                hideTaskPanel()
+                ConsoleOverlay.toggle(context)
+            },
+            toolIconButton(context, com.forest.android.assistant.R.drawable.ic_record, "录制操作") {
+                hideTaskPanel()
+                com.forest.android.assistant.core.recording.RecordingSetupOverlay.show(context)
+            }
+        )
+        toolButtons.chunked(3).forEachIndexed { index, buttons ->
+            tools.addView(LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                if (index > 0) setPadding(0, (6 * d).toInt(), 0, 0)
+                buttons.forEach { addView(it) }
+            })
+        }
         panel.addView(tools)
 
         // 运行中：提供停止入口（与胶囊上的停止键等价）

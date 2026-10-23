@@ -15,7 +15,22 @@ android {
         targetSdk = 35
         testInstrumentationRunner = "com.forest.android.assistant.core.image.ImageApiInstrumentation"
         versionCode = providers.gradleProperty("appVersionCode").orElse("1").get().toInt()
-        versionName = providers.gradleProperty("appVersionName").orElse("1.1.1").get()
+        versionName = providers.gradleProperty("appVersionName").orElse("1.1.6").get()
+    }
+
+    // 正式签名密钥不入库（仓库是公开的）。CI 由 workflow 从 RELEASE_KEYSTORE_BASE64 解码成文件，
+    // 再通过 RELEASE_KEYSTORE_PATH / RELEASE_KEYSTORE_PASSWORD / RELEASE_KEY_ALIAS / RELEASE_KEY_PASSWORD 传入；
+    // 本地没有这些变量时回退到 debug 签名，保证任何环境都能产出可安装的 APK
+    val releaseKeystorePath = providers.environmentVariable("RELEASE_KEYSTORE_PATH").orNull
+    signingConfigs {
+        if (!releaseKeystorePath.isNullOrBlank()) {
+            create("release") {
+                storeFile = file(releaseKeystorePath)
+                storePassword = providers.environmentVariable("RELEASE_KEYSTORE_PASSWORD").orNull
+                keyAlias = providers.environmentVariable("RELEASE_KEY_ALIAS").orNull
+                keyPassword = providers.environmentVariable("RELEASE_KEY_PASSWORD").orNull
+            }
+        }
     }
 
     buildTypes {
@@ -25,6 +40,11 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            signingConfig = if (releaseKeystorePath.isNullOrBlank()) {
+                signingConfigs.getByName("debug")
+            } else {
+                signingConfigs.getByName("release")
+            }
         }
     }
 

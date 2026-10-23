@@ -32,8 +32,36 @@ jobs:
         with:
           gradle-version: '9.6.1'
 
-      - name: Build debug APK
-        run: gradle assembleDebug
+      - name: Decode release keystore
+        env:
+          RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+        shell: bash
+        run: |
+          if [[ -z "$RELEASE_KEYSTORE_BASE64" ]]; then
+            echo "::error::RELEASE_KEYSTORE_BASE64 secret is missing; release APK would fall back to debug signing."
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/keystore"
+          echo "$RELEASE_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/keystore/assistant-release.jks"
+          echo "RELEASE_KEYSTORE_PATH=$RUNNER_TEMP/keystore/assistant-release.jks" >> "$GITHUB_ENV"
+
+      - name: Build debug and release APKs
+        env:
+          RELEASE_KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+        run: gradle assembleDebug assembleRelease
+
+      - name: Verify release signing certificate
+        shell: bash
+        run: |
+          apksigner="$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)/apksigner"
+          cert=$("$apksigner" verify --print-certs app/build/outputs/apk/release/app-release.apk | grep 'certificate SHA-256 digest' | head -1)
+          echo "release APK $cert"
+          if [[ "$cert" == *94bf1e80660d7404f7836335087295addb8a392282249f30e978149f6de5323a* ]]; then
+            echo "::error::release APK is debug-signed; check the release keystore secrets."
+            exit 1
+          fi
 
       - name: Prepare release files
         id: prepare
@@ -48,6 +76,7 @@ jobs:
           safe_release_name="${release_name//\//-}"
           echo "artifact_name=assistant-${safe_release_name}" >> "$GITHUB_OUTPUT"
           cp app/build/outputs/apk/debug/app-debug.apk "dist/assistant-${safe_release_name}-debug.apk"
+          cp app/build/outputs/apk/release/app-release.apk "dist/assistant-${safe_release_name}-release.apk"
           cd dist
           sha256sum *.apk > SHA256SUMS.txt
 
@@ -72,11 +101,12 @@ jobs:
             title="Android build ${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
           fi
           notes=$(cat <<EOF
-          Automated Android debug build for ${GITHUB_REF_NAME}.
+          Automated Android build for ${GITHUB_REF_NAME}.
 
           - Commit: ${GITHUB_SHA}
           - Version: $(grep '^appVersionName=' gradle.properties | cut -d= -f2) ($(grep '^appVersionCode=' gradle.properties | cut -d= -f2))
-          - APK is debug-signed. Installs from different CI runs may require uninstalling the previous build first because each runner uses its own debug signing key.
+          - \`*-debug.apk\`: debug build, debug-signed. Installs from different CI runs may require uninstalling the previous build first because each runner uses its own debug signing key.
+          - \`*-release.apk\`: release build (non-minified), signed with the project release key. Debug and release APKs use different keys, so installing one over the other requires uninstalling first.
           EOF
           )
           # 若同名 Release 已存在（例如重置历史后重推标签），先删除旧的空 Release，保证发布步骤可重复执行

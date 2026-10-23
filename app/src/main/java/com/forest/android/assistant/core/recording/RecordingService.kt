@@ -63,7 +63,9 @@ class RecordingService : Service() {
             check(GestureClient.available()) { "请先开启无障碍服务" }
             task = RecordingTask(this, requireNotNull(intent?.getStringExtra("name")),
                 intent.getIntExtra("cropWidth", 100), intent.getIntExtra("cropHeight", 100),
-                RecordingMode.valueOf(intent.getStringExtra("mode") ?: RecordingMode.COORDINATE.name))
+                RecordingMode.valueOf(intent.getStringExtra("mode") ?: RecordingMode.COORDINATE.name),
+                intent.getIntExtra("searchRegionWidth", DEFAULT_SEARCH_REGION_SIZE),
+                intent.getIntExtra("searchRegionHeight", DEFAULT_SEARCH_REGION_SIZE))
             FloatyManager.hideLauncher()
             PickerOverlay.hide()
             ConsoleOverlay.hide()
@@ -131,7 +133,8 @@ class RecordingService : Service() {
                             if (bitmap !== screen) bitmap.recycle()
                         }
                     }
-                    val pageRegion = RecordedCrop.around(input.points.first(), 600, screen.width, screen.height)
+                    val pageRegion = RecordedCrop.around(input.points.first(), current.searchRegionWidth,
+                        current.searchRegionHeight, screen.width, screen.height)
                     searchRegion = pageRegion
                     contextPath = saveRegion(pageRegion, true)
                     if (input.kind != RecordedOperation.Kind.SWIPE) {
@@ -278,13 +281,23 @@ class RecordingService : Service() {
         @Volatile var active = false
             private set
 
-        fun start(context: Context, name: String, cropWidth: Int, cropHeight: Int, mode: RecordingMode) {
+        fun start(
+            context: Context,
+            name: String,
+            cropWidth: Int,
+            cropHeight: Int,
+            mode: RecordingMode,
+            searchRegionWidth: Int = DEFAULT_SEARCH_REGION_SIZE,
+            searchRegionHeight: Int = DEFAULT_SEARCH_REGION_SIZE
+        ) {
             check(!active) { "已有录制正在进行" }
             active = true
             try {
                 ContextCompat.startForegroundService(context, Intent(context, RecordingService::class.java)
                     .putExtra("name", name).putExtra("cropWidth", cropWidth)
-                    .putExtra("cropHeight", cropHeight).putExtra("mode", mode.name))
+                    .putExtra("cropHeight", cropHeight).putExtra("mode", mode.name)
+                    .putExtra("searchRegionWidth", searchRegionWidth)
+                    .putExtra("searchRegionHeight", searchRegionHeight))
             } catch (e: Exception) {
                 active = false
                 throw e

@@ -15,15 +15,18 @@ Android 自动化脚本工具，包名：`com.forest.android.assistant`。
 
 ```bash
 gradle assembleDebug
+gradle assembleRelease
 ```
 
-APK：`app/build/outputs/apk/debug/app-debug.apk`。
+APK：`app/build/outputs/apk/debug/app-debug.apk`、`app/build/outputs/apk/release/app-release.apk`。
 
 ## 使用
 
 首次使用时按需启用无障碍服务，并授权屏幕捕获。图片匹配和 OCR 需要截图权限；点击和滑动需要无障碍权限。
 
 应用在「任务」中创建或导入脚本。脚本图片路径相对于任务目录。
+
+在「工具」页或悬浮菜单中打开「选择范围」，按住并拖动框选屏幕区域，点击「生成代码」即可复制 `var region = [x, y, width, height];`，结果也会写入运行日志。坐标为屏幕像素，`x/y` 是左上角位置，`width/height` 是宽高；可通过 `{ region: region }` 用于找图、找色和 OCR。支持反向拖动、重选和取消，只需悬浮窗权限。
 
 任务页提供单任务 ZIP 导入和全部任务导出。导出时可在系统文件选择器中指定保存位置；全部任务 ZIP 以 `tasks/<任务名>/` 保存脚本、配置和素材。导入时可选择旧版单任务 ZIP 或包含 `tasks/` 目录的合集 ZIP。同名任务会跳过，不会覆盖。单个任务也可从任务菜单导出 ZIP。区域截图保存时也可在系统文件选择器中指定 PNG 保存位置。
 
@@ -50,9 +53,33 @@ node tools/package-tasks.js "C:\Users\Administrator\Desktop\tasks" "build\我的
 
 任务目录参数必填，输出 ZIP 路径可以省略；省略时生成 `build/tasks-bundle.zip`。压缩包会使用 `tasks/<任务名>/...` 路径，并将中文文件名按 UTF-8 编码，避免 Windows 某些压缩工具写入 GBK 文件名后导致 APP 无法导入。生成 ZIP 后，在 APP「任务」页点击导入图标并选择该文件即可。
 
+## 签名
+
+正式签名密钥不入库（仓库公开）。CI 从 secrets 读取：
+
+- `RELEASE_KEYSTORE_BASE64`：PKCS12 密钥库的 Base64 内容
+- `RELEASE_KEYSTORE_PASSWORD`、`RELEASE_KEY_ALIAS`、`RELEASE_KEY_PASSWORD`
+
+workflow 解码出密钥库文件后传入 Gradle；本地无这些变量时 release 包回退到 debug 签名。本地打正式签名包：
+
+```bash
+RELEASE_KEYSTORE_PATH=/path/assistant-release.jks \
+RELEASE_KEYSTORE_PASSWORD=... RELEASE_KEY_ALIAS=assistant RELEASE_KEY_PASSWORD=... \
+  gradle assembleRelease
+```
+
+发布证书 SHA-256 指纹（`*-release.apk` 应为此值）：
+
+```
+F7:7A:A4:98:D5:8C:F2:29:68:5C:33:59:44:42:3A:CF:BD:E3:11:20:09:1D:C1:F3:6A:6C:02:3F:C9:7A:22:20
+```
+
 ## 发布
 
-推送 Git tag 会自动构建 APK 并创建 GitHub Release，APK 文件名和制品名包含 tag。
+推送 Git tag 会自动构建 debug 与 release 两个 APK 并创建 GitHub Release，APK 文件名和制品名包含 tag：
+
+- `<tag>-debug.apk`：debug 构建，使用 debug 签名。不同 CI 运行使用各自生成的签名密钥，覆盖安装前可能需要先卸载旧版本。
+- `<tag>-release.apk`：release 构建（当前未开启代码混淆），使用正式签名密钥。两者签名不同，互相覆盖安装前需先卸载。
 
 ## 相关文档
 

@@ -10,6 +10,7 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Bitmap
 import android.graphics.PixelFormat
+import android.graphics.Rect
 import android.os.SystemClock
 import android.graphics.RectF
 import android.os.Build
@@ -28,9 +29,10 @@ import kotlin.math.min
 import kotlin.math.abs
 
 /**
- * 坐标拾取器 / 取色器 / 截图器：全屏透明悬浮层，拖动准星取点，点击生成脚本代码。
+ * 屏幕拾取工具：拖动准星取点，或拖拽框选区域，生成脚本代码或保存截图。
  * - 坐标模式：生成 `click(x, y);`
  * - 取色模式：从最近一帧截屏读取该点像素，生成 `images.findColor(captureScreen(), "#rrggbb", ...)`
+ * - 范围模式：框选屏幕区域，生成 `var region = [x, y, width, height];`，无需截屏授权。
  *
  * 注意：取色准确性依赖“被采样像素未被悬浮层本身覆盖”，因此准星中心留空且不做全屏压暗。
  * 对应设计 docs/README.md 第 4.5 节「坐标拾取器 / 取色器」。
@@ -45,6 +47,9 @@ object PickerOverlay {
 
         /** 取像素颜色，生成 findColor 颜色串 */
         COLOR,
+
+        /** 拖拽框选屏幕区域，生成 region 数组 */
+        REGION,
 
         /** 拖拽框选屏幕区域并保存截图 */
         SCREENSHOT
@@ -267,6 +272,7 @@ object PickerOverlay {
 
         /** 当前拾取模式由工具入口确定 */
         private val mode: Mode = initialMode
+        private val isAreaMode = mode == Mode.REGION || mode == Mode.SCREENSHOT
 
         private val density = resources.displayMetrics.density
 
@@ -297,10 +303,10 @@ object PickerOverlay {
         private var isSelecting = false
         private var isCapturing = false
 
-        /** 截图确认按钮区域 */
+        /** 选区确认按钮区域（生成代码 / 保存截图） */
         private val saveRect = RectF()
 
-        /** 截图重选按钮区域 */
+        /** 选区重选按钮区域 */
         private val resetRect = RectF()
 
         /** 悬浮层在屏幕上的原点：窗口通常从状态栏下方开始，需换算成屏幕坐标 */
@@ -361,8 +367,8 @@ object PickerOverlay {
         override fun onDraw(canvas: Canvas) {
             super.onDraw(canvas)
             getLocationOnScreen(location)
-            if (mode == Mode.SCREENSHOT) {
-                drawScreenshot(canvas)
+            if (isAreaMode) {
+                drawSelection(canvas)
                 return
             }
             val gap = 9f * density
@@ -443,7 +449,7 @@ object PickerOverlay {
             )
         }
 
-        private fun drawScreenshot(canvas: Canvas) {
+        private fun drawSelection(canvas: Canvas) {
             frozenFrame?.let { frame ->
                 canvas.drawBitmap(
                     frame,
@@ -480,14 +486,22 @@ object PickerOverlay {
                 canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), dimPaint)
             }
 
-            val captureText = if (isCapturing) "截图中" else "保存"
+            val captureText = when {
+                mode == Mode.REGION -> "生成代码"
+                isCapturing -> "截图中"
+                else -> "保存"
+            }
             drawButton(canvas, saveRect, captureText)
             drawButton(canvas, resetRect, "重选")
             drawButton(canvas, cancelRect, "取消")
 
             val hint = when {
                 isCapturing -> "正在截取所选区域…"
-                hasSelection -> "${selectionWidth()}×${selectionHeight()}，可拖拽调整"
+                hasSelection && mode == Mode.REGION -> selectedRegion().let {
+                    "范围 [${it.left}, ${it.top}, ${it.width()}, ${it.height()}]"
+                }
+                hasSelection -> "${selectionWidth()}×${selectionHeight()}，可重新拖动框选"
+                mode == Mode.REGION -> "按住并拖动选择范围，生成 [x, y, 宽度, 高度]"
                 else -> "按住并拖动，框选要保存的区域"
             }
             val textX = margin
@@ -505,12 +519,24 @@ object PickerOverlay {
             canvas.drawText(label, textX, rect.centerY() + 5f * density, textPaint)
         }
 
-        private fun selectionWidth(): Int = abs(selectionEndX - selectionStartX).toInt()
+        private fun selectionWidth(): Int = abs(selectionEndX.toInt() - selectionStartX.toInt())
 
-        private fun selectionHeight(): Int = abs(selectionEndY - selectionStartY).toInt()
+        private fun selectionHeight(): Int = abs(selectionEndY.toInt() - selectionStartY.toInt())
+
+        /** 使用屏幕原点换算，保证状态栏/窗口偏移不会混入宽高。 */
+        private fun selectedRegion(): Rect {
+            getLocationOnScreen(location)
+            return Rect(
+                toScreenX(min(selectionStartX, selectionEndX)),
+                toScreenY(min(selectionStartY, selectionEndY)),
+                toScreenX(max(selectionStartX, selectionEndX)),
+                toScreenY(max(selectionStartY, selectionEndY))
+            )
+        }
 
         @SuppressLint("ClickableViewAccessibility")
         override fun onTouchEvent(event: MotionEvent): Boolean {
+            if (isAreaMode) return onSelectionTouchEvent(event)
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
                     downX = event.x
@@ -526,45 +552,11 @@ object PickerOverlay {
                         consumedByButton = true
                         return true
                     }
-                    if (mode == Mode.SCREENSHOT) {
-                        if (saveRect.contains(event.x, event.y) && hasSelection && !isCapturing) {
-                            consumedByButton = true
-                            captureSelection()
-                            return true
-                        }
-                        if (resetRect.contains(event.x, event.y)) {
-                            consumedByButton = true
-                            hasSelection = false
-                            isSelecting = true
-                            selectionStartX = event.x
-                            selectionStartY = event.y
-                            selectionEndX = event.x
-                            selectionEndY = event.y
-                            invalidate()
-                            return true
-                        }
-                        isSelecting = true
-                        hasSelection = false
-                        selectionStartX = event.x
-                        selectionStartY = event.y
-                        selectionEndX = event.x
-                        selectionEndY = event.y
-                        return true
-                    }
                     return true
                 }
                 MotionEvent.ACTION_MOVE -> {
                     if (abs(event.x - downX) > 6f * density || abs(event.y - downY) > 6f * density) {
                         moved = true
-                    }
-                    if (mode == Mode.SCREENSHOT) {
-                        if (isSelecting && !isCapturing) {
-                            selectionEndX = event.x
-                            selectionEndY = event.y
-                            hasSelection = true
-                            invalidate()
-                        }
-                        return true
                     }
                     px = event.x
                     py = event.y
@@ -573,16 +565,6 @@ object PickerOverlay {
                     return true
                 }
                 MotionEvent.ACTION_UP -> {
-                    if (mode == Mode.SCREENSHOT) {
-                        if (isSelecting && !isCapturing) {
-                            isSelecting = false
-                            selectionEndX = event.x
-                            selectionEndY = event.y
-                            hasSelection = selectionWidth() >= 2 && selectionHeight() >= 2
-                        }
-                        invalidate()
-                        return true
-                    }
                     if (!moved && !consumedByButton) {
                         px = event.x
                         py = event.y
@@ -593,6 +575,69 @@ object PickerOverlay {
                 }
             }
             return super.onTouchEvent(event)
+        }
+
+        /** 框选与按钮手势分开处理，重选/确认按钮的拖动不会意外创建新选区。 */
+        private fun onSelectionTouchEvent(event: MotionEvent): Boolean {
+            val x = event.x.coerceIn(0f, width.toFloat())
+            val y = event.y.coerceIn(0f, height.toFloat())
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    consumedByButton = false
+                    isSelecting = false
+                    when {
+                        cancelRect.contains(event.x, event.y) -> {
+                            consumedByButton = true
+                            PickerOverlay.hide()
+                        }
+                        isCapturing -> consumedByButton = true
+                        saveRect.contains(event.x, event.y) -> {
+                            consumedByButton = true
+                            if (hasSelection) {
+                                if (mode == Mode.REGION) {
+                                    val region = selectedRegion()
+                                    onResult("var region = [${region.left}, ${region.top}, ${region.width()}, ${region.height()}];")
+                                } else {
+                                    captureSelection()
+                                }
+                            } else {
+                                Toast.makeText(context, "请先拖动选择范围", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                        resetRect.contains(event.x, event.y) -> {
+                            consumedByButton = true
+                            hasSelection = false
+                        }
+                        else -> {
+                            isSelecting = true
+                            hasSelection = false
+                            selectionStartX = x
+                            selectionStartY = y
+                            selectionEndX = x
+                            selectionEndY = y
+                        }
+                    }
+                }
+                MotionEvent.ACTION_MOVE, MotionEvent.ACTION_UP -> {
+                    if (isSelecting && !consumedByButton && !isCapturing) {
+                        selectionEndX = x
+                        selectionEndY = y
+                        val minSize = if (mode == Mode.SCREENSHOT) 2 else 1
+                        hasSelection = selectionWidth() >= minSize && selectionHeight() >= minSize
+                    }
+                    if (event.actionMasked == MotionEvent.ACTION_UP) {
+                        isSelecting = false
+                        consumedByButton = false
+                    }
+                }
+                MotionEvent.ACTION_CANCEL -> {
+                    if (isSelecting) hasSelection = false
+                    isSelecting = false
+                    consumedByButton = false
+                }
+            }
+            invalidate()
+            return true
         }
 
         /** 取最近一帧截屏在准星处的像素（不阻塞 UI 线程；坐标为屏幕坐标） */
@@ -631,7 +676,7 @@ object PickerOverlay {
 
         /** 点击确认：生成代码（坐标为屏幕坐标，与 click/gesture API 一致） */
         private fun confirm() {
-            if (mode == Mode.SCREENSHOT) return
+            if (isAreaMode) return
             val x = toScreenX(px)
             val y = toScreenY(py)
             when (mode) {
@@ -653,15 +698,16 @@ object PickerOverlay {
                     onResult("images.findColor(captureScreen(), \"$hex\", { threshold: 16 });   // ($x, $y)")
                 }
 
-                Mode.SCREENSHOT -> Unit
+                Mode.REGION, Mode.SCREENSHOT -> Unit
             }
         }
 
         private fun captureSelection() {
-            val left = toScreenX(min(selectionStartX, selectionEndX).toInt().toFloat())
-            val top = toScreenY(min(selectionStartY, selectionEndY).toInt().toFloat())
-            val width = selectionWidth().coerceAtLeast(1)
-            val height = selectionHeight().coerceAtLeast(1)
+            val region = selectedRegion()
+            val left = region.left
+            val top = region.top
+            val width = region.width().coerceAtLeast(1)
+            val height = region.height().coerceAtLeast(1)
             isCapturing = true
             invalidate()
             Thread {

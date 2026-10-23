@@ -31,6 +31,46 @@ class RecordingScriptTest {
         assertTrue(script.indexOf("/*") < script.indexOf("images.findImage"))
     }
 
+    @Test fun customRectangularPageRangeIsUsedForImageMatching() {
+        val point = RecordedPoint(890, 1590)
+        val script = RecordingScript.generate(900, 1600, listOf(RecordedOperation(
+            RecordedOperation.Kind.CLICK, listOf(point), 40,
+            image = "images/step_001.png", crop = RecordedCrop.around(point, 100, 900, 1600)
+        )), RecordingMode.IMAGE, searchRegionWidth = 800, searchRegionHeight = 350)
+
+        assertTrue(script.contains("var region1 = [100, 1250, 800, 350];"))
+        assertTrue(script.contains("800×350 页面范围"))
+        assertTrue(script.contains("threshold: 0.9, region: region1"))
+        assertFalse(script.contains("600×600"))
+        assertFalse(script.contains("/*"))
+    }
+
+    @Test fun customPageRangeClampsToScreenWithoutChangingTheOtherDimension() {
+        val step = RecordedOperation(RecordedOperation.Kind.SWIPE,
+            listOf(RecordedPoint(200, 300), RecordedPoint(200, 100)), 400)
+        val script = RecordingScript.generate(360, 640, listOf(step),
+            searchRegionWidth = 1200, searchRegionHeight = 400)
+
+        assertTrue(script.contains("var region1 = [0, 100, 360, 400];"))
+        assertTrue(script.contains("360×400 页面范围"))
+        assertTrue(script.contains("swipe(200, 300, 200, 100, 400)"))
+        val fullScreenScript = RecordingScript.generate(360, 640, listOf(step),
+            searchRegionWidth = 1200, searchRegionHeight = 900)
+        assertTrue(fullScreenScript.contains("var region1 = [0, 0, 360, 640];"))
+        assertTrue(fullScreenScript.contains("360×640 页面范围"))
+    }
+
+    @Test fun recordedPageRangeTakesPrecedenceOverConfiguredDimensions() {
+        val step = RecordedOperation(RecordedOperation.Kind.CLICK, listOf(RecordedPoint(240, 550)), 40,
+            searchRegion = RecordedCrop(80, 200, 320, 700), contextImage = "contexts/step_001.png")
+        val script = RecordingScript.generate(900, 1600, listOf(step),
+            searchRegionWidth = 800, searchRegionHeight = 350)
+
+        assertTrue(script.contains("var region1 = [80, 200, 320, 700];"))
+        assertTrue(script.contains("320×700 页面范围"))
+        assertTrue(script.contains("页面范围截图：contexts/step_001.png"))
+    }
+
     @Test fun edgeCropKeepsSizeAndOriginalTapOffset() {
         val point = RecordedPoint(2, 1598)
         val crop = RecordedCrop.around(point, 100, 900, 1600)

@@ -9,7 +9,15 @@ import org.json.JSONObject
 import java.io.File
 
 /** 每个成功步骤立即落盘，进程意外退出后已录制的任务仍然存在。 */
-class RecordingTask(context: Context, val name: String, val cropWidth: Int, val cropHeight: Int, val mode: RecordingMode) {
+class RecordingTask(
+    context: Context,
+    val name: String,
+    val cropWidth: Int,
+    val cropHeight: Int,
+    val mode: RecordingMode,
+    val searchRegionWidth: Int = DEFAULT_SEARCH_REGION_SIZE,
+    val searchRegionHeight: Int = DEFAULT_SEARCH_REGION_SIZE
+) {
     private val directory = TaskManager.taskDir(context, name)
     val steps = mutableListOf<RecordedOperation>()
     var width = 0
@@ -19,6 +27,7 @@ class RecordingTask(context: Context, val name: String, val cropWidth: Int, val 
         require(name.isNotBlank() && name.length <= 50 && name != "." && name != ".." &&
             name.none { it == '/' || it == '\\' || it.isISOControl() }) { "任务名称不合法" }
         require(cropWidth in 20..500 && cropHeight in 20..500) { "截图宽度和高度均需为 20～500 像素" }
+        require(searchRegionWidth >= cropWidth && searchRegionHeight >= cropHeight) { "页面范围宽度和高度不能小于对应的截图尺寸" }
         check(!directory.exists() && directory.mkdirs()) { "任务已存在或无法创建目录" }
         check(File(directory, "images").mkdirs()) { "无法创建素材目录" }
     }
@@ -59,12 +68,13 @@ class RecordingTask(context: Context, val name: String, val cropWidth: Int, val 
             })
         }
         atomicWrite("recording.json", JSONObject().apply {
-            put("version", 3)
+            put("version", 4)
             put("mode", mode.name.lowercase())
             put("screenSize", JSONArray(listOf(width, height)))
             put("cropWidth", cropWidth)
             put("cropHeight", cropHeight)
-            put("searchRegionSize", 600)
+            put("searchRegionWidth", searchRegionWidth)
+            put("searchRegionHeight", searchRegionHeight)
             put("operations", operations)
         }.toString(2))
         atomicWrite("config.json", JSONObject().apply {
@@ -73,7 +83,7 @@ class RecordingTask(context: Context, val name: String, val cropWidth: Int, val 
             put("loop", JSONObject().put("count", 1).put("interval", 0))
         }.toString(2))
         // task.js 最后写入：任务列表只展示已经具备配置和素材的可运行任务。
-        atomicWrite("task.js", RecordingScript.generate(width, height, steps, mode))
+        atomicWrite("task.js", RecordingScript.generate(width, height, steps, mode, searchRegionWidth, searchRegionHeight))
     }
 
     fun discardIfEmpty() {
