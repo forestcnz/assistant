@@ -1,5 +1,7 @@
 package com.forest.android.assistant
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -250,6 +252,9 @@ class ScriptEditorActivity : ComponentActivity() {
         if (showExamples) {
             ScriptExamplesDialog(
                 onDismiss = { showExamples = false },
+                onCopy = { title, code ->
+                    if (copyExample(title, code)) showExamples = false
+                },
                 onInsert = { code, completeScript ->
                     insertAtCursor(code, completeWord = false, block = completeScript)
                     showExamples = false
@@ -290,10 +295,15 @@ class ScriptEditorActivity : ComponentActivity() {
                     }
                 },
                 confirmButton = {
-                    TextButton(onClick = {
-                        insertAtCursor(item.snippet)
-                        apiHelp = null
-                    }) { Text("插入示例") }
+                    Row {
+                        TextButton(onClick = {
+                            insertAtCursor(item.snippet)
+                            apiHelp = null
+                        }) { Text("插入示例") }
+                        TextButton(onClick = {
+                            if (copyExample(item.name, item.snippet)) apiHelp = null
+                        }) { Text("复制") }
+                    }
                 },
                 dismissButton = { TextButton(onClick = { apiHelp = null }) { Text("关闭") } }
             )
@@ -316,6 +326,20 @@ class ScriptEditorActivity : ComponentActivity() {
                 },
                 dismissButton = { TextButton(onClick = { showClearDialog = false }) { Text("取消") } }
             )
+        }
+    }
+
+    /** 复制不修改编辑内容、光标或保存状态，交由用户选择粘贴位置。 */
+    private fun copyExample(title: String, code: String): Boolean {
+        return try {
+            val clipboard = getSystemService(ClipboardManager::class.java)
+                ?: error("系统剪贴板不可用")
+            clipboard.setPrimaryClip(ClipData.newPlainText(title, code))
+            Toast.makeText(this, "已复制代码，可长按编辑器粘贴", Toast.LENGTH_SHORT).show()
+            true
+        } catch (_: Exception) {
+            Toast.makeText(this, "复制失败，请重试", Toast.LENGTH_SHORT).show()
+            false
         }
     }
 

@@ -90,6 +90,7 @@ import com.forest.android.assistant.core.gesture.GestureClient
 import com.forest.android.assistant.core.task.ScheduleManager
 import com.forest.android.assistant.core.task.RunHistory
 import com.forest.android.assistant.core.task.TaskManager
+import com.forest.android.assistant.core.task.ImageHistory
 import com.forest.android.assistant.core.task.TaskZip
 import com.forest.android.assistant.ui.AppIcon
 import com.forest.android.assistant.ui.ScriptTheme
@@ -128,6 +129,10 @@ class MainActivity : ComponentActivity() {
     private var taskMutationBusy by mutableStateOf(false)
     private var assetsTask by mutableStateOf<String?>(null)
     private var assets by mutableStateOf(emptyList<TaskManager.ImageInfo>())
+    private var assetsHistoryTask by mutableStateOf<String?>(null)
+    private var assetsHistory by mutableStateOf(emptyList<ImageHistory.Entry>())
+    private var assetsHistoryBusy by mutableStateOf(false)
+    private var assetsHistoryError by mutableStateOf<String?>(null)
     private var previewAsset by mutableStateOf<TaskManager.ImageInfo?>(null)
     private var previewBitmap by mutableStateOf<android.graphics.Bitmap?>(null)
     private var previewLoadJob: kotlinx.coroutines.Job? = null
@@ -174,6 +179,72 @@ class MainActivity : ComponentActivity() {
                 if (granted) 'I' else 'W'
             )
         }
+
+    private val cropImageLauncher =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            val task = result.data?.getStringExtra(AssetCropActivity.EXTRA_TASK) ?: assetsTask
+            if (task != null) {
+                assetsTask = task
+                assets = TaskManager.imageInfos(this, task)
+            }
+            if (result.resultCode == RESULT_OK) {
+                val name = result.data?.getStringExtra(AssetCropActivity.EXTRA_IMAGE).orEmpty()
+                Toast.makeText(this, "已替换 $name，原图已移入历史素材", Toast.LENGTH_SHORT).show()
+                ScriptRunner.appendLog("已裁剪替换 $name，原图已移入 images/history/")
+            }
+        }
+
+    private fun cropAsset(info: TaskManager.ImageInfo) {
+        val task = assetsTask ?: return
+        previewLoadJob?.cancel()
+        previewAsset = null
+        previewBitmap = null
+        cropImageLauncher.launch(Intent(this, AssetCropActivity::class.java)
+            .putExtra(AssetCropActivity.EXTRA_TASK, task)
+            .putExtra(AssetCropActivity.EXTRA_IMAGE, info.file.name))
+    }
+
+    private fun openAssetsHistory(task: String) {
+        assetsHistoryTask = task
+        assetsHistory = emptyList()
+        assetsHistoryError = null
+        assetsHistoryBusy = true
+        lifecycleScope.launch {
+            try {
+                assetsHistory = withContext(Dispatchers.IO) { ImageHistory.list(this@MainActivity, task) }
+            } catch (failure: Exception) {
+                if (failure is kotlinx.coroutines.CancellationException) throw failure
+                assetsHistoryError = failure.message ?: "读取历史素材失败"
+            } finally {
+                assetsHistoryBusy = false
+            }
+        }
+    }
+
+    private fun moveHistoryImageBack(task: String, entry: ImageHistory.Entry) {
+        if (assetsHistoryBusy) return
+        assetsHistoryBusy = true
+        assetsHistoryError = null
+        lifecycleScope.launch {
+            try {
+                withContext(Dispatchers.IO + kotlinx.coroutines.NonCancellable) {
+                    ImageHistory.moveBack(this@MainActivity, task, entry)
+                }
+                val refreshed = withContext(Dispatchers.IO) {
+                    TaskManager.imageInfos(this@MainActivity, task) to ImageHistory.list(this@MainActivity, task)
+                }
+                assets = refreshed.first
+                assetsHistory = refreshed.second
+                Toast.makeText(this@MainActivity, "已移回素材：${entry.originalName}", Toast.LENGTH_SHORT).show()
+                ScriptRunner.appendLog("已从历史移回素材：${entry.originalName}")
+            } catch (failure: Exception) {
+                if (failure is kotlinx.coroutines.CancellationException) throw failure
+                assetsHistoryError = failure.message ?: "移回失败，请重试"
+            } finally {
+                assetsHistoryBusy = false
+            }
+        }
+    }
 
     /** 从相册/文件导入素材（SAF） */
     private val importImageLauncher =
@@ -274,6 +345,8 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         pendingExportFile = savedInstanceState?.getString("pending_export_file")?.let(::File)
+        assetsTask = savedInstanceState?.getString("assets_task")
+        assetsTask?.let { assets = TaskManager.imageInfos(this, it) }
         taskTransferBusy = pendingExportFile != null
         mainTab = savedInstanceState?.getInt("main_tab", 0)?.coerceIn(0, 3) ?: 0
         if (intent.getBooleanExtra(EXTRA_SHOW_TASKS, false)) mainTab = 0
@@ -351,6 +424,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
+        outState.putString("assets_task", assetsTask)
         outState.putInt("main_tab", mainTab)
         outState.putBoolean("create_dialog", showCreateDialog)
         outState.putString("pending_export_file", pendingExportFile?.absolutePath)
@@ -561,6 +635,7 @@ class MainActivity : ComponentActivity() {
             AssetPreviewDialog(
                 info = info,
                 bitmap = previewBitmap,
+                onCrop = { cropAsset(info) },
                 onDismiss = {
                     previewAsset = null
                     previewBitmap = null
@@ -687,12 +762,24 @@ class MainActivity : ComponentActivity() {
                 onImport = {
                     importImageLauncher.launch(arrayOf("image/*"))
                 },
+                onHistory = { openAssetsHistory(name) },
                 onPreview = { info -> loadAssetPreview(info) },
+                onCrop = { info -> cropAsset(info) },
                 onRename = { info -> renameAsset = info },
                 onDelete = { info ->
                     TaskManager.deleteImage(info.file)
                     assets = TaskManager.imageInfos(this, name)
                 }
+            )
+        }
+
+        assetsHistoryTask?.let { name ->
+            AssetsHistoryDialog(
+                entries = assetsHistory,
+                busy = assetsHistoryBusy,
+                error = assetsHistoryError,
+                onDismiss = { assetsHistoryTask = null },
+                onMoveBack = { moveHistoryImageBack(name, it) }
             )
         }
     }
@@ -781,7 +868,7 @@ class MainActivity : ComponentActivity() {
                         R.drawable.ic_clock, onSchedule)
                     ToolRow("运行历史", "查看执行结果与耗时", R.drawable.ic_tool_log, onHistory)
                     HorizontalDivider(Modifier.padding(vertical = 8.dp))
-                    ToolRow("素材管理", "预览、导入与整理图片", R.drawable.ic_tool_color, onManageAssets)
+                    ToolRow("素材管理", "预览、裁剪、导入与整理图片", R.drawable.ic_tool_color, onManageAssets)
                     HorizontalDivider(Modifier.padding(vertical = 8.dp))
                     ToolRow("导出 ZIP", "分享脚本、素材与配置", R.drawable.ic_export, onExportZip)
                 }
@@ -887,7 +974,7 @@ class MainActivity : ComponentActivity() {
         )
     }
 
-    /** 素材管理：列出任务 images/ 下的图片，可删除 */
+    /** 素材管理：列出任务 images/ 下的图片，支持预览、裁剪与整理。 */
     @Composable
     private fun AssetsDialog(
         taskName: String,
@@ -895,7 +982,9 @@ class MainActivity : ComponentActivity() {
         onDismiss: () -> Unit,
         onRefresh: () -> Unit,
         onImport: () -> Unit,
+        onHistory: () -> Unit,
         onPreview: (TaskManager.ImageInfo) -> Unit,
+        onCrop: (TaskManager.ImageInfo) -> Unit,
         onRename: (TaskManager.ImageInfo) -> Unit,
         onDelete: (TaskManager.ImageInfo) -> Unit
     ) {
@@ -904,35 +993,80 @@ class MainActivity : ComponentActivity() {
             title = { Text("素材 · $taskName") },
             text = {
                 Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
-                    TextButton(onClick = onImport) { Text("+ 从相册导入") }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        TextButton(onClick = onImport) { Text("+ 从相册导入") }
+                        TextButton(onClick = onHistory) { Text("历史素材") }
+                    }
                     if (images.isEmpty()) {
                         Text("images/ 目录暂无图片，可从相册导入素材", style = MaterialTheme.typography.bodySmall)
                     } else {
-                        images.take(8).forEach { info ->
-                            Row(verticalAlignment = Alignment.CenterVertically) {
+                        images.forEach { info ->
+                            Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
                                 Column(
                                     modifier = Modifier
-                                        .weight(1f)
+                                        .fillMaxWidth()
                                         .clickable { onPreview(info) }
                                 ) {
-                                    Text(info.file.name, style = MaterialTheme.typography.bodyMedium)
+                                    Text(info.file.name, style = MaterialTheme.typography.bodyMedium,
+                                        maxLines = 2, overflow = TextOverflow.Ellipsis)
                                     Text(
                                         info.dimensionText() + " · " + info.sizeText() + "（点击预览）",
                                         style = MaterialTheme.typography.bodySmall
                                     )
                                 }
-                                TextButton(onClick = { onRename(info) }) { Text("重命名") }
-                                TextButton(onClick = { onDelete(info) }) { Text("删除") }
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                                    TextButton(onClick = { onCrop(info) }, enabled = info.width > 0 && info.height > 0) { Text("裁剪") }
+                                    TextButton(onClick = { onRename(info) }) { Text("重命名") }
+                                    TextButton(onClick = { onDelete(info) }) { Text("删除") }
+                                }
+                                HorizontalDivider()
                             }
-                        }
-                        if (images.size > 8) {
-                            Text("共 ${images.size} 个，仅显示前 8 个", style = MaterialTheme.typography.bodySmall)
                         }
                     }
                     TextButton(onClick = onRefresh) { Text("刷新") }
                 }
             },
             confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } }
+        )
+    }
+
+    /** 历史素材仅提供移回操作，不提供预览、裁剪、重命名或删除入口。 */
+    @Composable
+    private fun AssetsHistoryDialog(
+        entries: List<ImageHistory.Entry>,
+        busy: Boolean,
+        error: String?,
+        onDismiss: () -> Unit,
+        onMoveBack: (ImageHistory.Entry) -> Unit
+    ) {
+        AlertDialog(
+            onDismissRequest = { if (!busy) onDismiss() },
+            title = { Text("历史素材") },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    Text("移回后恢复原文件名，直接覆盖当前同名素材。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    if (busy) Text("正在处理…", modifier = Modifier.padding(vertical = 8.dp))
+                    if (error != null) Text(error, color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(vertical = 8.dp))
+                    if (entries.isEmpty() && !busy && error == null) {
+                        Text("暂无历史素材，裁剪前的原图会保存在这里。", modifier = Modifier.padding(vertical = 16.dp))
+                    }
+                    entries.forEach { entry ->
+                        Column(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+                            Text(entry.originalName, style = MaterialTheme.typography.bodyMedium,
+                                maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            Text(entry.archivedAt, style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            TextButton(onClick = { onMoveBack(entry) }, enabled = !busy,
+                                modifier = Modifier.align(Alignment.End)) { Text("移回素材") }
+                            HorizontalDivider()
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = onDismiss, enabled = !busy) { Text("关闭") } }
         )
     }
 
@@ -965,6 +1099,7 @@ class MainActivity : ComponentActivity() {
     private fun AssetPreviewDialog(
         info: TaskManager.ImageInfo,
         bitmap: android.graphics.Bitmap?,
+        onCrop: () -> Unit,
         onDismiss: () -> Unit
     ) {
         AlertDialog(
@@ -990,7 +1125,8 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             },
-            confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } }
+            confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } },
+            dismissButton = { TextButton(onClick = onCrop, enabled = bitmap != null) { Text("裁剪") } }
         )
     }
 

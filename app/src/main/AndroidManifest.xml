@@ -35,6 +35,12 @@
             android:name=".TemplateCaptureActivity"
             android:exported="false" />
 
+        <!-- 素材裁剪：替换当前图片，原图迁移到历史素材 -->
+        <activity
+            android:name=".AssetCropActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
+
         <!-- 区域截图保存：由系统文件选择器确定 PNG 保存位置 -->
         <activity
             android:name=".ScreenshotExportActivity"

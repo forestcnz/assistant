@@ -72,6 +72,7 @@ dependencies {
 
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.7")
     implementation("androidx.activity:activity-compose:1.9.3")
 
     // QuickJS 脚本引擎（quickjs-kt，ES2020+，含各 ABI 原生库）
