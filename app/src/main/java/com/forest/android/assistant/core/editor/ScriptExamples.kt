@@ -12,101 +12,318 @@ object ScriptExamples {
 
     val items = listOf(
         // 各任务共用的初始化与图片生命周期。
-        Item("横屏坐标", "以 1920×1080 为基准填写点击坐标。", "准备",
-            "adapter.setDesignSize(1920, 1080);"),
-        Item("申请操作权限", "点击前开启无障碍；截图前申请授权。", "准备", """
-            if (!auto.waitFor(5000)) exit();
-            if (!requestScreenCapture()) exit();
+        Item("横屏坐标", "以 1920×1080 为基准填写点击坐标，结束时取消适配。", "准备", """
+            adapter.setDesignSize(1920, 1080);
+            try {
+                click(960, 540); // 按 1920×1080 填写的设计坐标
+                sleep(500);
+            } finally {
+                adapter.reset();
+            }
         """.trimIndent()),
-        Item("截取当前画面", "先授权截图；shot 可能为空，使用前判断。", "准备",
-            "var shot = captureScreen();"),
-        Item("预加载找图素材", "放在循环前；template 为空表示素材读取失败。", "准备",
-            "var template = images.read(\"images/按钮.png\");"),
-        Item("释放截图与素材", "shot 每轮用完释放；template 在整个任务结束时释放。", "准备", """
-            images.release(shot);
-            images.release(template);
+        Item("申请操作权限", "先等无障碍服务，再申请截图授权；任一失败直接结束脚本。", "准备", """
+            if (!auto.waitFor(5000)) {
+                toastLog("无障碍服务未开启");
+                exit();
+            }
+            if (!requestScreenCapture()) {
+                toastLog("截图授权失败");
+                exit();
+            }
+        """.trimIndent()),
+        Item("截取当前画面", "先申请截图授权；shot 可能为空，用完必须释放。", "准备", """
+            var shot = captureScreen();
+            if (!shot) {
+                toastLog("截图失败");
+                exit();
+            }
+            try {
+                log("截图：", images.width(shot), "×", images.height(shot));
+            } finally {
+                images.release(shot);
+            }
+        """.trimIndent()),
+        Item("预加载找图素材", "放在循环前读取一次；template 为空表示素材读取失败，结束时释放。", "准备", """
+            var template = images.read("images/按钮.png");
+            if (!template) {
+                toastLog("素材读取失败：images/按钮.png");
+                exit();
+            }
+            try {
+                log("素材尺寸：", images.width(template), "×", images.height(template));
+            } finally {
+                images.release(template);
+            }
+        """.trimIndent()),
+        Item("释放截图与素材", "截图每轮用完释放；素材在整个任务结束时释放，也要覆盖异常退出。", "准备", """
+            var shot = null, template = null;
+            try {
+                template = images.read("images/按钮.png");
+                shot = captureScreen();
+                if (template && shot) log("准备完成");
+            } finally {
+                images.release(template);
+                images.release(shot);
+            }
         """.trimIndent()),
 
         // 天下五绝、福地绳子、恩仇、通天塔中的循环控制。
-        Item("循环指定次数", "执行 5 次；修改次数和循环内的动作。", "循环",
-            "for (var i = 0; i < 5; i++) { click(760, 255); sleep(800); }"),
-        Item("持续循环", "每秒执行一次，直到手动停止。", "循环",
-            "while (true) { click(760, 255); sleep(1000); }"),
-        Item("遍历多个坐标", "按数组顺序点击各个位置。", "循环", """
+        Item("循环指定次数", "执行 5 次，每次点击后等 800 毫秒让界面切换。", "循环", """
+            for (var i = 0; i < 5; i++) {
+                log("第 " + (i + 1) + " 次");
+                click(760, 255);
+                sleep(800);
+            }
+        """.trimIndent()),
+        Item("持续循环", "每秒执行一次，直到手动停止脚本；建议在循环内先判断状态。", "循环", """
+            while (true) {
+                click(760, 255);
+                sleep(1000);
+            }
+        """.trimIndent()),
+        Item("遍历多个坐标", "按数组顺序依次点击各位置，中间留出等待时间。", "循环", """
             var positions = [[760, 255], [512, 414]];
-            for (var p of positions) { click(p[0], p[1]); sleep(800); }
+            for (var p of positions) {
+                log("点击：", p[0], p[1]);
+                click(p[0], p[1]);
+                sleep(800);
+            }
         """.trimIndent()),
-        Item("超时后结束循环", "最多循环 8 秒；将 log 换成要执行的操作。", "循环", """
+        Item("超时后结束循环", "最多循环 8 秒，超时自动结束；把 log 换成实际轮询操作。", "循环", """
             var deadline = Date.now() + 8000;
-            while (Date.now() < deadline) { log("等待中"); sleep(1000); }
+            while (Date.now() < deadline) {
+                log("等待中，剩余 " + Math.ceil((deadline - Date.now()) / 1000) + " 秒");
+                sleep(1000);
+            }
+            log("超时，结束循环");
         """.trimIndent()),
-        Item("连续未找到后结束", "在成功截图的找图循环中使用；循环前设 misses = 0，point 为找图结果。", "循环", """
-            misses = point ? 0 : misses + 1;
-            if (misses >= 5) break;
+        Item("连续未找到后结束", "完整的找图循环：连续 5 次没找到就退出，找到则重置计数。", "循环", """
+            var template = images.read("images/按钮.png");
+            if (!template) exit();
+            var misses = 0;
+            try {
+                while (true) {
+                    var shot = captureScreen();
+                    try {
+                        if (!shot) { sleep(1000); continue; } // 截图失败不计次数
+                        var point = images.findImage(shot, template, { threshold: 0.88 });
+                        misses = point ? 0 : misses + 1;
+                        if (point) {
+                            click(point.x, point.y);
+                            sleep(1000);
+                        }
+                    } finally {
+                        images.release(shot);
+                    }
+                    if (misses >= 5) {
+                        log("连续 " + misses + " 次未找到，结束");
+                        break;
+                    }
+                    sleep(500);
+                }
+            } finally {
+                images.release(template);
+            }
         """.trimIndent()),
-        Item("保持每秒轮询", "循环开头记录 startedAt = Date.now()，这两行放在结尾。", "循环", """
-            var remaining = 1000 - (Date.now() - startedAt);
-            if (remaining > 0) sleep(remaining);
+        Item("保持每秒轮询", "每轮从循环开头计时，结尾补足到 1 秒，避免截屏耗时导致频率漂移。", "循环", """
+            while (true) {
+                var startedAt = Date.now();
+                log("本轮开始");
+                var remaining = 1000 - (Date.now() - startedAt);
+                if (remaining > 0) sleep(remaining);
+            }
         """.trimIndent()),
 
         // 固定坐标点击、重试来自天下五绝和各任务的导航步骤。
-        Item("点击后等待", "点击完成后留出 3 秒切换界面。", "点击", """
-            click(1777, 24);
-            sleep(3000);
+        Item("点击后等待", "点击完成后留出 3 秒切换界面，再继续下一步。", "点击", """
+            if (click(1777, 24)) {
+                sleep(3000);
+                log("第 1 步完成");
+            } else {
+                log("第 1 步点击失败");
+            }
         """.trimIndent()),
-        Item("点击失败就重试", "固定坐标点击未完成时，隔 1 秒重试。", "点击",
-            "while (!click(1777, 24)) sleep(1000);"),
+        Item("点击失败就重试", "固定坐标点击未完成时，隔 1 秒重试，超过 5 次放弃。", "点击", """
+            var tries = 0;
+            while (!click(1777, 24)) {
+                tries++;
+                if (tries >= 5) {
+                    toastLog("连续 5 次点击失败");
+                    exit();
+                }
+                sleep(1000);
+            }
+            log("点击成功，重试 " + tries + " 次");
+        """.trimIndent()),
 
         // 通天塔、帮派宣言、福地绳子、恩仇的等图与独立阈值。
-        Item("找图并点击", "shot 为有效截图，template 为已加载素材；阈值按图片调整。", "找图", """
-            var point = images.findImage(shot, template, { threshold: 0.88 });
-            if (point) click(point.x, point.y);
+        Item("找图并点击", "截屏、加载素材、找图并点击，最后释放图片。素材放到任务的 images/ 下。", "找图", """
+            var template = images.read("images/按钮.png");
+            if (!template) { toastLog("素材读取失败"); exit(); }
+            var shot = null;
+            try {
+                shot = captureScreen();
+                if (!shot) { toastLog("截图失败"); exit(); }
+                var point = images.findImage(shot, template, { threshold: 0.88 });
+                if (point) {
+                    click(point.x, point.y);
+                    log("已点击：", point.x, point.y);
+                } else {
+                    log("未找到按钮");
+                }
+            } finally {
+                images.release(shot);
+                images.release(template);
+            }
         """.trimIndent()),
-        Item("只在指定区域找图", "使用有效 shot、template；区域格式为 [x, y, 宽, 高]。", "找图", """
+        Item("只在指定区域找图", "只在 [x, y, 宽, 高] 范围内搜索，可避开背景里的相似图标。", "找图", """
             var region = [37, 593, 801, 160];
-            var point = images.findImage(shot, template, { region: region, threshold: 0.88 });
+            var template = images.read("images/按钮.png");
+            if (!template) { toastLog("素材读取失败"); exit(); }
+            var shot = null;
+            try {
+                shot = captureScreen();
+                if (!shot) { toastLog("截图失败"); exit(); }
+                var point = images.findImage(shot, template, { region: region, threshold: 0.88 });
+                if (point) {
+                    click(point.x, point.y);
+                    log("区域内已点击：", point.x, point.y);
+                } else {
+                    log("区域内未找到按钮");
+                }
+            } finally {
+                images.release(shot);
+                images.release(template);
+            }
         """.trimIndent()),
-        Item("等待图片出现", "先授权；最多等 8 秒，每秒检查一次，找到后点击。", "找图", """
+        Item("等待图片出现", "先授权截图；最多等 8 秒，每秒检查一次，找到后点击。", "找图", """
+            if (!requestScreenCapture()) { toastLog("截图授权失败"); exit(); }
             var point = waitImage("images/按钮.png", 8, 1, { threshold: 0.88 });
-            if (point) click(point.x, point.y);
+            if (point) {
+                click(point.x, point.y);
+                log("按钮已出现并点击");
+            } else {
+                log("等待 8 秒仍未出现");
+            }
+        """.trimIndent()),
+        Item("等待图片消失", "常用于等加载遮罩消失；超时返回 false 时再继续后续操作。", "找图", """
+            if (!requestScreenCapture()) { toastLog("截图授权失败"); exit(); }
+            if (waitImageVanish("images/加载中.png", 5, 0.5)) {
+                log("加载完成");
+                click(960, 540);
+            } else {
+                log("加载仍存在，稍后重试");
+            }
         """.trimIndent()),
 
         // 击败它们、区域确认中的 OCR、文字匹配与区域遍历。
-        Item("初始化 OCR", "首次识字前调用一次。", "OCR",
-            "if (!ocr.init()) { toastLog(\"OCR 初始化失败\"); exit(); }"),
-        Item("读取区域文字", "先初始化 OCR，shot 为有效截图。", "OCR", """
-            var text = ocr.recognizeText(shot, { region: [37, 593, 801, 160] });
-            log(text);
+        Item("初始化 OCR", "首次识字前调用一次；初始化失败直接结束脚本。", "OCR", """
+            if (!ocr.init()) {
+                toastLog("OCR 初始化失败");
+                exit();
+            }
+            log("OCR 已就绪：", ocr.ready());
         """.trimIndent()),
-        Item("识字后点击", "先初始化 OCR；在有效 shot 中忽略空格和符号查找文字。", "OCR", """
-            var line = ocr.findTextContains(shot, "击败它们");
-            if (line) click(line.centerX(), line.centerY());
+        Item("读取区域文字", "先初始化 OCR 并授权截图，再读取指定区域的文字。", "OCR", """
+            if (!ocr.init()) { toastLog("OCR 初始化失败"); exit(); }
+            if (!requestScreenCapture()) { toastLog("截图授权失败"); exit(); }
+            var shot = captureScreen();
+            if (!shot) { toastLog("截图失败"); exit(); }
+            try {
+                var text = ocr.recognizeText(shot, { region: [37, 593, 801, 160] });
+                log("识别结果：" + text);
+            } finally {
+                images.release(shot);
+            }
         """.trimIndent()),
-        Item("遍历区域识别结果", "先初始化 OCR，shot 为有效截图；逐行输出原文。", "OCR", """
+        Item("识字后点击", "在截图中忽略空格和符号查找文字，找到后点击整行中心。", "OCR", """
+            if (!ocr.init()) { toastLog("OCR 初始化失败"); exit(); }
+            if (!requestScreenCapture()) { toastLog("截图授权失败"); exit(); }
+            var shot = captureScreen();
+            if (!shot) { toastLog("截图失败"); exit(); }
+            try {
+                var line = ocr.findTextContains(shot, "击败它们");
+                if (line) {
+                    click(line.centerX(), line.centerY());
+                    log("已点击：" + line.text);
+                } else {
+                    log("未找到「击败它们」");
+                }
+            } finally {
+                images.release(shot);
+            }
+        """.trimIndent()),
+        Item("遍历区域识别结果", "先初始化 OCR 并授权截图，逐行输出识别到的文字及其中心坐标。", "OCR", """
+            if (!ocr.init()) { toastLog("OCR 初始化失败"); exit(); }
+            if (!requestScreenCapture()) { toastLog("截图授权失败"); exit(); }
+            var shot = captureScreen();
+            if (!shot) { toastLog("截图失败"); exit(); }
+            try {
+                var lines = ocr.recognize(shot, { region: [601, 570, 324, 130] });
+                for (var line of lines) {
+                    log(line.text, line.centerX(), line.centerY());
+                }
+            } finally {
+                images.release(shot);
+            }
+        """.trimIndent()),
+        Item("匹配确定或同意", "放在 OCR 结果遍历中：去掉空白后匹配「确定」或「同意」，只点一次后跳出。", "OCR", """
             var lines = ocr.recognize(shot, { region: [601, 570, 324, 130] });
-            for (var line of lines) log(line.text);
-        """.trimIndent()),
-        Item("匹配确定或同意", "放在 OCR 结果遍历中；line 为当前行，先去掉空白。", "OCR", """
-            var text = line.text.replace(/\s+/g, "");
-            if (/确定|同意/.test(text)) click(line.centerX(), line.centerY());
+            for (var line of lines) {
+                var text = line.text.replace(/\s+/g, "");
+                if (/确定|同意/.test(text)) {
+                    click(line.centerX(), line.centerY());
+                    break;
+                }
+            }
         """.trimIndent()),
 
         // 失败不推进、单帧最多点击一次、弹窗优先等任务判断。
-        Item("截图失败跳过本轮", "放在截图循环中，失败不计入连续未找到次数。", "判断", """
+        Item("截图失败跳过本轮", "放在截图循环中；截图失败不计入连续未找到次数。", "判断", """
+            while (true) {
+                var shot = captureScreen();
+                if (!shot) {
+                    sleep(1000);
+                    continue;
+                }
+                try {
+                    log("本轮截图正常");
+                } finally {
+                    images.release(shot);
+                }
+                sleep(1000);
+            }
+        """.trimIndent()),
+        Item("每轮只点击一次", "放在 OCR 遍历中匹配成功的分支，点完立刻 break，避免同帧重复点击。", "判断", """
+            var lines = ocr.recognize(shot, { region: [601, 570, 324, 130] });
+            for (var line of lines) {
+                var text = line.text.replace(/\s+/g, "");
+                if (/确定|同意/.test(text)) {
+                    click(line.centerX(), line.centerY());
+                    break;
+                }
+            }
+        """.trimIndent()),
+        Item("优先处理结束弹窗", "先判断结束弹窗，再判断背景按钮，避免误点背景内容。", "判断", """
             var shot = captureScreen();
-            if (!shot) { sleep(1000); continue; }
+            if (!shot) { toastLog("截图失败"); exit(); }
+            try {
+                if (images.existsImage(shot, "images/次数耗尽.png")) {
+                    log("次数已耗尽，结束脚本");
+                    exit();
+                }
+                if (images.existsImage(shot, "images/开始挑战.png")) {
+                    log("可以挑战");
+                }
+            } finally {
+                images.release(shot);
+            }
         """.trimIndent()),
-        Item("每轮只点击一次", "放在 OCR 遍历中匹配成功的分支；line 为匹配行。", "判断", """
-            click(line.centerX(), line.centerY());
-            break;
-        """.trimIndent()),
-        Item("优先处理结束弹窗", "shot 为有效截图；先准备对应素材，弹窗先于背景按钮判断。", "判断", """
-            if (images.existsImage(shot, "images/次数耗尽.png")) exit();
-            if (images.existsImage(shot, "images/开始挑战.png")) log("可以挑战");
-        """.trimIndent()),
-        Item("输出运行状态", "普通进度和未找到目标分别输出日志。", "判断", """
+        Item("输出运行状态", "普通进度用 log，异常提示用 console.warn/error，均输出到控制台。", "判断", """
             log("开始执行");
+            console.info("进度：第 1 步");
             console.warn("未找到目标，等待重试");
+            console.error("示例错误日志，不会结束脚本");
         """.trimIndent())
     )
 

@@ -26,6 +26,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
@@ -36,8 +37,7 @@ import androidx.compose.ui.unit.sp
 fun ScriptExamplesDialog(
     onDismiss: () -> Unit,
     onCopy: (title: String, code: String) -> Unit,
-    onInsert: (code: String, completeScript: Boolean) -> Unit,
-    onReplace: (title: String, code: String) -> Unit
+    onInsert: (code: String, completeScript: Boolean) -> Unit
 ) {
     var complete by remember { mutableStateOf(false) }
     var category by remember { mutableStateOf("全部") }
@@ -50,31 +50,37 @@ fun ScriptExamplesDialog(
 
     val preview = selected
     if (preview != null) {
+        // 预览布局：顶部说明与底部按钮区固定，中间代码区按内容自适应高度，
+        // 超出部分在代码区内单独滚动（同时支持横向滚动）
+        val scroll = rememberScrollState()
         AlertDialog(
             onDismissRequest = { selected = null },
             title = { Text(preview.title) },
             text = {
-                Column(
-                    modifier = Modifier.verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
+                Column {
                     Text(preview.description)
+                    // 代码区沿用编辑器的 JS 语法高亮，保持与编辑器一致的着色和行高
                     SelectionContainer {
-                        Text(preview.code, fontFamily = FontFamily.Monospace, fontSize = 12.sp,
-                            softWrap = false, modifier = Modifier.horizontalScroll(rememberScrollState()))
-                    }
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                        TextButton(onClick = { onInsert(preview.code, preview.completeScript) }) { Text("光标插入") }
-                        if (preview.completeScript) {
-                            TextButton(onClick = { onReplace(preview.title, preview.code) }) { Text("替换全文") }
-                        }
+                        Text(remember(preview.code) { JsHighlighter.highlight(preview.code) },
+                            fontFamily = FontFamily.Monospace, fontSize = 12.sp, lineHeight = 18.sp,
+                            softWrap = false,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f, fill = false)
+                                .verticalScroll(scroll)
+                                .horizontalScroll(rememberScrollState()))
                     }
                 }
             },
             confirmButton = {
-                Button(onClick = { onCopy(preview.title, preview.code) }) { Text("复制代码") }
-            },
-            dismissButton = { TextButton(onClick = { selected = null }) { Text("返回") } }
+                // 三个按钮放在同一行：返回 / 光标插入 / 复制代码
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(onClick = { selected = null }) { Text("返回") }
+                    TextButton(onClick = { onInsert(preview.code, preview.completeScript) }) { Text("光标插入") }
+                    Button(onClick = { onCopy(preview.title, preview.code) }) { Text("复制代码") }
+                }
+            }
         )
         return
     }
@@ -84,7 +90,7 @@ fun ScriptExamplesDialog(
         title = { Text("示例脚本") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(if (complete) "一个完整示例，展示全部公开 API。" else "每项 1～2 行，按需组合；点开后复制。",
+                Text(if (complete) "一个完整示例，展示全部公开 API。" else "每项都是可直接运行的完整片段，含截图、判断与释放；复制后按注释修改素材名和坐标。",
                     style = MaterialTheme.typography.bodySmall)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     ExampleFilterChip("关键用法", !complete) { complete = false }

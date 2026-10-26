@@ -134,7 +134,6 @@ class ScriptEditorActivity : ComponentActivity() {
     private fun EditorScreen() {
         var apiHelp by remember { mutableStateOf<ApiDocs.Item?>(null) }
         var showExamples by remember { mutableStateOf(false) }
-        var pendingReplacement by remember { mutableStateOf<Pair<String, String>?>(null) }
         val keyboard = LocalSoftwareKeyboardController.current
         Scaffold(
             containerColor = MaterialTheme.colorScheme.background,
@@ -258,26 +257,7 @@ class ScriptEditorActivity : ComponentActivity() {
                 onInsert = { code, completeScript ->
                     insertAtCursor(code, completeWord = false, block = completeScript)
                     showExamples = false
-                },
-                onReplace = { title, code ->
-                    showExamples = false
-                    if (content.text.isBlank()) replaceWithExample(code)
-                    else pendingReplacement = title to code
                 }
-            )
-        }
-        pendingReplacement?.let { (title, code) ->
-            AlertDialog(
-                onDismissRequest = { pendingReplacement = null },
-                title = { Text("替换当前脚本？") },
-                text = { Text("将当前编辑内容替换为「$title」。点击顶部“保存”后才会写入脚本文件；返回或切到后台不会保存本次替换。") },
-                confirmButton = {
-                    TextButton(onClick = {
-                        replaceWithExample(code)
-                        pendingReplacement = null
-                    }) { Text("确认替换") }
-                },
-                dismissButton = { TextButton(onClick = { pendingReplacement = null }) { Text("取消") } }
             )
         }
         apiHelp?.let { item ->
@@ -397,15 +377,6 @@ class ScriptEditorActivity : ComponentActivity() {
         content = TextFieldValue(newText, TextRange(newCursor))
         dirty = true
         contentVersion++
-    }
-
-    private fun replaceWithExample(code: String) {
-        content = TextFieldValue(code.trimEnd() + "\n", TextRange(0))
-        dirty = true
-        contentVersion++
-        requiresExplicitSave = true
-        errorLine = 0
-        errorHint = null
     }
 
     /** 后台串行保存快照；旧请求不能覆盖更新的保存请求。 */
