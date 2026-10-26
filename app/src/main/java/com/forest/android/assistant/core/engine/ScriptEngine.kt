@@ -79,7 +79,7 @@ object ScriptEngine {
         val session = Session()
         activeSession = session
         val outcome: RunOutcome = try {
-            ImageApi.debugLogger = { msg -> env.onLog('D', msg) }
+            ImageApi.debugLogger = { level, msg -> env.onLog(level, msg) }
             ImageApi.cancellationCheck = { checkStop(session) }
             quickJs {
                 defineGlobals(session, env)
@@ -388,7 +388,7 @@ object ScriptEngine {
                 )
                 -1L
             } else {
-                ImageApi.storeImage(bmp).toLong()
+                ImageApi.storeImage(bmp, "屏幕截图").toLong()
             }
         }
         guard("__img_read") { args ->

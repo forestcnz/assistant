@@ -26,26 +26,37 @@ object ImageApi {
 
     data class Point(val x: Int, val y: Int)
 
-    /** 调试日志钩子（引擎运行期注入，便于排查匹配问题） */
+    /** 匹配日志钩子：命中为 D（调试）、未命中为 W（警告）；引擎运行期注入 */
     @Volatile
-    var debugLogger: ((String) -> Unit)? = null
+    var debugLogger: ((Char, String) -> Unit)? = null
 
     @Volatile
     var cancellationCheck: (() -> Unit)? = null
 
     // —— JS 侧 Image 句柄：自增 id → Bitmap，避免把 Bitmap 暴露给 JS 引擎 ——
     private val images = ConcurrentHashMap<Int, Bitmap>()
+    // 图片来源名称（文件名 / "屏幕截图"）：仅在调试日志中标识模板路径，不参与匹配
+    private val imageNames = ConcurrentHashMap<Int, String>()
     private val templates = TemplateCache()
     private val screenGrays = ScreenGrayCache()
     private val nextId = AtomicInteger(1)
 
-    fun storeImage(bitmap: Bitmap): Int = nextId.getAndIncrement().also { images[it] = bitmap }
+    /** 存入图片句柄；[name] 用于日志中显示来源（文件名或“屏幕截图”） */
+    fun storeImage(bitmap: Bitmap, name: String = "截图"): Int =
+        nextId.getAndIncrement().also {
+            images[it] = bitmap
+            imageNames[it] = name
+        }
 
     fun image(id: Int?): Bitmap? = id?.let { images[it] }
+
+    /** 图片句柄的来源名称（文件名），未登记时返回 null */
+    fun imageName(id: Int): String? = imageNames[id]
 
     fun releaseImage(id: Int) {
         synchronized(templates) {
             images.remove(id)
+            imageNames.remove(id)
             templates.remove(id)
             screenGrays.removeImage(id)
         }
@@ -54,6 +65,7 @@ object ImageApi {
     fun clearImages() {
         synchronized(templates) {
             images.clear()
+            imageNames.clear()
             templates.clear()
             screenGrays.clear()
         }
@@ -61,12 +73,12 @@ object ImageApi {
 
     // ==================== 文件读写 ====================
 
-    /** 读图（相对路径基于脚本目录解析） */
+    /** 读图（相对路径基于脚本目录解析）；记录文件名，便于日志定位模板 */
     fun read(path: String, scriptDir: File): Int? {
         val f = resolve(path, scriptDir) ?: return null
         if (!f.isFile) return null
         val bmp = BitmapFactory.decodeFile(f.absolutePath) ?: return null
-        return storeImage(bmp)
+        return storeImage(bmp, f.name)
     }
 
     /** 保存图片；format 支持 png/jpg（默认按扩展名，quality 默认 100） */
@@ -284,13 +296,23 @@ object ImageApi {
         region: IntArray?,
         max: Int
     ): List<Match> {
+        // 模板来源名（文件名），用于日志定位；未知句柄退回 id
+        val tplName = imageName(tplId) ?: "image#$tplId"
+        // 无法进入匹配流程时同样按失败记 W，避免只看到“找不到”却不知道原因
+        fun fail(reason: String): List<Match> {
+            debugLogger?.invoke('W', "${tplName}找图失败 $reason")
+            return emptyList()
+        }
         if (max <= 0) return emptyList()
-        val screen = image(imageId) ?: return emptyList()
-        val tpl = image(tplId) ?: return emptyList()
-        val r = clampRegion(region, screen.width, screen.height) ?: return emptyList()
+        val screen = image(imageId) ?: return fail("原因=截屏句柄无效")
+        val tpl = image(tplId) ?: return fail("原因=模板句柄无效")
+        val r = clampRegion(region, screen.width, screen.height) ?: return fail("原因=搜索区域无效")
         val tw = tpl.width
         val th = tpl.height
-        if (tw <= 0 || th <= 0 || tw > r.width() || th > r.height()) return emptyList()
+        if (tw <= 0 || th <= 0) return fail("原因=模板尺寸无效")
+        if (tw > r.width() || th > r.height()) {
+            return fail("tpl=${tw}x$th region=${r.width()}x${r.height()} 原因=模板大于搜索区")
+        }
 
         val currentCheck = cancellationCheck ?: {}
         val bitmapGeneration = screen.generationId
@@ -313,11 +335,14 @@ object ImageApi {
             return Gray(width, height, pixels, currentCheck)
         }
         val prepared = synchronized(templates) {
-            if (images[tplId] !== tpl) return emptyList()
-            templates.getOrPut(tplId, tpl.generationId) { TemplateMatcher.PreparedTemplate(tpl.toGray()) }
-        }
+            if (images[tplId] !== tpl) null
+            else templates.getOrPut(tplId, tpl.generationId) {
+                TemplateMatcher.PreparedTemplate(tpl.toGray())
+            }
+        } ?: return fail("原因=模板已释放")
         return TemplateMatcher.find(
-            grayScreen, prepared, threshold, max, r.left, r.top, debugLogger, ::screenLevel
+            grayScreen, prepared, threshold, max, r.left, r.top, debugLogger, ::screenLevel,
+            tplName = tplName
         )
             .map { Match(it.x, it.y, it.score) }
     }

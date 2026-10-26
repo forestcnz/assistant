@@ -37,10 +37,23 @@ internal object TemplateMatcher {
         max: Int,
         offsetX: Int = 0,
         offsetY: Int = 0,
-        debugLogger: ((String) -> Unit)? = null,
-        screenLevelProvider: ((Int) -> Gray)? = null
+        /** 日志回调：命中写 D（调试），未命中写 W（警告） */
+        logger: ((Char, String) -> Unit)? = null,
+        screenLevelProvider: ((Int) -> Gray)? = null,
+        /** 模板来源名称（文件名），仅用于日志 */
+        tplName: String? = null
     ): List<Match> {
-        if (max <= 0 || prepared.gray.w > grayScreen.w || prepared.gray.h > grayScreen.h) return emptyList()
+        // 日志前缀：模板来源文件名，便于区分多个模板
+        val logPrefix = tplName?.let { "$it " } ?: ""
+        if (max <= 0 || prepared.gray.w > grayScreen.w || prepared.gray.h > grayScreen.h) {
+            // 模板比搜索区还大属于不可匹配，同样按失败记入 W
+            logger?.invoke(
+                'W',
+                "${logPrefix}找图失败 tpl=${prepared.gray.w}x${prepared.gray.h} " +
+                        "region=${grayScreen.w}x${grayScreen.h} 原因=模板大于搜索区"
+            )
+            return emptyList()
+        }
         val tw = prepared.gray.w
         val th = prepared.gray.h
         val grayTpl = prepared.gray
@@ -57,21 +70,38 @@ internal object TemplateMatcher {
         val coarse = scanCoarseByMad(cs, ct, coarseRegion, limit = max(16, max * 8))
         val candidates = refine(grayScreen, grayTpl, tplStats, coarse, scale,
             localRegion, prepared, screenLevelProvider)
-        debugLogger?.invoke(
-            "match tpl=${tw}x$th scale=$scale thr=$threshold coarse=${coarse.size} " +
-                    "best=" + (candidates.maxByOrNull { it.score }
-                ?.let { "(${it.x + offsetX},${it.y + offsetY})=${"%.3f".format(it.score)}" } ?: "-")
-        )
+        // 最高分候选：同时用于日志与失败判定
+        val best = candidates.maxByOrNull { it.score }
+        val bestText = best?.let {
+            "(${it.x + offsetX},${it.y + offsetY})=${"%.3f".format(it.score)}"
+        } ?: "-"
 
-        return candidates
+        val hits = candidates
             .filter { it.score >= threshold }
             .sortedByDescending { it.score }
             .let { aggregate(it, max(4, min(tw, th) / 2)) }
-            .let { hits ->
+            .let { aggregated ->
                 // max=1 语义为“最佳匹配”，按分数取；多结果按从左到右、从上到下排序
-                if (max == 1) hits.sortedByDescending { it.score }.take(1)
-                else hits.sortedWith(compareBy({ it.y }, { it.x })).take(max)
+                if (max == 1) aggregated.sortedByDescending { it.score }.take(1)
+                else aggregated.sortedWith(compareBy({ it.y }, { it.x })).take(max)
             }.map { Match(it.x + offsetX, it.y + offsetY, it.score) }
+
+        // 未达到阈值（含无任何候选）记为警告，命中则保持调试级别
+        if (hits.isEmpty()) {
+            logger?.invoke(
+                'W',
+                "${logPrefix}找图失败 tpl=${tw}x$th scale=$scale thr=$threshold " +
+                        "coarse=${coarse.size} best=$bestText 原因=未达到阈值"
+            )
+        } else {
+            logger?.invoke(
+                'D',
+                "${logPrefix}match tpl=${tw}x$th scale=$scale thr=$threshold " +
+                        "coarse=${coarse.size} best=$bestText"
+            )
+        }
+
+        return hits
     }
 
     /**
