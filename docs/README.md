@@ -24,6 +24,8 @@ APK：`app/build/outputs/apk/debug/app-debug.apk`、`app/build/outputs/apk/relea
 
 脚本开发请查阅[完整脚本 API 参考](script-api.md)：覆盖当前 63 个公开方法，以及参数类型、默认值、时间与坐标单位、返回值、任务配置和完整示例。
 
+从操作说明编写任务可参考[任务脚本编写指南](script-writing-guide.md)：包含独立图片阈值、等待与停止条件、区域 OCR、中文注释和单任务打包约定。
+
 首次使用时按需启用无障碍服务，并授权屏幕捕获。图片匹配和 OCR 需要截图权限；点击和滑动需要无障碍权限。
 
 应用在「任务」中创建或导入脚本。脚本图片路径相对于任务目录。
@@ -120,5 +122,6 @@ F7:7A:A4:98:D5:8C:F2:29:68:5C:33:59:44:42:3A:CF:BD:E3:11:20:09:1D:C1:F3:6A:6C:02
 ## 相关文档
 
 - [完整脚本 API 参考](script-api.md)：全部脚本方法及参数说明。
+- [任务脚本编写指南](script-writing-guide.md)：结合现有任务总结脚本结构、识别、循环和打包方式。
 - [设备认证（ECDSA 许可证）设计方案](device-auth-ecdsa.md)：一机一证的设备码、许可证格式、签发与校验流程。
 - [性能优化方案与行为一致性验收](performance-optimization-plan.md)。
