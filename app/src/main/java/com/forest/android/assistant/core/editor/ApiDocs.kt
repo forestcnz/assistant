@@ -129,6 +129,56 @@ object ApiDocs {
         ),
         Item("ocr.findAllText", "ocr.findAllText(image, text, options?)", "ocr.findAllText(captureScreen(), \"运行\")", "精确匹配优先，否则返回包含匹配的 OcrItem[]；支持 options.region",
             "findAllText(image: any, text: string, options?: OcrOptions): OcrItem[];"),
+        Item(
+            "ocr.findTextAny", "ocr.findTextAny(image, texts, options?)",
+            "ocr.findTextAny(captureScreen(), [\"确定\", \"同意\"])",
+            "一次 OCR 命中任意关键词：行顺序优先，同一行内取 texts 靠前的关键词。匹配规则同 findTextContains（忽略空格、标点、全角差异）。返回额外带 matched 字段的 OcrItem，无命中或关键词清理后全为空时返回 null。options.region 为 [x, y, width, height]。",
+            "findTextAny(image: any, texts: string[], options?: OcrOptions): OcrItem | null;"
+        ),
+
+        // —— 等待与批量操作（新增）——
+        Item(
+            "waitImageClick", "waitImageClick(tpl, timeout, interval, options?)",
+            "waitImageClick(\"images/btn.png\", 0, 1, { threshold: 0.88 });",
+            "轮询等图出现并点击中心。timeout 单位秒：省略或负数=一直等到停止，0=只查一次，正数=最多等待秒数。options 支持 threshold、region、delay（点击后等待毫秒）、missLimit（连续未找到多少次后返回 false，0 不限）。只有成功截图却未匹配才计数；找到即清零，点击失败不推进。",
+            null
+        ),
+        Item(
+            "images.findImageAny", "images.findImageAny(img, templates, options?)",
+            "images.findImageAny(captureScreen(), [{ tpl: a, name: 'a' }, b])",
+            "单帧内按数组顺序查找多个模板，首个命中即返回，数组顺序即优先级（不比较分数）。条目支持 ImageRef、路径字符串或 { tpl, threshold, name }。返回 { x, y, index, name } 或 null。",
+            null
+        ),
+        Item(
+            "waitImageAny", "waitImageAny(templates, timeout, interval, options?)",
+            "waitImageAny([{ tpl: reward, name: 'reward' }, quick], 0, 1)",
+            "轮询等待多个模板中任意一个出现。timeout 秒：省略或负数=一直等到停止，0=只查一次。options 支持 threshold、region、missLimit。返回 { x, y, index, name } 或 null。截图失败不计入未找到。",
+            null
+        ),
+        Item(
+            "waitTextClick", "waitTextClick(texts, timeout, interval, options?)",
+            "waitTextClick([\"确定\", \"同意\"], 0, 1, { region: [0, 0, 1920, 1080] })",
+            "轮询截图 → OCR → 命中任意关键词后点击整行中心。timeout 秒：省略或负数=一直等到停止，0=只查一次。interval 默认 1 秒，按本轮开始补足周期。options 支持 region、delay（点击后等待毫秒）、missLimit。",
+            null
+        ),
+        Item(
+            "images.readAll", "images.readAll(source)",
+            "images.readAll({ a: \"images/a.png\", b: \"images/b.png\" })",
+            "批量读图。source 为路径数组或「键名→路径」对象。数组入参返回等长数组、对象入参返回同 key 对象，失败位置为 null；missing 为失败路径数组。",
+            null
+        ),
+        Item(
+            "images.releaseAll", "images.releaseAll(...targets)",
+            "images.releaseAll(t.images, shot)",
+            "批量释放图片句柄。参数可混用句柄、数组、对象和 null，递归展开并按内部 id 去重；返回实际释放数量。",
+            null
+        ),
+        Item(
+            "clickRetry", "clickRetry(x, y, times, interval, duration)",
+            "clickRetry(1777, 24, 3, 500);",
+            "固定坐标点击失败时重试。times 含首次、默认 3，0 表示一直重试直到停止；interval 为失败后等待毫秒（默认 500）；duration 透传给 click（默认 30ms）。",
+            null
+        ),
 
         // —— adapter ——
         Item("adapter.setDesignSize", "adapter.setDesignSize(w, h)", "adapter.setDesignSize(1080, 1920);", "声明设计基准分辨率"),
@@ -165,8 +215,14 @@ object ApiDocs {
         appendLine()
         appendLine("interface Point { x: number; y: number; }")
         appendLine("interface Rect { left: number; top: number; right: number; bottom: number; }")
-        appendLine("interface OcrItem extends Rect { text: string; bounds: Rect; confidence: number; centerX(): number; centerY(): number; }")
+        appendLine("interface OcrItem extends Rect { text: string; bounds: Rect; confidence: number; matched?: string; centerX(): number; centerY(): number; }")
         appendLine("interface OcrOptions { region?: [number, number, number, number]; }")
+        // 多模板匹配结果：index 为传入数组下标，name 为条目 name/路径
+        appendLine("interface AnyMatch { x: number; y: number; index: number; name: string; }")
+        // 模板条目：可直接传句柄/路径，也可用对象覆盖阈值与名称
+        appendLine("interface TemplateEntry { tpl: any; threshold?: number; name?: string; }")
+        // images.readAll 的结果：数组入参返回数组，对象入参返回同 key 对象
+        appendLine("interface ReadAllResult { images: any; missing: string[]; }")
         appendLine()
         items.filter { '.' !in it.name }.forEach { item ->
             appendLine("/** ${item.doc} */")

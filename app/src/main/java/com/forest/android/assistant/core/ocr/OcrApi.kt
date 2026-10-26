@@ -148,6 +148,19 @@ object OcrApi {
         return OcrTextMatcher.findContains(recognize(bitmap, region), text)
     }
 
+    /** 多关键词命中的结果：[item] 为匹配行，[keyword] 为命中的原始关键词 */
+    data class KeywordMatch(val item: Item, val keyword: String)
+
+    /**
+     * 多关键词宽松包含匹配：只执行一次 OCR，再按行顺序找首个命中任意关键词的行。
+     * 全部关键词清理后为空时直接返回 null，不触发识别。
+     */
+    fun findContainsAny(bitmap: Bitmap, texts: List<String>, region: IntArray?): KeywordMatch? {
+        // 先判空，避免无效查询触发一次完整 OCR
+        if (texts.none { OcrTextMatcher.normalize(it).isNotEmpty() }) return null
+        return OcrTextMatcher.findContainsAny(recognize(bitmap, region), texts)
+    }
+
     private fun clampRegion(region: IntArray?, w: Int, h: Int): Rect? {
         if (region == null || region.size < 4) return null
         val x = region[0].coerceIn(0, w - 1)

@@ -156,7 +156,22 @@ function findDeclarationTask(shot) {
 
 ## 6. 等待、重试与连续未找到次数
 
-下面的帮助函数接收专用匹配函数，例如 `findStart`。帮助函数只负责截图和等待，不持有公共图片阈值：
+**优先使用内置等待接口**：`waitImageClick`、`waitImageAny`、`waitTextClick` 已经内置了“截图失败不计数、找到即清零、点击失败不推进、逐帧释放截图”这些规则，直接调用比手写帮助函数更可靠。
+
+```javascript
+// 默认不限时，一直等到出现或手动停止
+waitImageClick(declarationTask, 0, 1, {
+    threshold: 0.88, delay: 3000, missLimit: 3
+});
+
+// 一帧内判断多个状态，数组顺序即优先级
+var hit = waitImageAny([
+    { tpl: reward, threshold: 0.88, name: "reward" },
+    { tpl: quick,  threshold: 0.88, name: "quick" }
+], 0, 1);
+```
+
+只有需要自定义判断逻辑（例如同帧做多次额外校验）时，才手写下面的帮助函数。它接收专用匹配函数，例如 `findStart`，只负责截图和等待，不持有公共图片阈值：
 
 ```javascript
 function scanScreen(findPoint) {
@@ -212,7 +227,22 @@ if (!waitAndClick(findDeclarationTask, "选择帮派宣言", 3)) {
 }
 ```
 
-“连续 N 次找不到”的计数规则：成功截图却没有匹配才加一；找到图片就清零，包括找到后点击失败的情况；截图失败不增加次数。截图失败本身不能证明图片已经消失。
+“连续 N 次找不到”的计数规则：成功截图却没有匹配才加一；找到图片就清零，包括找到后点击失败的情况；截图失败不增加次数。截图失败本身不能证明图片已经消失。内置的 `waitImageClick` / `waitImageAny` / `waitTextClick` 的 `options.missLimit` 就是按这个规则实现的。
+
+批量素材用 `images.readAll` 加载、`images.releaseAll` 释放，避免每个任务重复写 `for...in`：
+
+```javascript
+var t = images.readAll({ start: "images/进行帮派任务.png", task: "images/帮派宣言.png" });
+if (t.missing.length) {
+    console.error("缺少图片：" + t.missing.join("、"));
+    exit();
+}
+try {
+    // 业务步骤
+} finally {
+    images.releaseAll(t.images);
+}
+```
 
 在业务循环中也可以用 `break` 结束循环，但达到停止条件后不能继续执行领取、使用或交付步骤。`exit()` 结束当前宿主执行轮次；宿主配置了多轮时仍可能运行下一轮。因此内部控制完整流程的任务通常配合 `loop.count: 1`。
 

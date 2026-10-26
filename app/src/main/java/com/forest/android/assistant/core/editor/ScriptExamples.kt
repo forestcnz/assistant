@@ -324,16 +324,96 @@ object ScriptExamples {
             console.info("进度：第 1 步");
             console.warn("未找到目标，等待重试");
             console.error("示例错误日志，不会结束脚本");
+        """.trimIndent()),
+
+        // 新增 API：等图点击、多状态识别、批量读写、多关键词 OCR。
+        Item("等图点击", "轮询等待图片出现并点击。timeout 省略表示一直等到停止，missLimit 控制连续未找到次数。", "找图", """
+            // timeout 省略 = 一直等到停止；delay 为点击后等待的毫秒数
+            if (!waitImageClick("images/按钮.png", 0, 1, {
+                threshold: 0.88, delay: 3000, missLimit: 3
+            })) {
+                toastLog("连续 3 次未找到按钮");
+                exit();
+            }
+            log("按钮已点击");
+        """.trimIndent()),
+        Item("多状态识别", "一帧内按数组顺序匹配多个模板，首个命中即返回；数组顺序就是优先级。", "找图", """
+            var shot = captureScreen();
+            if (!shot) { toastLog("截图失败"); exit(); }
+            try {
+                var hit = images.findImageAny(shot, [
+                    { tpl: "images/次数耗尽.png", threshold: 0.86, name: "exhausted" },
+                    { tpl: "images/战败.png", threshold: 0.88, name: "defeated" },
+                    { tpl: "images/随机战.png", threshold: 0.88, name: "random" }
+                ]);
+                if (hit) log("命中：" + hit.name + " 下标 " + hit.index);
+            } finally {
+                images.release(shot);
+            }
+        """.trimIndent()),
+        Item("等任一状态出现", "轮询多个模板，谁先出现就返回谁；适合弹窗优先于背景按钮的分支判断。", "找图", """
+            var hit = waitImageAny([
+                { tpl: "images/排名奖励.png", threshold: 0.88, name: "reward" },
+                { tpl: "images/快速通关.png", threshold: 0.88, name: "quick" }
+            ], 0, 1);
+            if (hit && hit.name === "reward") {
+                log("需要先领奖");
+            } else if (hit) {
+                log("可直接进入下一步");
+            }
+        """.trimIndent()),
+        Item("批量读图与释放", "一次性加载全部素材并检查缺失；结束时统一释放，重复句柄只算一次。", "准备", """
+            var t = images.readAll({
+                elder: "images/云中易.png",
+                enter: "images/进入恩仇录.png"
+            });
+            if (t.missing.length) {
+                console.error("缺少图片：" + t.missing.join("、"));
+                exit();
+            }
+            try {
+                log("素材已加载");
+            } finally {
+                images.releaseAll(t.images);
+            }
+        """.trimIndent()),
+        Item("多关键词 OCR 点击", "一次识别匹配多个关键词，命中后点击整行中心。", "OCR", """
+            var shot = captureScreen();
+            if (!shot) { toastLog("截图失败"); exit(); }
+            try {
+                var line = ocr.findTextAny(shot, ["确定", "同意"], {
+                    region: [1702, 425, 192, 92]
+                });
+                if (line) {
+                    log("命中关键词：" + line.matched);
+                    click(line.centerX(), line.centerY());
+                }
+            } finally {
+                images.release(shot);
+            }
+        """.trimIndent()),
+        Item("常驻监听文字", "轮询 OCR，命中任意关键词就点击；timeout 省略表示一直等到停止。", "OCR", """
+            waitTextClick(["击败它们"], 0, 1, {
+                region: [37, 593, 801, 160],
+                delay: 1000
+            });
+        """.trimIndent()),
+        Item("固定坐标重试", "点击通道未受理时自动重试；times 含首次，0 表示一直重试到停止。", "点击", """
+            if (!clickRetry(1777, 24, 3, 500)) {
+                toastLog("打开地图失败");
+                exit();
+            }
+            log("地图已打开");
         """.trimIndent())
     )
 
     val completeExample = Item(
         title = "完整示例：全部 API",
-        description = "展示全部 63 个公开方法。会截图、OCR、保存演示图片及执行手势；运行前修改文字与点击坐标。",
+        description = "展示全部 71 个公开方法。会截图、OCR、保存演示图片及执行手势；运行前修改文字与点击坐标。",
         category = "完整示例",
         completeScript = true,
         code = """
-            // 完整 API 示例：全部 63 个公开函数/方法及公开属性。
+            // 完整 API 示例：全部 71 个公开函数/方法及公开属性。
             // 素材从本次截图生成，无需提前导入；图片保存到任务的 output/ 目录。
             // 会实际执行点击、滑动和多指手势，请先修改下方坐标与查询文字。
             var query = "确定";
@@ -384,13 +464,21 @@ object ScriptExamples {
                 template = images.read(output + "-template.png");
                 if (!template) { toastLog("演示素材读取失败"); exit(); }
                 log("保存截图：", images.save(shot, output + "-screen.png", "png", 100));
+                // 批量读图：一次加载多个素材并检查缺失
+                var batch = images.readAll({ template: output + "-template.png" });
+                log("批量读图缺失：", batch.missing.length);
+                images.releaseAll(batch.images);
 
-                // 6. 找图：单个、多个、是否存在、指定范围。
+                // 6. 找图：单个、多模板、多个、是否存在、指定范围。
                 var options = { region: region, threshold: 0.88 };
                 var point = images.findImage(shot, template, options);
                 log("匹配中心：", JSON.stringify(point));
+                // 多模板：数组顺序即优先级，首个命中即返回
+                log("多模板匹配：", JSON.stringify(images.findImageAny(shot, [
+                    { tpl: template, threshold: 0.88, name: "demo" }
+                ])));
                 log("全部匹配：", JSON.stringify(images.findAllImages(shot, template, { threshold: 0.88, max: 3 })));
-                log("是否存在：", images.existsImage(shot, template, options));
+                log("是否存在：", JSON.stringify(images.existsImage(shot, template, options)));
                 log("范围找图：", JSON.stringify(images.findImageInRegion(shot, template, 0, 0, 1920, 1080, 0.88)));
 
                 // 7. 取色、单色查找、多点找色；偏移量是实际像素。
@@ -418,16 +506,26 @@ object ScriptExamples {
                 var foundText = ocr.findTextContains(shot, query, { region: region });
                 log("忽略空格和符号：", JSON.stringify(foundText));
                 log("全部文字匹配：", JSON.stringify(ocr.findAllText(shot, query, { region: region })));
+                // 多关键词：一次识别命中任意关键词，返回带 matched 的 OcrItem
+                var anyText = ocr.findTextAny(shot, [query, "取消"], { region: region });
+                log("多关键词 OCR：", anyText ? anyText.matched : null);
                 log("找图后识字：", JSON.stringify(images.findImageWithText(shot, template, { threshold: 0.88, padding: 8 })));
 
                 // 9. 等图出现/消失：超时和间隔单位均为秒。目标不消失时返回 false。
                 log("等待出现：", JSON.stringify(waitImage(template, 2, 0.5, { threshold: 0.88 })));
                 log("等待消失：", waitImageVanish(template, 2, 0.5, { threshold: 0.88 }));
+                // 新增等待接口：timeout 省略=不限时，0=只查一次，正数=限时秒数
+                log("等图点击：", waitImageClick(template, 0, 0.5, { threshold: 0.88 }));
+                log("等任一图：", JSON.stringify(waitImageAny([
+                    { tpl: template, threshold: 0.88, name: "demo" }
+                ], 0, 0.5)));
+                log("等文字点击：", waitTextClick([query], 0, 0.5, { region: region }));
 
                 // 10. 点击与手势：这里会实际操作屏幕，坐标按上方设计分辨率。
                 log("点击：", click(x, y));
                 sleep(500);
                 log("随机偏移点击：", clickRandom(x, y, 5, 100));
+                log("固定坐标重试：", clickRetry(x, y, 2, 200));
                 log("长按：", longClick(x, y, 600));
                 log("定时按压：", press(x, y, 800));
                 log("滑动：", swipe(960, 800, 960, 300, 500));
@@ -438,9 +536,8 @@ object ScriptExamples {
                 }
             } finally {
                 // 11. 正常结束或提前退出时释放本示例持有的图片，再取消坐标适配。
-                images.release(template);
-                images.release(crop);
-                images.release(shot);
+                // releaseAll 接受句柄、数组和对象，按内部 id 去重。
+                images.releaseAll(template, crop, shot);
                 adapter.reset();
             }
             toastLog("完整 API 示例结束");

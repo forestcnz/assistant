@@ -428,6 +428,15 @@ object ScriptEngine {
             val text = args.getOrNull(1)?.toString() ?: return@guard emptyList<Any>()
             OcrApi.findContains(bmp, text, regionOf(args, 2))?.let { ocrItem(it) } ?: emptyList<Any>()
         }
+        // 多关键词：一次 OCR 命中任意关键词即返回 [文字, left, top, right, bottom, confidence, 命中词]
+        guard("__ocr_find_contains_any") { args ->
+            val bmp = ImageApi.image((args.getOrNull(0) as? Number)?.toInt()) ?: return@guard emptyList<Any>()
+            val texts = flattenStrings(args.getOrNull(1))
+            if (texts.isEmpty()) return@guard emptyList<Any>()
+            OcrApi.findContainsAny(bmp, texts, regionOf(args, 2))?.let { match ->
+                ocrItem(match.item) + listOf(match.keyword)
+            } ?: emptyList<Any>()
+        }
 
         // —— adapter 分辨率适配（API 第 6 节）——
         guard("__adapter_set") { args ->
@@ -590,6 +599,12 @@ object ScriptEngine {
 
     private fun numArg(args: Array<Any?>, index: Int): Long =
         (args.getOrNull(index) as? Number)?.toLong() ?: 0L
+
+    /** JS 数组 → 字符串列表（非字符串项转成文本，null/undefined 忽略） */
+    private fun flattenStrings(arg: Any?): List<String> = when (arg) {
+        is List<*> -> arg.mapNotNull { it?.toString()?.takeIf(String::isNotEmpty) }
+        else -> emptyList()
+    }
 
     /** 模板引用：数字 = Image 句柄，字符串 = 相对脚本目录的路径 */
     private fun resolveTemplate(arg: Any?, scriptDir: File): Int? = when (arg) {
@@ -965,6 +980,285 @@ waitImageVanish = function(tpl, timeout, interval, options) {
         if (Date.now() >= deadline) return false;
         sleep(Math.max(50, Math.round(interval * 1000)));
     }
+};
+
+// ==================== 新增 API：等待点击、多模板/多关键词匹配 ====================
+// 超时语义统一：省略或负数 = 一直等到手动停止；0 = 只检查一次；正数 = 最多等待的秒数。
+// 内部用 Infinity 作为截止时间，但它不出现在对外接口上。
+function __deadline(timeout) {
+    if (timeout === undefined || timeout === null) return Infinity;
+    var t = Number(timeout);
+    if (isNaN(t) || t < 0) return Infinity;
+    return Date.now() + t * 1000;
+}
+// 未命中后的等待毫秒数；最小 50ms，避免空转
+function __gap(interval) {
+    var v = (interval === undefined) ? 0.5 : Number(interval);
+    if (!isFinite(v) || v <= 0) v = 0.5;
+    return Math.max(50, Math.round(v * 1000));
+}
+
+// 模板条目：支持 ImageRef、路径字符串、{ tpl, threshold, name } 三种写法
+function __tplEntries(templates) {
+    var out = [];
+    if (!templates || !templates.length) return out;
+    for (var i = 0; i < templates.length; i++) {
+        var e = templates[i];
+        if (e === null || e === undefined) continue;
+        if (typeof e === 'object' && e.tpl !== undefined) {
+            out.push({ tpl: e.tpl, threshold: e.threshold, name: e.name == null ? '' : String(e.name) });
+        } else {
+            out.push({ tpl: e, threshold: undefined, name: (typeof e === 'string') ? e : '' });
+        }
+    }
+    return out;
+}
+
+// 在单帧内按数组顺序查找多个模板，首个命中即返回（数组顺序即优先级，不比较分数）
+function __findAnyIn(shot, entries, options) {
+    var base = __opt(options, 'threshold', 0.9);
+    var region = __opt(options, 'region', null);
+    for (var i = 0; i < entries.length; i++) {
+        var e = entries[i];
+        var tpl = __tplRef(e.tpl);
+        if (tpl === -1) continue;                        // 无效句柄/路径读取失败：跳过该条目
+        var p = images.findImage(shot, e.tpl, {
+            threshold: (e.threshold === undefined || e.threshold === null) ? base : e.threshold,
+            region: region
+        });
+        if (p) return { x: p.x, y: p.y, index: i, name: e.name };
+    }
+    return null;
+}
+
+// images.findImageAny：单帧多模板匹配
+images.findImageAny = function(img, templates, options) {
+    var id = __img(img);
+    if (id < 0) return null;
+    var entries = __tplEntries(templates);
+    if (!entries.length) return null;
+    var shot = __wrapImage(id);
+    if (!shot) return null;
+    return __findAnyIn(shot, entries, options);
+};
+
+// 轮询等待多个模板中的任意一个出现
+waitImageAny = function(templates, timeout, interval, options) {
+    var entries = __tplEntries(templates);
+    if (!entries.length) return null;
+    var missLimit = __opt(options, 'missLimit', 0);
+    if (!__capture_ready() && !__request_capture()) return null;
+    var deadline = __deadline(timeout);
+    var gap = __gap(interval);
+    var misses = 0, retries = 0;
+    while (true) {
+        var shot = captureScreen();
+        if (shot) {
+            var hit = null;
+            try {
+                hit = __findAnyIn(shot, entries, options);
+            } finally {
+                images.release(shot);
+            }
+            if (hit) return hit;
+            // 只有成功截图却没命中才计数；截图失败不能证明目标不存在
+            misses++;
+            if (missLimit > 0 && misses >= missLimit) {
+                console.warn('waitImageAny：连续 ' + misses + ' 次未找到，结束等待');
+                return null;
+            }
+        }
+        retries++;
+        if (retries === 1 || retries % 10 === 0) {
+            console.warn('waitImageAny：重试 ' + retries + ' 次，连续未找到 ' + misses + ' 次');
+        }
+        if (Date.now() >= deadline) return null;
+        sleep(gap);
+    }
+};
+
+// 轮询等图出现并点击；missLimit > 0 时连续未找到达到次数即返回 false
+waitImageClick = function(tpl, timeout, interval, options) {
+    var missLimit = __opt(options, 'missLimit', 0);
+    var delay = __opt(options, 'delay', 0);
+    if (!__capture_ready() && !__request_capture()) return false;
+    var deadline = __deadline(timeout);
+    var gap = __gap(interval);
+    var misses = 0, retries = 0;
+    while (true) {
+        var shot = captureScreen();
+        if (shot) {
+            var point = null;
+            try {
+                point = images.findImage(shot, tpl, options);
+            } finally {
+                images.release(shot);
+            }
+            if (point) {
+                misses = 0;                              // 找到即清零，点击失败也不推进步骤
+                if (click(point.x, point.y)) {
+                    if (delay > 0) sleep(delay);
+                    return true;
+                }
+                console.warn('waitImageClick：点击未完成，重新定位');
+            } else {
+                misses++;
+                if (missLimit > 0 && misses >= missLimit) {
+                    console.warn('waitImageClick：连续 ' + misses + ' 次未找到，结束等待');
+                    return false;
+                }
+            }
+        }
+        retries++;
+        if (retries === 1 || retries % 10 === 0) {
+            console.warn('waitImageClick：重试 ' + retries + ' 次，连续未找到 ' + misses + ' 次');
+        }
+        if (Date.now() >= deadline) return false;
+        sleep(gap);
+    }
+};
+
+// ocr.findTextAny：一次 OCR 命中任意关键词，返回带 matched 的 OcrItem
+ocr.findTextAny = function(image, texts, options) {
+    var list = [];
+    if (texts && texts.length) {
+        for (var i = 0; i < texts.length; i++) {
+            if (texts[i] !== null && texts[i] !== undefined) list.push(String(texts[i]));
+        }
+    }
+    if (!list.length) return null;
+    var r = __regionArgs(options);
+    var raw = __ocr_find_contains_any(__img(image), list, r[0], r[1], r[2], r[3]);
+    if (!raw || !raw.length) return null;
+    var item = __ocrItem(raw);
+    item.matched = raw[6];                              // 实际命中的关键词原文
+    return item;
+};
+
+// waitTextClick：轮询截图 → OCR → 命中任意关键词后点击整行中心
+waitTextClick = function(texts, timeout, interval, options) {
+    var list = [];
+    if (texts && texts.length) {
+        for (var i = 0; i < texts.length; i++) {
+            if (texts[i] !== null && texts[i] !== undefined) list.push(String(texts[i]));
+        }
+    }
+    if (!list.length) return false;
+    if (!ocr.ready() && !ocr.init()) return false;
+    if (!__capture_ready() && !__request_capture()) return false;
+    var missLimit = __opt(options, 'missLimit', 0);
+    var delay = __opt(options, 'delay', 0);
+    var deadline = __deadline(timeout);
+    var gap = __gap(interval === undefined ? 1 : interval);
+    var misses = 0, retries = 0;
+    while (true) {
+        var startedAt = Date.now();
+        var shot = captureScreen();
+        if (shot) {
+            var found = null;
+            try {
+                found = ocr.findTextAny(shot, list, options);
+            } finally {
+                images.release(shot);
+            }
+            if (found) {
+                if (click(found.centerX(), found.centerY())) {
+                    if (delay > 0) sleep(delay);
+                    return true;
+                }
+                console.warn('waitTextClick：点击未完成，下一轮重新识别');
+            } else {
+                misses++;
+                if (missLimit > 0 && misses >= missLimit) {
+                    console.warn('waitTextClick：连续 ' + misses + ' 次未找到，结束等待');
+                    return false;
+                }
+            }
+        }
+        retries++;
+        if (retries === 1 || retries % 10 === 0) {
+            console.warn('waitTextClick：重试 ' + retries + ' 次，连续未找到 ' + misses + ' 次');
+        }
+        if (Date.now() >= deadline) return false;
+        // 按本轮开始时间补足到目标周期；OCR 超时则立即进入下一轮
+        var remaining = gap - (Date.now() - startedAt);
+        if (remaining > 0) sleep(remaining);
+    }
+};
+
+// clickRetry：固定坐标点击失败时重试；times 含首次，0 表示一直重试
+clickRetry = function(x, y, times, interval, duration) {
+    var max = (times === undefined || times === null) ? 3 : Number(times);
+    if (isNaN(max) || max < 0) max = 3;
+    var wait = (interval === undefined || interval === null) ? 500 : Number(interval);
+    if (isNaN(wait) || wait < 0) wait = 500;
+    var hold = (duration === undefined || duration === null) ? 30 : duration;
+    var attempts = 0;
+    while (true) {
+        attempts++;
+        if (click(x, y, hold)) return true;
+        if (max > 0 && attempts >= max) {
+            console.warn('clickRetry：已尝试 ' + attempts + ' 次仍未完成');
+            return false;
+        }
+        if (wait > 0) sleep(wait);
+    }
+};
+
+// —— images.readAll / releaseAll ——
+// 数组入参返回等长数组（失败位为 null），对象入参返回同 key 对象（失败 key 为 null）
+images.readAll = function(source) {
+    var isArray = (source && typeof source.length === 'number' && typeof source !== 'string');
+    var imagesOut = isArray ? [] : {};
+    var missing = [];
+    if (!source) return { images: imagesOut, missing: missing };
+    if (isArray) {
+        for (var i = 0; i < source.length; i++) {
+            var path = source[i];
+            var img = (path === null || path === undefined) ? null : images.read(String(path));
+            imagesOut.push(img);
+            if (!img) missing.push(String(path));
+        }
+    } else {
+        for (var key in source) {
+            if (!Object.prototype.hasOwnProperty.call(source, key)) continue;
+            var p = source[key];
+            var im = (p === null || p === undefined) ? null : images.read(String(p));
+            imagesOut[key] = im;
+            if (!im) missing.push(String(p));
+        }
+    }
+    return { images: imagesOut, missing: missing };
+};
+
+// 收集图片句柄：支持可变参数、数组和对象（只遍历 value），按内部 id 去重
+function __collectImageIds(target, out) {
+    if (target === null || target === undefined) return;
+    if (typeof target === 'object' && target.__id !== undefined) {
+        if (target.__id > 0) out[target.__id] = target;
+        return;
+    }
+    if (typeof target === 'object' && typeof target.length === 'number') {
+        for (var i = 0; i < target.length; i++) __collectImageIds(target[i], out);
+        return;
+    }
+    if (typeof target === 'object') {
+        for (var key in target) {
+            if (Object.prototype.hasOwnProperty.call(target, key)) __collectImageIds(target[key], out);
+        }
+    }
+}
+
+images.releaseAll = function() {
+    var ids = {};
+    for (var i = 0; i < arguments.length; i++) __collectImageIds(arguments[i], ids);
+    var count = 0;
+    for (var id in ids) {
+        // 收集阶段已按 __id 去重，这里直接释放并计数
+        images.release(ids[id]);
+        count++;
+    }
+    return count;
 };
 """
 }

@@ -26,6 +26,7 @@ class ImageApiInstrumentation : Instrumentation() {
     private var onlyLoop = false
     private var onlyOcr = false
     private var onlyStop = false
+    private var onlyNewApi = false
 
     override fun onCreate(arguments: Bundle?) {
         super.onCreate(arguments)
@@ -33,6 +34,7 @@ class ImageApiInstrumentation : Instrumentation() {
         onlyLoop = arguments?.getString("onlyLoop") == "true"
         onlyOcr = arguments?.getString("onlyOcr") == "true"
         onlyStop = arguments?.getString("onlyStop") == "true"
+        onlyNewApi = arguments?.getString("onlyNewApi") == "true"
         Log.i(TAG, "Instrumentation onCreate; starting test thread")
         start()
     }
@@ -43,6 +45,13 @@ class ImageApiInstrumentation : Instrumentation() {
         Log.i(TAG, "Instrumentation base onStart returned")
         val result = Bundle()
         try {
+            if (onlyNewApi) {
+                report("New script APIs end-to-end")
+                NewApiChecks.run(targetContext)
+                result.putString("stream", "新增脚本 API 回归通过")
+                finish(Activity.RESULT_OK, result)
+                return
+            }
             if (onlyStop) {
                 report("Script runtime stops busy JavaScript")
                 RuntimeStopChecks.run(targetContext)
