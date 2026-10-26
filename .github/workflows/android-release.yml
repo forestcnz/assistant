@@ -35,7 +35,11 @@ jobs:
       - name: Install SDK platform 37
         shell: bash
         run: |
-          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-37.0" "build-tools;37.0.0" >/dev/null
+          sdkmanager="${ANDROID_SDK_ROOT:-$ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager"
+          # 运行器镜像通常已预装 android-37.0 与 build-tools 37.0.0，这里只做兜底。
+          # 不要用 `yes | sdkmanager`：sdkmanager 提前退出时 yes 会收到 SIGPIPE，
+          # 在 pipefail 下会让整个步骤失败。许可证在 runner 镜像里已接受，直接关掉 stdin 安装即可。
+          "$sdkmanager" --install "platforms;android-37.0" "build-tools;37.0.0" < /dev/null
 
       - name: Decode release keystore
         env:
