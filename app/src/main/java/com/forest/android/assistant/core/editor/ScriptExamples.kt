@@ -404,16 +404,34 @@ object ScriptExamples {
                 exit();
             }
             log("地图已打开");
+        """.trimIndent()),
+        Item("双模板同行校验", "两个模板是否在同一行，并返回两者中心的中点；不同行仍返回坐标，sameRow 标记结论。", "找图", """
+            var shot = captureScreen();
+            if (!shot) { toastLog("截图失败"); exit(); }
+            try {
+                var pair = images.findImagePair(shot, "images/装备.png", "images/技能.png", {
+                    thresholdA: 0.88, thresholdB: 0.88
+                });
+                if (!pair) { log("至少有一个模板没找到"); }
+                else if (pair.sameRow) {
+                    log("同一行，Y 差 " + pair.rowDelta + "px");
+                    click(pair.midX, pair.midY);   // 两个模板之间的坐标
+                } else {
+                    log("不在同一行：Y 差 " + pair.rowDelta + "，容差 " + pair.tolerance);
+                }
+            } finally {
+                images.release(shot);
+            }
         """.trimIndent())
     )
 
     val completeExample = Item(
         title = "完整示例：全部 API",
-        description = "展示全部 71 个公开方法。会截图、OCR、保存演示图片及执行手势；运行前修改文字与点击坐标。",
+        description = "展示全部 72 个公开方法。会截图、OCR、保存演示图片及执行手势；运行前修改文字与点击坐标。",
         category = "完整示例",
         completeScript = true,
         code = """
-            // 完整 API 示例：全部 71 个公开函数/方法及公开属性。
+            // 完整 API 示例：全部 72 个公开函数/方法及公开属性。
             // 素材从本次截图生成，无需提前导入；图片保存到任务的 output/ 目录。
             // 会实际执行点击、滑动和多指手势，请先修改下方坐标与查询文字。
             var query = "确定";
@@ -478,6 +496,12 @@ object ScriptExamples {
                     { tpl: template, threshold: 0.88, name: "demo" }
                 ])));
                 log("全部匹配：", JSON.stringify(images.findAllImages(shot, template, { threshold: 0.88, max: 3 })));
+                // 双模板：同行判定 + 两者中心的中点
+                var pair = images.findImagePair(shot, template, template, { threshold: 0.88 });
+                if (pair) {
+                    log("双模板：", "sameRow=" + pair.sameRow, "中点=(" + pair.midX + "," + pair.midY + ")",
+                        "Y差=" + pair.rowDelta + "/" + pair.tolerance);
+                }
                 log("是否存在：", JSON.stringify(images.existsImage(shot, template, options)));
                 log("范围找图：", JSON.stringify(images.findImageInRegion(shot, template, 0, 0, 1920, 1080, 0.88)));
 

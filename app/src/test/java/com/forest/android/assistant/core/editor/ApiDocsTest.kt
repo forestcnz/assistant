@@ -20,6 +20,7 @@ class ApiDocsTest {
             "clickR" to "clickRetry",
             "images.findImageA" to "images.findImageAny",
             "findImageAny" to "images.findImageAny",
+            "findImageP" to "images.findImagePair",
             "readAl" to "images.readAll",
             "releaseAl" to "images.releaseAll",
             "ocr.findTextA" to "ocr.findTextAny",
@@ -52,6 +53,7 @@ class ApiDocsTest {
         assertTrue("缺少 clickRetry 声明", dts.contains("declare function clickRetry("))
         // 对象成员
         assertTrue("缺少 images.findImageAny 声明", dts.contains("findImageAny: (...args: any[]) => any;"))
+        assertTrue("缺少 images.findImagePair 声明", dts.contains("findImagePair: (...args: any[]) => any;"))
         assertTrue("缺少 images.readAll 声明", dts.contains("readAll: (...args: any[]) => any;"))
         assertTrue("缺少 images.releaseAll 声明", dts.contains("releaseAll: (...args: any[]) => any;"))
         assertTrue(dts.contains("findTextAny(image: any, texts: string[], options?: OcrOptions): OcrItem | null;"))
@@ -59,6 +61,8 @@ class ApiDocsTest {
         assertTrue("缺少 AnyMatch", dts.contains("interface AnyMatch"))
         assertTrue("缺少 TemplateEntry", dts.contains("interface TemplateEntry"))
         assertTrue("缺少 ReadAllResult", dts.contains("interface ReadAllResult"))
+        assertTrue("缺少 PairMatch", dts.contains("interface PairMatch"))
+        assertTrue("缺少 MatchRect", dts.contains("interface MatchRect"))
         assertTrue("OcrItem 缺少 matched 字段", dts.contains("matched?: string"))
     }
 }

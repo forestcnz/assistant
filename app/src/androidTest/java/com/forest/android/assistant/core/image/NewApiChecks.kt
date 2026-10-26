@@ -28,9 +28,10 @@ object NewApiChecks {
         // 准备两个模板：左上角纯色块、右下角纯色块
         val red = makeBlock(Color.RED)
         val blue = makeBlock(Color.BLUE)
-        val redPath = File(baseDir, "red.png").also { save(red, it) }.absolutePath
-        val bluePath = File(baseDir, "blue.png").also { save(blue, it) }.absolutePath
+        val redPath = File(baseDir, "red.png").also { save(red, it) }.absolutePath.replace('\\', '/')
+        val bluePath = File(baseDir, "blue.png").also { save(blue, it) }.absolutePath.replace('\\', '/')
         val textBitmap = makeTextImage()
+        val textPath = File(baseDir, "text.png").also { save(textBitmap, it) }.absolutePath.replace('\\', '/')
 
         // 画面：红块在 (60,60)，蓝块在 (400,300)，另有一行文字
         val screen = buildScreen(red, blue, textBitmap)
@@ -41,6 +42,7 @@ object NewApiChecks {
                 adapter.setDesignSize(640, 480);
                 var RED = "$redPath";
                 var BLUE = "$bluePath";
+                var TEXT = "$textPath";
 
                 // ---- images.readAll：对象入参返回同 key 对象，缺失项进 missing ----
                 var batch = images.readAll({ red: RED, blue: BLUE, nope: "images/missing.png" });
@@ -122,6 +124,50 @@ object NewApiChecks {
                 check(ocr.findTextAny(shot, ["", "★"]) === null, "关键词全无效应返回 null");
                 check(ocr.findTextAny(shot, []) === null, "空数组应返回 null");
                 check(ocr.findTextAny(shot, ["不存在的文字"]) === null, "未命中应返回 null");
+
+                // ---- images.findImagePair：红块与蓝块不在同一行，但仍返回坐标 ----
+                var pair = images.findImagePair(shot, RED, BLUE, { threshold: 0.88 });
+                check(pair !== null, "findImagePair 应返回结果");
+                check(pair.sameRow === false, "红蓝块位置不同行，sameRow 应为 false");
+                check(pair.rowDelta > pair.tolerance, "不同行时 rowDelta 应大于容差");
+                // 中点为两个匹配中心的中点
+                check(pair.midX === Math.floor((pair.a.x + pair.b.x) / 2), "midX 应为两中心中点");
+                check(pair.midY === Math.floor((pair.a.y + pair.b.y) / 2), "midY 应为两中心中点");
+                check(pair.dx === pair.b.x - pair.a.x, "dx 应为 b.x - a.x");
+                check(pair.dy === pair.b.y - pair.a.y, "dy 应为 b.y - a.y");
+                check(pair.a.x > 0 && pair.a.right > pair.a.left, "a 框应有有效边界");
+                check(pair.b.x > 0 && pair.b.bottom > pair.b.top, "b 框应有有效边界");
+
+                // 放大容差后应判为同行（容差覆盖实际 Y 差）
+                var loose = images.findImagePair(shot, RED, BLUE, {
+                    threshold: 0.88, rowTolerance: 400
+                });
+                check(loose !== null, "大容差时仍应返回结果");
+                check(loose.sameRow === true, "容差覆盖 Y 差时应判为同行");
+                check(loose.tolerance === 400, "rowTolerance 应被采用");
+
+                // 同一模板：画面上有两个红块（同一行、水平隔开），应配对成功
+                var reds = images.findAllImages(shot, RED, { threshold: 0.88, max: 4 });
+                if (reds.length < 2) {
+                    throw new Error("画面应有两个红块，实际 findAllImages 返回 " + reds.length + " 个");
+                }
+                var redPos = "";
+                for (var ri = 0; ri < reds.length; ri++) redPos += "(" + reds[ri].x + "," + reds[ri].y + ") ";
+                var sameTpl = images.findImagePair(shot, RED, RED, { threshold: 0.88 });
+                check(sameTpl !== null, "画面有两个红块时同一模板应配对成功");
+                check(sameTpl.sameRow === true, "两个红块在同一行，sameRow 应为 true");
+                check(sameTpl.a.x !== sameTpl.b.x,
+                    "位置应不同，a=(" + sameTpl.a.x + "," + sameTpl.a.y + ") b=(" +
+                    sameTpl.b.x + "," + sameTpl.b.y + ") findAll=[" + redPos + "]");
+                check(sameTpl.tolerance >= 4, "容差不应小于 4px");
+
+                // 只有一个文字块时，同一模板去重后不足两个位置，应返回 null
+                var oneOnly = images.findImagePair(shot, TEXT, TEXT, { threshold: 0.8 });
+                check(oneOnly === null, "画面上只有一个文字块时同一模板应返回 null");
+
+                // 缺少任一模板时返回 null
+                check(images.findImagePair(shot, RED, "images/missing.png") === null,
+                    "缺少模板时应返回 null");
 
                 // ---- images.releaseAll：去重计数，忽略 null ----
                 // batch 与 arr 各自 read 过同一路径，产生的是 4 个独立句柄（各 2 个），
@@ -226,6 +272,8 @@ object NewApiChecks {
         canvas.drawBitmap(red, 40f, 40f, null)
         canvas.drawBitmap(blue, 380f, 280f, null)
         canvas.drawBitmap(text, 180f, 160f, null)
+        // 第二个红块：与第一个红块在同一行、水平方向隔开，用于「同一模板配两个位置」的用例
+        canvas.drawBitmap(red, 480f, 40f, null)
         return bmp
     }
 

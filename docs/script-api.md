@@ -1,6 +1,6 @@
 # 雕雕助手脚本 API 完整参考
 
-本文按当前仓库的脚本引擎实现整理，包含 **71 个公开函数/方法**，另列公开属性、返回对象、配置字段及使用限制。适用于包含 `ocr.findTextContains` 的当前版本。
+本文按当前仓库的脚本引擎实现整理，包含 **72 个公开函数/方法**，另列公开属性、返回对象、配置字段及使用限制。适用于包含 `ocr.findTextContains` 的当前版本。
 
 接口实现以 [`ScriptEngine.kt`](../app/src/main/java/com/forest/android/assistant/core/engine/ScriptEngine.kt) 为准；编辑器补全和自动导出的 `.d.ts` 目前只覆盖其中一部分，不能代替本手册。以 `__` 开头的桥接函数属于内部实现，不是供任务脚本调用的 API；公开的脚本路径变量 `__scriptPath__` 单独说明。
 
@@ -14,7 +14,7 @@
 | [点击与手势](#gestures) | `click`、`clickRandom`、`clickRetry`、`longClick`、`press`、`swipe`、`swipeRandom`、`gesture`、`gestures`、`gesturesAvailable` |
 | [截图](#capture) | `requestScreenCapture`、`requestScreenCaptureAsync`、`captureScreen` |
 | [图片基础操作](#image-basics) | `images.read`、`images.readAll`、`images.save`、`images.clip`、`images.pixel`、`images.width`、`images.height`、`images.release`、`images.releaseAll` |
-| [找图与找色](#image-search) | `images.findImage`、`images.findImageAny`、`images.findAllImages`、`images.existsImage`、`images.findImageInRegion`、`images.findImageWithText`、`images.findColor`、`images.findMultiColors` |
+| [找图与找色](#image-search) | `images.findImage`、`images.findImageAny`、`images.findImagePair`、`images.findAllImages`、`images.existsImage`、`images.findImageInRegion`、`images.findImageWithText`、`images.findColor`、`images.findMultiColors` |
 | [轮询找图](#wait-image) | `waitImage`、`waitImageVanish`、`waitImageClick`、`waitImageAny` |
 | [颜色工具](#colors) | `colors.parseColor`、`colors.rgb`、`colors.argb`、`colors.red`、`colors.green`、`colors.blue`、`colors.alpha`、`colors.toString`、`colors.isSimilar` |
 | [OCR](#ocr) | `ocr.init`、`ocr.ready`、`ocr.recognize`、`ocr.recognizeText`、`ocr.findText`、`ocr.findTextContains`、`ocr.findTextAny`、`ocr.findAllText`、`waitTextClick`、`OcrItem.centerX`、`OcrItem.centerY` |
@@ -791,6 +791,45 @@ if (state && state.name === "exhausted") {
 }
 ```
 
+### `images.findImagePair`
+
+签名：`images.findImagePair(img: ImageRef, tplA: ImageRef | string, tplB: ImageRef | string, options?: FindImagePairOptions): PairMatch | null`。
+
+在同一帧画面中查找两个模板，判定它们是否位于同一行，并返回两者**中心的中点**。
+
+| 参数 | 类型 | 必填 | 默认值 | 说明 |
+| --- | --- | --- | --- | --- |
+| `img` | `ImageRef` | 是 | — | 待搜索的画面 |
+| `tplA` | `ImageRef` 或 `string` | 是 | — | 第一个模板 |
+| `tplB` | `ImageRef` 或 `string` | 是 | — | 第二个模板 |
+| `options.threshold` | `number` | 否 | `0.9` | 两个模板共用阈值 |
+| `options.thresholdA` | `number` | 否 | — | 单独覆盖 A 的阈值 |
+| `options.thresholdB` | `number` | 否 | — | 单独覆盖 B 的阈值 |
+| `options.region` | `Region` | 否 | 全图 | 两个模板共用的搜索区域 |
+| `options.rowTolerance` | `number`，整数 | 否 | 自动 | 同行判定的像素容差；`<= 0` 使用自动值 |
+
+**同行判定**：两个匹配框中心的 Y 差值不超过容差。容差默认按较小模板高度的 30% 自动计算（最小 4px），大小不同的控件用同一把尺子会出错。
+
+返回：`PairMatch`，字段见 1.5 节 `PairMatch`。
+
+任一模板未找到、模板无效或路径读取失败时返回 `null`。两个参数是**同一份素材**（同一句柄或同一路径）时，取画面中按 X 排序的前两个互不重叠的位置配对，用于两个外观相同的控件；只有一个匹配时返回 `null`。
+
+性能说明：A 先全区域搜索；B 优先在 A 所在的行带内搜索，找不到时回退一次全区域搜索，保证「找到了但不同行」仍能返回 `sameRow: false`。
+
+```javascript
+var pair = images.findImagePair(shot, "images/装备.png", "images/技能.png", {
+    thresholdA: 0.88, thresholdB: 0.88
+});
+if (!pair) {
+    log("至少有一个模板没找到");
+} else if (pair.sameRow) {
+    log("同一行，Y 差 " + pair.rowDelta + "px（容差 " + pair.tolerance + "）");
+    click(pair.midX, pair.midY);          // 两个模板之间的坐标
+} else {
+    log("不在同一行：Y 差 " + pair.rowDelta + "，容差 " + pair.tolerance);
+}
+```
+
 ### `images.findAllImages`
 
 签名：`images.findAllImages(img: ImageRef, tpl: ImageRef | string, options?: FindAllImagesOptions): Point[]`。
@@ -1555,7 +1594,7 @@ try {
 
 ### 15.1 JavaScript 环境
 
-脚本通过 QuickJS 运行。可使用引擎提供的标准 JavaScript 语法及对象，例如变量、函数、条件/循环、数组与字符串操作、`Math`、`Date`、`JSON`、`RegExp`、`Promise`。这些语言标准库的方法不属于本应用新增的 71 个 API。
+脚本通过 QuickJS 运行。可使用引擎提供的标准 JavaScript 语法及对象，例如变量、函数、条件/循环、数组与字符串操作、`Math`、`Date`、`JSON`、`RegExp`、`Promise`。这些语言标准库的方法不属于本应用新增的 72 个 API。
 
 当前应用没有注入浏览器 DOM、`window`、`document`、`fetch`、`XMLHttpRequest`、Node.js `process` / `Buffer` / 文件系统、`setTimeout` / `setInterval`、Auto.js 的控件选择器、`app.launchPackage`、通用 `shell` 等能力。目标应用启动可使用任务的 `target` 配置；Root 兜底属于内部实现，不代表脚本可以调用任意 shell 命令。
 

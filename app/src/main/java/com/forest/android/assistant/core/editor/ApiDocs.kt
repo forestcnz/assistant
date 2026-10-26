@@ -180,6 +180,13 @@ object ApiDocs {
             null
         ),
 
+        Item(
+            "images.findImagePair", "images.findImagePair(img, tplA, tplB, options?)",
+            "images.findImagePair(shot, \"images/装备.png\", \"images/技能.png\")",
+            "查找两个模板并校验是否在同一行，返回两者中心的中点 midX/midY 与同行结论 sameRow（容差按较小模板高度的 30%，最小 4px，可用 rowTolerance 覆盖）。不同行仍返回结果；任一模板未找到返回 null。options 支持 threshold/thresholdA/thresholdB/region/rowTolerance。",
+            "declare function findImagePair(img: any, tplA: any, tplB: any, options?: any): any | null;"
+        ),
+
         // —— adapter ——
         Item("adapter.setDesignSize", "adapter.setDesignSize(w, h)", "adapter.setDesignSize(1080, 1920);", "声明设计基准分辨率"),
         Item("adapter.reset", "adapter.reset()", "adapter.reset();", "取消坐标缩放"),
@@ -223,6 +230,9 @@ object ApiDocs {
         appendLine("interface TemplateEntry { tpl: any; threshold?: number; name?: string; }")
         // images.readAll 的结果：数组入参返回数组，对象入参返回同 key 对象
         appendLine("interface ReadAllResult { images: any; missing: string[]; }")
+        // 双模板匹配：a/b 为两个模板各自的框
+        appendLine("interface MatchRect { x: number; y: number; left: number; top: number; right: number; bottom: number; bounds: Rect; }")
+        appendLine("interface PairMatch { sameRow: boolean; rowDelta: number; tolerance: number; midX: number; midY: number; dx: number; dy: number; a: MatchRect; b: MatchRect; }")
         appendLine()
         items.filter { '.' !in it.name }.forEach { item ->
             appendLine("/** ${item.doc} */")

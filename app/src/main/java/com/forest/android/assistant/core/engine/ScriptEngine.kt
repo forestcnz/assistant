@@ -568,6 +568,42 @@ object ScriptEngine {
             val threshold = (args.getOrNull(2) as? Number)?.toInt() ?: 16
             ImageApi.findColor(imageId, color, threshold, regionOf(args, 3))?.let { pt(it) }
         }
+        // 双模板：返回扁平数组 [sameRow, rowDelta, tolerance, midX, midY, dx, dy,
+        //   aX, aY, aLeft, aTop, aRight, aBottom, bX, bY, bLeft, bTop, bRight, bBottom]
+        // 参数顺序：imageId, tplA, tplB, thresholdA, thresholdB, rx, ry, rw, rh, rowTolerance
+        guard("__img_find_pair") { args ->
+            val imageId = (args.getOrNull(0) as? Number)?.toInt() ?: return@guard null
+            val tplA = resolveTemplate(args.getOrNull(1), scriptDir) ?: return@guard null
+            val tplB = resolveTemplate(args.getOrNull(2), scriptDir) ?: return@guard null
+            val thresholdA = (args.getOrNull(3) as? Number)?.toDouble() ?: 0.9
+            val thresholdB = (args.getOrNull(4) as? Number)?.toDouble() ?: 0.9
+            val region = regionOf(args, 5)              // 读取 5..8 四个分量
+            val rowTolerance = (args.getOrNull(9) as? Number)?.toInt() ?: 0
+            val pair = ImageApi.findImagePair(
+                imageId, tplA, tplB, thresholdA, thresholdB, region, rowTolerance
+            ) ?: return@guard null
+            listOf(
+                if (pair.sameRow) 1L else 0L,
+                pair.rowDelta.toLong(),
+                pair.tolerance.toLong(),
+                ScriptAdapter.toDesignX(pair.midX).toLong(),
+                ScriptAdapter.toDesignY(pair.midY).toLong(),
+                ScriptAdapter.toDesignX(pair.dx).toLong(),
+                ScriptAdapter.toDesignY(pair.dy).toLong(),
+                ScriptAdapter.toDesignX(pair.a.x).toLong(),
+                ScriptAdapter.toDesignY(pair.a.y).toLong(),
+                ScriptAdapter.toDesignX(pair.a.left).toLong(),
+                ScriptAdapter.toDesignY(pair.a.top).toLong(),
+                ScriptAdapter.toDesignX(pair.a.right).toLong(),
+                ScriptAdapter.toDesignY(pair.a.bottom).toLong(),
+                ScriptAdapter.toDesignX(pair.b.x).toLong(),
+                ScriptAdapter.toDesignY(pair.b.y).toLong(),
+                ScriptAdapter.toDesignX(pair.b.left).toLong(),
+                ScriptAdapter.toDesignY(pair.b.top).toLong(),
+                ScriptAdapter.toDesignX(pair.b.right).toLong(),
+                ScriptAdapter.toDesignY(pair.b.bottom).toLong()
+            )
+        }
         guard("__img_find_multi") { args ->
             val imageId = (args.getOrNull(0) as? Number)?.toInt() ?: return@guard null
             val first = (args.getOrNull(1) as? Number)?.toInt() ?: return@guard null
@@ -800,6 +836,34 @@ var images = {
         }
         return __pt(__img_find_multi(__img(img), __parseColor(firstColor), flat, __opt(options, 'threshold', 16),
             r[0], r[1], r[2], r[3]));
+    },
+    // 双模板同行校验：两个模板各用自己的阈值查找，返回中点与同行结论
+    findImagePair: function(img, tplA, tplB, options) {
+        var r = __regionArgs(options);
+        var raw = __img_find_pair(__img(img), __tplRef(tplA), __tplRef(tplB),
+            __opt(options, 'thresholdA', __opt(options, 'threshold', 0.9)),
+            __opt(options, 'thresholdB', __opt(options, 'threshold', 0.9)),
+            r[0], r[1], r[2], r[3],
+            __opt(options, 'rowTolerance', 0));
+        if (!raw) return null;
+        function rect(x, y, l, t, rr, b) {
+            return {
+                x: raw[x], y: raw[y],
+                left: raw[l], top: raw[t], right: raw[rr], bottom: raw[b],
+                bounds: { left: raw[l], top: raw[t], right: raw[rr], bottom: raw[b] }
+            };
+        }
+        return {
+            sameRow: raw[0] === 1,
+            rowDelta: raw[1],
+            tolerance: raw[2],
+            midX: raw[3],
+            midY: raw[4],
+            dx: raw[5],
+            dy: raw[6],
+            a: rect(7, 8, 9, 10, 11, 12),
+            b: rect(13, 14, 15, 16, 17, 18)
+        };
     },
     release: function(img) { __img_release(__img(img)); }
 };
