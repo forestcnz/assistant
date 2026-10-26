@@ -426,8 +426,10 @@ object ScriptRunner {
     fun stop() {
         val name = _state.value.taskName ?: return
         addLog('I', "停止任务: $name")
-        ScriptEngine.cancel()   // 打断绑定函数内的阻塞循环（sleep/等待）
-        job?.cancel()           // 取消引擎协程（挂起点）
+        // 先置停止标志并中断 VM：纯 JS 忙循环立即结束，绑定函数内的阻塞循环随后退出
+        ScriptEngine.cancel()
+        // 再取消引擎协程：打断 evaluate/await 等挂起点（quickjs-kt 也会据此中断求值）
+        job?.cancel()
     }
 
     /**

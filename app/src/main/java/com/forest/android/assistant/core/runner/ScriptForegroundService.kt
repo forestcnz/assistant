@@ -46,15 +46,14 @@ class ScriptForegroundService : Service() {
 
     private fun startForegroundCompat(taskName: String) {
         val nm = getSystemService(NotificationManager::class.java)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            nm.createNotificationChannel(
-                NotificationChannel(
-                    CHANNEL_ID,
-                    "脚本运行状态",
-                    NotificationManager.IMPORTANCE_LOW
-                ).apply { description = "脚本运行期间的保活通知" }
-            )
-        }
+        // minSdk 29：通知渠道必然可用
+        nm.createNotificationChannel(
+            NotificationChannel(
+                CHANNEL_ID,
+                "脚本运行状态",
+                NotificationManager.IMPORTANCE_LOW
+            ).apply { description = "脚本运行期间的保活通知" }
+        )
         val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
             ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
         else

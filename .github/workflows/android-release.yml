@@ -30,7 +30,12 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
         with:
-          gradle-version: '9.6.1'
+          gradle-version: '9.8.2'
+
+      - name: Install SDK platform 37
+        shell: bash
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-37.0" "build-tools;37.0.0" >/dev/null
 
       - name: Decode release keystore
         env:

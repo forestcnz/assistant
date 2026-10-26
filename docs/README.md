@@ -6,12 +6,12 @@ Android 自动化脚本工具，包名：`com.forest.android.assistant`。
 
 - 通过无障碍服务执行点击、滑动和手势。
 - 使用截图进行图片匹配、找色和 OCR。
-- 编写、运行和管理 JavaScript 自动化任务。
+- 编写、运行和管理 JavaScript 自动化任务；停止按钮可中断纯 JS 忙循环。
 - 导入、预览与裁剪图片素材；支持单任务 ZIP 与多任务合集 ZIP 导入导出。
 
 ## 构建
 
-需要 JDK 17 和 Gradle 9.6.1：
+需要 JDK 17 和 Gradle 9.8.2；Android SDK 需安装 Platform 37（`compileSdk = 37`，最低支持 Android 10 / API 29）：
 
 ```bash
 gradle assembleDebug

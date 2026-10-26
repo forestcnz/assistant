@@ -2,6 +2,8 @@ package com.forest.android.assistant.core.engine
 
 import android.graphics.Bitmap
 import com.dokar.quickjs.QuickJs
+import com.dokar.quickjs.QuickJsException
+import com.dokar.quickjs.QuickJsInterruptedException
 import com.dokar.quickjs.binding.JsObject
 import com.dokar.quickjs.binding.function
 import com.dokar.quickjs.quickJs
@@ -10,6 +12,9 @@ import com.forest.android.assistant.core.image.ImageApi
 import com.forest.android.assistant.core.image.ScreenCapture
 import com.forest.android.assistant.core.ocr.OcrApi
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.ensureActive
+import kotlin.coroutines.coroutineContext
 import kotlin.random.Random
 import java.io.File
 
@@ -54,13 +59,48 @@ object ScriptEngine {
     private class ScriptStoppedException : RuntimeException("脚本被停止")
 
     /** 单次运行的取消会话：绑定函数内的阻塞循环轮询此标志实现快速中断 */
-    private class Session {
+    private class Session(
+        /** 运行所在协程的 Job（测试环境可能为 null） */
+        val job: Job?
+    ) {
         @Volatile
         var cancelled = false
 
         /** 本次运行是否已自动重新申请过截屏（每轮最多一次，避免反复弹窗） */
         @Volatile
         var captureReRequested = false
+
+        // VM 句柄：interruptEvaluation() 可中断纯 JS 忙循环；close 仍由执行线程完成，
+        // 避免销毁正在执行的 VM（见下面 detach 与 finally）
+        private var runtime: QuickJs? = null
+
+        @Synchronized
+        fun attach(vm: QuickJs) {
+            runtime = vm
+        }
+
+        /** 解除 VM 引用；之后 interrupt 退化为只置标志 */
+        @Synchronized
+        fun detach() {
+            runtime = null
+        }
+
+        /**
+         * 置停止标志并请求中断 VM。
+         * interruptEvaluation() 内部有锁，不应在调用方线程（可能是主线程）直接等待，
+         * 因此由独立线程执行；VM 已销毁时该调用无副作用。
+         */
+        @Synchronized
+        fun cancel() {
+            cancelled = true
+            val vm = runtime ?: return
+            Thread {
+                runCatching { vm.interruptEvaluation() }
+            }.apply {
+                name = "ScriptJs-interrupt"
+                isDaemon = true
+            }.start()
+        }
     }
 
     @Volatile
@@ -68,7 +108,7 @@ object ScriptEngine {
 
     /** 请求中断当前正在运行的脚本（由 ScriptRunner.stop 调用） */
     fun cancel() {
-        activeSession?.cancelled = true
+        activeSession?.cancel()
     }
 
     /**
@@ -76,18 +116,29 @@ object ScriptEngine {
      * 绑定函数同步阻塞执行引擎线程，与脚本顺序执行语义一致。
      */
     suspend fun execute(env: ScriptEnv, script: String): RunOutcome {
-        val session = Session()
+        val session = Session(coroutineContext[Job])
         activeSession = session
         val outcome: RunOutcome = try {
             ImageApi.debugLogger = { level, msg -> env.onLog(level, msg) }
             ImageApi.cancellationCheck = { checkStop(session) }
             quickJs {
-                defineGlobals(session, env)
-                // 末尾补 undefined 丢弃脚本完成值：否则函数/对象结果会走类型转换而报错
-                evaluate<JsObject?>(PRELUDE + DISCARD_RESULT, "prelude.js")
-                evaluate<JsObject?>(script + DISCARD_RESULT, env.scriptPath)
-                RunOutcome(OutcomeKind.FINISHED)
+                session.attach(this)
+                try {
+                    checkStop(session)
+                    defineGlobals(session, env)
+                    // 末尾补 undefined 丢弃脚本完成值：否则函数/对象结果会走类型转换而报错
+                    evaluate<JsObject?>(PRELUDE + DISCARD_RESULT, "prelude.js")
+                    checkStop(session)
+                    evaluate<JsObject?>(script + DISCARD_RESULT, env.scriptPath)
+                    checkStop(session)
+                    RunOutcome(OutcomeKind.FINISHED)
+                } finally {
+                    session.detach()
+                }
             }
+        } catch (e: QuickJsInterruptedException) {
+            // interruptEvaluation() 或宿主取消协程触发：按用户停止处理
+            RunOutcome(OutcomeKind.STOPPED)
         } catch (e: ScriptStoppedException) {
             RunOutcome(OutcomeKind.STOPPED)
         } catch (e: CancellationException) {
@@ -96,17 +147,22 @@ object ScriptEngine {
             RunOutcome(OutcomeKind.EXITED)
         } catch (e: Throwable) {
             val marker = generateSequence<Throwable>(e) { it.cause }
-                .firstOrNull { it is ScriptExitException || it is ScriptStoppedException }
+                .firstOrNull {
+                    it is ScriptExitException || it is ScriptStoppedException ||
+                            it is QuickJsInterruptedException
+                }
             when (marker) {
                 is ScriptExitException -> RunOutcome(OutcomeKind.EXITED)
                 is ScriptStoppedException -> RunOutcome(OutcomeKind.STOPPED)
+                is QuickJsInterruptedException -> RunOutcome(OutcomeKind.STOPPED)
                 else -> {
                     env.onLog('E', "脚本异常: ${e.message}")
-                    val pos = parseErrorPosition(e.message)
+                    val pos = errorPositionOf(e)
                     RunOutcome(
                         kind = OutcomeKind.ERROR,
                         message = e.message,
-                        stack = e.stackTraceToString(),
+                        // 优先记录 QuickJS 给出的 JS 堆栈（含脚本行列），否则退回 JVM 堆栈
+                        stack = jsStackOf(e) ?: e.stackTraceToString(),
                         errorLine = pos?.first,
                         errorColumn = pos?.second
                     )
@@ -121,6 +177,29 @@ object ScriptEngine {
         }
         return outcome
     }
+
+    /**
+     * 脚本出错位置（行/列，1 起）。
+     * quickjs-kt 1.0.9+ 的 QuickJsException 提供结构化 location，优先使用；
+     * 其他异常或老版本回退到从消息中解析。
+     */
+    private fun errorPositionOf(e: Throwable): Pair<Int, Int>? {
+        val qe = quickJsExceptionOf(e)
+        qe?.let { exception ->
+            val line = exception.lineNumber
+            val column = exception.columnNumber
+            if (line != null && line > 0) return Pair(line, column?.takeIf { it > 0 } ?: 1)
+        }
+        return parseErrorPosition(e.message)
+    }
+
+    /** QuickJS 提供的 JS 侧调用堆栈；没有结构化堆栈时返回 null */
+    private fun jsStackOf(e: Throwable): String? =
+        quickJsExceptionOf(e)?.stack?.takeIf { it.isNotBlank() }
+
+    /** 沿 cause 链找第一个 QuickJsException（QuickJS 错误可能被包装） */
+    private fun quickJsExceptionOf(e: Throwable): QuickJsException? =
+        generateSequence(e) { it.cause }.filterIsInstance<QuickJsException>().firstOrNull()
 
     /**
      * 从异常消息中解析脚本出错位置。
@@ -146,13 +225,14 @@ object ScriptEngine {
     /** 注入全局 Bridge：JS 函数名 → Kotlin 实现（全部同步绑定） */
     private fun QuickJs.defineGlobals(session: Session, env: ScriptEnv) {
         // 带停止检查的绑定注册：每个绑定函数入口先查停止标志。
-        // stop() 后引擎线程无法强杀（QuickJS 1.0.5 无 VM 级中断），只能靠检查点中断；
-        // 逐个入口检查保证「最多等当前正在执行的一个原生调用（截屏/找图/OCR）结束即停止」，
-        // 而不是把本轮循环剩余的所有调用跑完，显著缩短停止响应延迟。
+        // interruptEvaluation() 只能中断 JS 字节码执行，无法打断已经进入的 Kotlin 原生调用
+        // （截屏/找图/OCR/手势等待）；因此两层机制并存：
+        // 1) VM 中断负责纯 JS 忙循环，毫秒级生效；
+        // 2) 绑定入口检查保证原生调用返回后立刻停止，不再继续跑本轮剩余步骤。
         fun guard(name: String, block: (args: Array<Any?>) -> Any?) {
             function(name) { args ->
                 checkStop(session)
-                block(args)
+                block(args).also { checkStop(session) }
             }
         }
 

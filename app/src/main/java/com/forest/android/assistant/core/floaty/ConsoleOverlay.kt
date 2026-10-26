@@ -6,7 +6,6 @@ import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
-import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -534,11 +533,8 @@ object ConsoleOverlay {
     }
 
     private fun overlayParams(gravity: Int, x: Int, y: Int): WindowManager.LayoutParams {
-        val windowType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
-            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-        else
-            @Suppress("DEPRECATION")
-            WindowManager.LayoutParams.TYPE_PHONE
+        // minSdk 29：悬浮窗类型固定为 TYPE_APPLICATION_OVERLAY
+        val windowType = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
         return WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.WRAP_CONTENT,

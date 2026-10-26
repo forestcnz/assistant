@@ -252,7 +252,8 @@ class RecordingService : Service() {
 
     private fun startNotification() {
         val manager = getSystemService(NotificationManager::class.java)
-        if (Build.VERSION.SDK_INT >= 26) manager.createNotificationChannel(
+        // minSdk 29：通知渠道必然可用，无需版本判断
+        manager.createNotificationChannel(
             NotificationChannel("operation_recording", "操作录制", NotificationManager.IMPORTANCE_LOW))
         val finish = PendingIntent.getService(this, 0,
             Intent(this, RecordingService::class.java).setAction(ACTION_FINISH),

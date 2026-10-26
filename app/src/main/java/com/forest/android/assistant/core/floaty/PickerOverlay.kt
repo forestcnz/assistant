@@ -13,7 +13,6 @@ import android.graphics.PixelFormat
 import android.graphics.Rect
 import android.os.SystemClock
 import android.graphics.RectF
-import android.os.Build
 import android.util.Log
 import android.view.Gravity
 import android.view.MotionEvent
@@ -151,11 +150,8 @@ object PickerOverlay {
     private fun attachPicker(context: Context, mode: Mode, frozenFrame: Bitmap?): Boolean {
         val wm = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
         val view = PickerView(context, mode, frozenFrame) { code -> deliver(context, code) }
-        val windowType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
-            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-        else
-            @Suppress("DEPRECATION")
-            WindowManager.LayoutParams.TYPE_PHONE
+        // minSdk 29：悬浮窗类型固定为 TYPE_APPLICATION_OVERLAY
+        val windowType = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
         val params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.MATCH_PARENT,

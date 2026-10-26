@@ -137,25 +137,22 @@ class ScreenCaptureService : Service() {
 
     private fun startForegroundCompat() {
         val nm = getSystemService(NotificationManager::class.java)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            nm.createNotificationChannel(
-                NotificationChannel(
-                    CHANNEL_ID,
-                    "雕雕助手",
-                    NotificationManager.IMPORTANCE_LOW
-                ).apply { description = "自动化脚本识别界面时使用屏幕截图" }
-            )
-        }
+        // minSdk 29：通知渠道必然可用
+        nm.createNotificationChannel(
+            NotificationChannel(
+                CHANNEL_ID,
+                "雕雕助手",
+                NotificationManager.IMPORTANCE_LOW
+            ).apply { description = "自动化脚本识别界面时使用屏幕截图" }
+        )
         val notification: Notification = Notification.Builder(this, CHANNEL_ID)
             .setContentTitle("雕雕助手")
             .setContentText("正在为自动化脚本提供屏幕截图")
             .setSmallIcon(android.R.drawable.ic_menu_view)
             .setOngoing(true)
             .build()
-        val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
-            ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
-        else
-            0
+        // minSdk 29：Q 起才引入前台服务类型，本分支恒为真
+        val type = ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
         try {
             ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, type)
         } catch (e: Exception) {
