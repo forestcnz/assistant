@@ -110,6 +110,8 @@ if (!requestScreenCapture()) {
 
 坐标适配不会缩放模板图片。模板应与实际截图中的目标像素尺寸相符；更换分辨率、游戏缩放或界面布局后，需要重新核对素材。
 
+双图匹配 `images.findImagePair` 可显式使用 `mode: "shape"` 和 `scales`，按轮廓尝试多个模板尺寸。使用前检查 `images.supportsShapeMatching === true`，具体参数见 API 参考。形状模式弱化颜色和平滑背景差异，会增加识别耗时；应使用正反样本重新确定阈值，不能照搬像素模式的阈值。
+
 固定坐标点击的可复用片段：
 
 ```javascript

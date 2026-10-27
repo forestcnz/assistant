@@ -19,7 +19,7 @@ import com.forest.android.assistant.core.image.TemplateMatcher.Gray
  * 匹配算法：灰度化 + 归一化互相关（NCC），由粗到细多级搜索：
  * 1. 粗搜：模板缩到约 12px，滑动打分，用原始数组堆选择邻近去重后的候选；
  * 2. 精搜：逐级缩小定位范围，最终以原分辨率 NCC 判分，再过滤和聚合命中。
- * 纯 Kotlin 实现，避免引入 OpenCV（AAR 117MB，APK 会涨到 80MB+）；后续需要多尺度/复杂找色时可替换实现。
+ * 纯 Kotlin 实现；findImagePair 的可选 shape 模式使用 Sobel 轮廓和多尺度模板。
  * 对应脚本 API 见 docs/README.md 第 5.4 节。
  */
 object ImageApi {
@@ -39,6 +39,7 @@ object ImageApi {
     private val imageNames = ConcurrentHashMap<Int, String>()
     private val templates = TemplateCache()
     private val screenGrays = ScreenGrayCache()
+    private val shapeEdges = ScreenGrayCache()
     private val nextId = AtomicInteger(1)
 
     /** 存入图片句柄；[name] 用于日志中显示来源（文件名或“屏幕截图”） */
@@ -59,6 +60,7 @@ object ImageApi {
             imageNames.remove(id)
             templates.remove(id)
             screenGrays.removeImage(id)
+            shapeEdges.removeImage(id)
         }
     }
 
@@ -68,6 +70,7 @@ object ImageApi {
             imageNames.clear()
             templates.clear()
             screenGrays.clear()
+            shapeEdges.clear()
         }
     }
 
@@ -358,10 +361,16 @@ object ImageApi {
         thresholdA: Double = 0.9,
         thresholdB: Double = 0.9,
         region: IntArray? = null,
-        rowTolerance: Int = 0
+        rowTolerance: Int = 0,
+        mode: String = "pixel",
+        scales: List<Double> = ShapeMatcher.defaultScales
     ): PairMatch? {
+        require(mode == "pixel" || mode == "shape") { "findImagePair mode must be pixel or shape" }
         val tplA = image(tplAId) ?: return null
         val tplB = image(tplBId) ?: return null
+        if (mode == "shape") {
+            return findShapePair(imageId, tplAId, tplBId, tplA, tplB, thresholdA, thresholdB, region, rowTolerance, scales)
+        }
 
         // 同一模板：取画面中按 X 排序的前两个“互不重叠”的位置（两个外观相同的控件）
         // 注意：调用方即使传同一路径，也可能解析成两个不同句柄，
@@ -386,6 +395,50 @@ object ImageApi {
         }) ?: findMatches(imageId, tplBId, thresholdB, region, 1).firstOrNull() ?: return null
 
         return buildPair(a, b, tplA, tplB, tolerance)
+    }
+
+    private fun findShapePair(
+        imageId: Int, tplAId: Int, tplBId: Int, tplA: Bitmap, tplB: Bitmap,
+        thresholdA: Double, thresholdB: Double, region: IntArray?, rowTolerance: Int, scales: List<Double>
+    ): PairMatch? {
+        ShapeMatcher.validateScales(scales)
+        val screen = image(imageId) ?: return null
+        val r = clampRegion(region, screen.width, screen.height) ?: return null
+        val check = cancellationCheck ?: {}
+        val key = ScreenGrayCache.Key(imageId, r.left, r.top, r.right, r.bottom, 1, screen.generationId)
+        val pixels = shapeEdges.getOrPut(key, { images[imageId] === screen }) {
+            ShapeMatcher.edges(screen.toGray(r)).px
+        }
+        val search = ShapeMatcher.Search(Gray(r.width(), r.height(), pixels, check))
+        val hitsA = search.find(tplA.toGray(), thresholdA, scales)
+        val hitsB = search.find(tplB.toGray(), thresholdB, scales)
+        fun report(name: String?, hits: List<ShapeMatcher.Match>) {
+            debugLogger?.invoke(if (hits.isEmpty()) 'W' else 'D',
+                "${name ?: "模板"} shape matches=${hits.size} best=${hits.firstOrNull()?.score ?: "-"}")
+        }
+        report(imageName(tplAId), hitsA)
+        report(imageName(tplBId), hitsB)
+        val sameSource = tplAId == tplBId || isSameSource(tplAId, tplBId)
+        val candidates = hitsA.flatMap { a -> hitsB.mapNotNull { b ->
+            // 同一素材必须对应两个不重叠的实例。
+            if (sameSource && a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom) null
+            else a to b
+        } }.sortedByDescending { (a, b) -> a.score + b.score }
+        val selected = candidates.firstOrNull { (a, b) ->
+            isSameRow(abs(a.y - b.y), resolveTolerance(rowTolerance, a.height, b.height))
+        } ?: candidates.firstOrNull() ?: return null
+        val (first, second) = selected
+        val (a, b) = if (sameSource && first.x > second.x) second to first else first to second
+        fun rect(m: ShapeMatcher.Match) = MatchRect(
+            m.x + r.left, m.y + r.top, m.left + r.left, m.top + r.top, m.right + r.left, m.bottom + r.top
+        )
+        val rectA = rect(a)
+        val rectB = rect(b)
+        val tolerance = resolveTolerance(rowTolerance, a.height, b.height)
+        val rowDelta = abs(a.y - b.y)
+        val mid = midPoint(rectA.x, rectA.y, rectB.x, rectB.y)
+        return PairMatch(isSameRow(rowDelta, tolerance), rowDelta, tolerance, mid.first, mid.second,
+            delta(a.x, b.x), delta(a.y, b.y), rectA, rectB)
     }
 
     /** 同行容差：显式值优先，否则取较小模板高度的 30%，最少 4px */

@@ -621,8 +621,14 @@ object ScriptEngine {
             val thresholdB = (args.getOrNull(4) as? Number)?.toDouble() ?: 0.9
             val region = regionOf(args, 5)              // 读取 5..8 四个分量
             val rowTolerance = (args.getOrNull(9) as? Number)?.toInt() ?: 0
+            val mode = args.getOrNull(10) as? String ?: "pixel"
+            val scaleArg = args.getOrNull(11)
+            val scales = if (scaleArg == null) listOf(0.75, 1.0, 1.25, 1.5) else {
+                require(scaleArg is List<*>) { "scales must be an array" }
+                scaleArg.map { require(it is Number) { "scales must contain numbers" }; it.toDouble() }
+            }
             val pair = ImageApi.findImagePair(
-                imageId, tplA, tplB, thresholdA, thresholdB, region, rowTolerance
+                imageId, tplA, tplB, thresholdA, thresholdB, region, rowTolerance, mode, scales
             ) ?: return@guard null
             listOf(
                 if (pair.sameRow) 1L else 0L,
@@ -879,6 +885,7 @@ var images = {
         return __pt(__img_find_multi(__img(img), __parseColor(firstColor), flat, __opt(options, 'threshold', 16),
             r[0], r[1], r[2], r[3]));
     },
+    supportsShapeMatching: true,
     // 双模板同行校验：两个模板各用自己的阈值查找，返回中点与同行结论
     findImagePair: function(img, tplA, tplB, options) {
         var r = __regionArgs(options);
@@ -886,7 +893,8 @@ var images = {
             __opt(options, 'thresholdA', __opt(options, 'threshold', 0.9)),
             __opt(options, 'thresholdB', __opt(options, 'threshold', 0.9)),
             r[0], r[1], r[2], r[3],
-            __opt(options, 'rowTolerance', 0));
+            __opt(options, 'rowTolerance', 0),
+            __opt(options, 'mode', 'pixel'), __opt(options, 'scales', null));
         if (!raw) return null;
         function rect(x, y, l, t, rr, b) {
             return {

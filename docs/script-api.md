@@ -893,8 +893,26 @@ if (state && state.name === "exhausted") {
 | `options.thresholdB` | `number` | 否 | — | 单独覆盖 B 的阈值 |
 | `options.region` | `Region` | 否 | 全图 | 两个模板共用的搜索区域 |
 | `options.rowTolerance` | `number`，整数 | 否 | 自动 | 同行判定的像素容差；`<= 0` 使用自动值 |
+| `options.mode` | `"pixel" \| "shape"` | 否 | `"pixel"` | `shape` 先提取 Sobel 轮廓，再按多个比例缩放模板匹配；原像素模式行为不变 |
+| `options.scales` | `number[]` | 否 | `[0.75, 1, 1.25, 1.5]` | 仅用于 `shape`，1～12 个有限数，每个在 0.5～2 范围内；非法值报错 |
 
 **同行判定**：两个匹配框中心的 Y 差值不超过容差。容差默认按较小模板高度的 30% 自动计算（最小 4px），大小不同的控件用同一把尺子会出错。
+
+`shape` 模式使用缩放后的实际匹配框计算中心和默认同行容差，`rowTolerance` 仍以实际截图像素计。形状模式会在每个模板的最多四个候选中优先选择同行的一对；相同素材必须对应两个不重叠的实例。它弱化颜色、明暗反转及平滑背景差异，不是 OCR，也不能保证忽略复杂背景或兼容所有字体。缩放比例越多，搜索越慢，建议按界面限定 `region`。两种模式的分数不可直接等同，形状阈值应结合正反样本验证。
+
+新版引擎提供 `images.supportsShapeMatching === true`。旧版会忽略未知选项，使用形状模式的脚本应先检查此属性，避免误用旧算法：
+
+```javascript
+if (images.supportsShapeMatching !== true) {
+    toastLog("请先更新支持形状匹配的 APP");
+    exit();
+}
+var pair = images.findImagePair(shot, "images/确.png", "images/认.png", {
+    mode: "shape", scales: [0.75, 1, 1.25, 1.5],
+    thresholdA: 0.82, thresholdB: 0.82, rowTolerance: 20
+});
+if (pair && pair.sameRow) click(pair.midX, pair.midY);
+```
 
 返回：`PairMatch`，字段见 1.5 节 `PairMatch`。
 

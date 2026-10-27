@@ -213,7 +213,7 @@ object ApiDocs {
         Item(
             "images.findImagePair", "images.findImagePair(img, tplA, tplB, options?)",
             "images.findImagePair(shot, \"images/装备.png\", \"images/技能.png\")",
-            "查找两个模板并校验是否在同一行，返回两者中心的中点 midX/midY 与同行结论 sameRow（容差按较小模板高度的 30%，最小 4px，可用 rowTolerance 覆盖）。不同行仍返回结果；任一模板未找到返回 null。options 支持 threshold/thresholdA/thresholdB/region/rowTolerance。",
+            "查找两个模板并校验同行，返回中点 midX/midY 和 sameRow。任一模板未找到返回 null。options 支持 threshold/thresholdA/thresholdB/region/rowTolerance；mode 默认 pixel，shape 为轮廓多尺度匹配，scales 默认 [0.75,1,1.25,1.5]，支持 1～12 个 0.5～2 的比例。默认同行容差按实际匹配高度的30%（最小4px），可用 rowTolerance 覆盖。shape 会增加耗时，复杂背景与不同字体仍可能失败。",
             "declare function findImagePair(img: any, tplA: any, tplB: any, options?: any): any | null;"
         ),
 
@@ -265,7 +265,7 @@ object ApiDocs {
         appendLine("interface WatchOptions { maxClicks?: number; delayMs?: number; }")
         appendLine("interface RetryOptions { timeoutMs?: number; intervalMs?: number; maxAttempts?: number; name?: string; onRetry?: (reason: string, state: PollState) => void; }")
         appendLine("interface ImageLoopOptions { timeoutMs?: number; intervalMs?: number; confirmCount?: number; maxAttempts?: number; name?: string; onRetry?: (reason: string, state: PollState) => void; threshold?: number; region?: Region; maxClicks?: number; delayMs?: number; }")
-        appendLine("interface FindImagePairOptions { threshold?: number; thresholdA?: number; thresholdB?: number; region?: Region; rowTolerance?: number; }")
+        appendLine("interface FindImagePairOptions { threshold?: number; thresholdA?: number; thresholdB?: number; region?: Region; rowTolerance?: number; mode?: 'pixel' | 'shape'; scales?: number[]; }")
         appendLine("interface ResizeOptions { filter?: boolean; }")
         appendLine("interface MatchTemplateOptions { threshold?: number; region?: Region; max?: number; }")
         appendLine("interface ImageMatch extends Point { score: number; bounds: Rect; }")
@@ -288,6 +288,7 @@ object ApiDocs {
         }
         appendLine()
         appendLine("declare const images: {")
+        appendLine("    readonly supportsShapeMatching: boolean;")
         items.filter { it.name.startsWith("images.") }.forEach {
             appendLine("    /** ${it.doc} */")
             val declaration = it.declaration?.takeUnless { value -> value.startsWith("declare ") }

@@ -62,6 +62,7 @@ class ApiDocsTest {
         assertTrue("缺少 TemplateEntry", dts.contains("interface TemplateEntry"))
         assertTrue("缺少 ReadAllResult", dts.contains("interface ReadAllResult"))
         assertTrue("缺少 PairMatch", dts.contains("interface PairMatch"))
+        assertTrue("缺少形状模式选项", dts.contains("mode?: 'pixel' | 'shape'; scales?: number[]"))
         assertTrue("缺少 MatchRect", dts.contains("interface MatchRect"))
         assertTrue("OcrItem 缺少 matched 字段", dts.contains("matched?: string"))
     }
