@@ -55,15 +55,14 @@ class FloatyForegroundService : Service() {
 
     private fun startForegroundCompat(): Boolean {
         val manager = getSystemService(NotificationManager::class.java)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            manager.createNotificationChannel(
-                NotificationChannel(
-                    CHANNEL_ID,
-                    "悬浮球状态",
-                    NotificationManager.IMPORTANCE_LOW
-                ).apply { description = "悬浮球启用期间保持后台服务运行" }
-            )
-        }
+        // minSdk 29：通知渠道必然可用
+        manager.createNotificationChannel(
+            NotificationChannel(
+                CHANNEL_ID,
+                "悬浮球状态",
+                NotificationManager.IMPORTANCE_LOW
+            ).apply { description = "悬浮球启用期间保持后台服务运行" }
+        )
         val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
         } else {

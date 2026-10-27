@@ -14,6 +14,7 @@ import com.forest.android.assistant.core.floaty.ConsoleOverlay
 import com.forest.android.assistant.core.floaty.FloatyManager
 import com.forest.android.assistant.MainActivity
 import com.forest.android.assistant.ScreenshotExportActivity
+import com.forest.android.assistant.core.engine.RuntimeStopChecks
 import com.forest.android.assistant.core.engine.ScriptRunner
 import com.forest.android.assistant.core.ocr.OcrScriptChecks
 import com.forest.android.assistant.core.task.TaskManager
@@ -24,12 +25,16 @@ class ImageApiInstrumentation : Instrumentation() {
     private var onlyBurst = false
     private var onlyLoop = false
     private var onlyOcr = false
+    private var onlyStop = false
+    private var onlyNewApi = false
 
     override fun onCreate(arguments: Bundle?) {
         super.onCreate(arguments)
         onlyBurst = arguments?.getString("onlyBurst") == "true"
         onlyLoop = arguments?.getString("onlyLoop") == "true"
         onlyOcr = arguments?.getString("onlyOcr") == "true"
+        onlyStop = arguments?.getString("onlyStop") == "true"
+        onlyNewApi = arguments?.getString("onlyNewApi") == "true"
         Log.i(TAG, "Instrumentation onCreate; starting test thread")
         start()
     }
@@ -40,6 +45,20 @@ class ImageApiInstrumentation : Instrumentation() {
         Log.i(TAG, "Instrumentation base onStart returned")
         val result = Bundle()
         try {
+            if (onlyNewApi) {
+                report("New script APIs end-to-end")
+                NewApiChecks.run(targetContext)
+                result.putString("stream", "新增脚本 API 回归通过")
+                finish(Activity.RESULT_OK, result)
+                return
+            }
+            if (onlyStop) {
+                report("Script runtime stops busy JavaScript")
+                RuntimeStopChecks.run(targetContext)
+                result.putString("stream", "脚本运行时停止回归通过")
+                finish(Activity.RESULT_OK, result)
+                return
+            }
             if (onlyOcr) {
                 report("OCR normalized contains script API")
                 OcrScriptChecks.run(targetContext)
@@ -298,8 +317,9 @@ class ImageApiInstrumentation : Instrumentation() {
     private fun testScreenshotExportStartsInSeparateTask() {
         val context = targetContext
         val tasks = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
-        fun mainTaskId(): Int? = tasks.appTasks.firstOrNull {
-            it.taskInfo.baseActivity?.className == MainActivity::class.java.name
+        // compileSdk 37 起 appTasks 的元素类型可空，过滤掉空项再匹配主界面
+        fun mainTaskId(): Int? = tasks.appTasks.filterNotNull().firstOrNull {
+            it.taskInfo?.baseActivity?.className == MainActivity::class.java.name
         }?.taskInfo?.taskId
         if (mainTaskId() == null) {
             runOnMainSync {

@@ -72,6 +72,14 @@ object ApiDocs {
             "images.findAllImages(captureScreen(), \"images/btn.png\", { threshold: 0.9, max: 5 })",
             "全部匹配位置（相邻聚合）"
         ),
+        Item("images.matchTemplate", "images.matchTemplate(img, tpl, options?)",
+            "images.matchTemplate(shot, template, { threshold: 0.9, max: 5 })",
+            "模板匹配明细数组，包含中心、相似度分数和边界",
+            "matchTemplate(img: ImageRef, tpl: ImageRef | string, options?: MatchTemplateOptions): ImageMatch[];"),
+        Item("images.findImageDetails", "images.findImageDetails(img, tpl, options?)",
+            "images.findImageDetails(shot, template, { threshold: 0.9 })",
+            "返回最高分匹配的中心、相似度分数和边界；无匹配时返回 null",
+            "findImageDetails(img: ImageRef, tpl: ImageRef | string, options?: MatchTemplateOptions): ImageMatch | null;"),
         Item(
             "images.existsImage", "images.existsImage(img, tpl, options?)",
             "images.existsImage(captureScreen(), \"images/btn.png\")", "模板是否在屏"
@@ -92,8 +100,12 @@ object ApiDocs {
         ),
         Item("images.findImageWithText", "images.findImageWithText(img, tpl, options?)", "images.findImageWithText(captureScreen(), \"images/card.png\", { threshold: 0.9, padding: 8 })", "找图并对匹配区域做 OCR，返回 {x,y,bounds,text,items}"),
         Item("images.read", "images.read(path)", "images.read(\"images/btn.png\")", "读图（相对脚本目录）"),
+        Item("images.width", "images.width(image)", "images.width(image)", "图片实际像素宽度", "width(image: ImageRef): number;"),
+        Item("images.height", "images.height(image)", "images.height(image)", "图片实际像素高度", "height(image: ImageRef): number;"),
         Item("images.save", "images.save(image, path[, format, quality])", "images.save(captureScreen(), \"shot.png\")", "保存图片"),
         Item("images.clip", "images.clip(img, x, y, w, h)", "images.clip(img, 0, 0, 200, 200)", "裁剪图片"),
+        Item("images.resize", "images.resize(image, width, height, options?)", "images.resize(image, 960, 540)", "按实际像素缩放图片，返回新句柄",
+            "resize(image: ImageRef, width: number, height: number, options?: ResizeOptions): ImageRef | null;"),
         Item("images.pixel", "images.pixel(img, x, y)", "images.pixel(img, 10, 10)", "取像素色值"),
 
         // —— colors ——
@@ -129,6 +141,81 @@ object ApiDocs {
         ),
         Item("ocr.findAllText", "ocr.findAllText(image, text, options?)", "ocr.findAllText(captureScreen(), \"运行\")", "精确匹配优先，否则返回包含匹配的 OcrItem[]；支持 options.region",
             "findAllText(image: any, text: string, options?: OcrOptions): OcrItem[];"),
+        Item(
+            "ocr.findTextAny", "ocr.findTextAny(image, texts, options?)",
+            "ocr.findTextAny(captureScreen(), [\"确定\", \"同意\"])",
+            "一次 OCR 命中任意关键词：行顺序优先，同一行内取 texts 靠前的关键词。匹配规则同 findTextContains（忽略空格、标点、全角差异）。返回额外带 matched 字段的 OcrItem，无命中或关键词清理后全为空时返回 null。options.region 为 [x, y, width, height]。",
+            "findTextAny(image: any, texts: string[], options?: OcrOptions): OcrItem | null;"
+        ),
+
+        // —— 等待与批量操作（新增）——
+        Item(
+            "waitImageClick", "waitImageClick(tpl, timeout, interval, options?)",
+            "waitImageClick(\"images/btn.png\", 0, 1, { threshold: 0.88 });",
+            "轮询等图出现并点击中心。timeout 单位秒：省略或负数=一直等到停止，0=只查一次，正数=最多等待秒数。options 支持 threshold、region、delay（点击后等待毫秒）、missLimit（连续未找到多少次后返回 false，0 不限）。只有成功截图却未匹配才计数；找到即清零，点击失败不推进。",
+            null
+        ),
+        Item(
+            "images.findImageAny", "images.findImageAny(img, templates, options?)",
+            "images.findImageAny(captureScreen(), [{ tpl: a, name: 'a' }, b])",
+            "单帧内按数组顺序查找多个模板，首个命中即返回，数组顺序即优先级（不比较分数）。条目支持 ImageRef、路径字符串或 { tpl, threshold, name }。返回 { x, y, index, name } 或 null。",
+            null
+        ),
+        Item(
+            "waitImageAny", "waitImageAny(templates, timeout, interval, options?)",
+            "waitImageAny([{ tpl: reward, name: 'reward' }, quick], 0, 1)",
+            "轮询等待多个模板中任意一个出现。timeout 秒：省略或负数=一直等到停止，0=只查一次。options 支持 threshold、region、missLimit。返回 { x, y, index, name } 或 null。截图失败不计入未找到。",
+            null
+        ),
+        Item(
+            "waitTextClick", "waitTextClick(texts, timeout, interval, options?)",
+            "waitTextClick([\"确定\", \"同意\"], 0, 1, { region: [0, 0, 1920, 1080] })",
+            "轮询截图 → OCR → 命中任意关键词后点击整行中心。timeout 秒：省略或负数=一直等到停止，0=只查一次。interval 默认 1 秒。options 支持 region/regions、delay（点击后等待毫秒）、missLimit。",
+            "declare function waitTextClick(texts: string[], timeout?: number, interval?: number, options?: WaitTextClickOptions): boolean;"
+        ),
+        Item("waitText", "waitText(text, options?)", "waitText(\"确定\", { regions: regions, timeoutMs: 10000 })",
+            "等待指定文字出现，返回结构化轮询结果",
+            "declare function waitText(text: string, options?: ScreenWaitOptions & OcrOptions): WaitResult<OcrItem>;"),
+        Item("waitTextAny", "waitTextAny(texts, options?)", "waitTextAny([\"确定\", \"同意\"], { regions: regions })",
+            "等待任一文字出现，支持按顺序检查多个区域",
+            "declare function waitTextAny(texts: string[], options?: ScreenWaitOptions & OcrOptions): WaitResult<OcrItem>;"),
+        Item("watchText", "watchText(texts, options?)", "watchText([\"确定\", \"同意\"], { intervalMs: 500, maxClicks: 3 })",
+            "持续识别并点击文字，直到限制条件满足或手动停止",
+            "declare function watchText(texts: string[], options?: ScreenWaitOptions & OcrOptions & WatchOptions): WaitResult<OcrItem>;"),
+        Item("waitScreen", "waitScreen(check, options?)", "waitScreen(function(shot) { return images.findImage(shot, template); }, { timeoutMs: 10000 })",
+            "重复截图并检查同步条件；返回命中、超时、未命中次数或截图状态",
+            "declare function waitScreen<T>(check: (image: ImageRef, state: PollState) => T | null | false | undefined, options?: ScreenWaitOptions): WaitResult<T>;"),
+        Item("retry", "retry(action, options?)", "retry(function(attempt) { return click(100, 200); }, { maxAttempts: 3 })",
+            "重试同步操作，成功或达到限制时返回结构化结果",
+            "declare function retry<T>(action: (attempt: number, state: PollState) => T | null | false | undefined, options?: RetryOptions): WaitResult<T>;"),
+        Item("clickImageUntilGone", "clickImageUntilGone(tpl, options?)", "clickImageUntilGone(\"images/sweep.png\", { confirmCount: 5, delayMs: 1000 })",
+            "持续定位并点击图片，连续确认消失后返回点击次数",
+            "declare function clickImageUntilGone(tpl: ImageRef | string, options?: ImageLoopOptions): WaitResult<Point>;"),
+        Item(
+            "images.readAll", "images.readAll(source)",
+            "images.readAll({ a: \"images/a.png\", b: \"images/b.png\" })",
+            "批量读图。source 为路径数组或「键名→路径」对象。数组入参返回等长数组、对象入参返回同 key 对象，失败位置为 null；missing 为失败路径数组。",
+            null
+        ),
+        Item(
+            "images.releaseAll", "images.releaseAll(...targets)",
+            "images.releaseAll(t.images, shot)",
+            "批量释放图片句柄。参数可混用句柄、数组、对象和 null，递归展开并按内部 id 去重；返回实际释放数量。",
+            null
+        ),
+        Item(
+            "clickRetry", "clickRetry(x, y, times, interval, duration)",
+            "clickRetry(1777, 24, 3, 500);",
+            "固定坐标点击失败时重试。times 含首次、默认 3，0 表示一直重试直到停止；interval 为失败后等待毫秒（默认 500）；duration 透传给 click（默认 30ms）。",
+            null
+        ),
+
+        Item(
+            "images.findImagePair", "images.findImagePair(img, tplA, tplB, options?)",
+            "images.findImagePair(shot, \"images/装备.png\", \"images/技能.png\")",
+            "查找两个模板并校验是否在同一行，返回两者中心的中点 midX/midY 与同行结论 sameRow（容差按较小模板高度的 30%，最小 4px，可用 rowTolerance 覆盖）。不同行仍返回结果；任一模板未找到返回 null。options 支持 threshold/thresholdA/thresholdB/region/rowTolerance。",
+            "declare function findImagePair(img: any, tplA: any, tplB: any, options?: any): any | null;"
+        ),
 
         // —— adapter ——
         Item("adapter.setDesignSize", "adapter.setDesignSize(w, h)", "adapter.setDesignSize(1080, 1920);", "声明设计基准分辨率"),
@@ -163,20 +250,48 @@ object ApiDocs {
         appendLine("// ddhelp 脚本 API 声明（自动生成，勿手改）")
         appendLine("// OCR 用法见 docs/README.md")
         appendLine()
+        appendLine("interface ImageHandle { __id: number; width: number; height: number; }")
+        appendLine("type ImageRef = ImageHandle | number;")
+        appendLine("type Region = [number, number, number, number];")
         appendLine("interface Point { x: number; y: number; }")
         appendLine("interface Rect { left: number; top: number; right: number; bottom: number; }")
-        appendLine("interface OcrItem extends Rect { text: string; bounds: Rect; confidence: number; centerX(): number; centerY(): number; }")
-        appendLine("interface OcrOptions { region?: [number, number, number, number]; }")
+        appendLine("interface OcrItem extends Rect { text: string; bounds: Rect; confidence: number; matched?: string; regionIndex?: number; centerX(): number; centerY(): number; }")
+        appendLine("interface OcrOptions { region?: [number, number, number, number]; regions?: Region[]; }")
+        appendLine("interface PollState { attempts: number; misses: number; clicks: number; elapsedMs: number; name: string; value?: any; lastError: string | null; }")
+        appendLine("type WaitReason = 'matched' | 'clicked' | 'gone' | 'completed' | 'max_clicks' | 'attempt_limit' | 'miss_limit' | 'timeout' | 'capture_error' | 'ocr_error' | 'invalid_image' | 'invalid_argument' | 'template_error';")
+        appendLine("interface WaitResult<T> { ok: boolean; reason: WaitReason; name: string; attempts: number; misses: number; clicks: number; elapsedMs: number; value: T | null; lastError: string | null; }")
+        appendLine("interface ScreenWaitOptions { timeoutMs?: number; intervalMs?: number; missLimit?: number; confirmCount?: number; maxAttempts?: number; name?: string; onRetry?: (reason: string, state: PollState) => void; }")
+        appendLine("interface WaitTextClickOptions extends OcrOptions { delay?: number; missLimit?: number; maxAttempts?: number; confirmCount?: number; name?: string; onRetry?: (reason: string, state: PollState) => void; }")
+        appendLine("interface WatchOptions { maxClicks?: number; delayMs?: number; }")
+        appendLine("interface RetryOptions { timeoutMs?: number; intervalMs?: number; maxAttempts?: number; name?: string; onRetry?: (reason: string, state: PollState) => void; }")
+        appendLine("interface ImageLoopOptions { timeoutMs?: number; intervalMs?: number; confirmCount?: number; maxAttempts?: number; name?: string; onRetry?: (reason: string, state: PollState) => void; threshold?: number; region?: Region; maxClicks?: number; delayMs?: number; }")
+        appendLine("interface FindImagePairOptions { threshold?: number; thresholdA?: number; thresholdB?: number; region?: Region; rowTolerance?: number; }")
+        appendLine("interface ResizeOptions { filter?: boolean; }")
+        appendLine("interface MatchTemplateOptions { threshold?: number; region?: Region; max?: number; }")
+        appendLine("interface ImageMatch extends Point { score: number; bounds: Rect; }")
+        // 多模板匹配结果：index 为传入数组下标，name 为条目 name/路径
+        appendLine("interface AnyMatch { x: number; y: number; index: number; name: string; }")
+        // 模板条目：可直接传句柄/路径，也可用对象覆盖阈值与名称
+        appendLine("interface TemplateEntry { tpl: any; threshold?: number; name?: string; }")
+        // images.readAll 的结果：数组入参返回数组，对象入参返回同 key 对象
+        appendLine("interface ReadAllResult { images: any; missing: string[]; }")
+        // 双模板匹配：a/b 为两个模板各自的框
+        appendLine("interface MatchRect { x: number; y: number; left: number; top: number; right: number; bottom: number; bounds: Rect; }")
+        appendLine("interface PairMatch { sameRow: boolean; rowDelta: number; tolerance: number; midX: number; midY: number; dx: number; dy: number; a: MatchRect; b: MatchRect; }")
         appendLine()
         items.filter { '.' !in it.name }.forEach { item ->
             appendLine("/** ${item.doc} */")
-            appendLine(dtsSignature(item))
+            appendLine(item.declaration?.let { declaration ->
+                if (declaration.startsWith("declare ")) declaration
+                else "declare function ${item.name} $declaration"
+            } ?: dtsSignature(item))
         }
         appendLine()
         appendLine("declare const images: {")
         items.filter { it.name.startsWith("images.") }.forEach {
             appendLine("    /** ${it.doc} */")
-            appendLine("    ${it.name.removePrefix("images.")}: (...args: any[]) => any;")
+            val declaration = it.declaration?.takeUnless { value -> value.startsWith("declare ") }
+            appendLine("    ${declaration ?: "${it.name.removePrefix("images.")}: (...args: any[]) => any;"}")
         }
         appendLine("};")
         appendLine("declare const colors: {")

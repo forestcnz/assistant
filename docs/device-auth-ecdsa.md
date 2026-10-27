@@ -26,25 +26,25 @@
 
 | 项 | 取值 | 理由 |
 | --- | --- | --- |
-| 签名算法 | ECDSA P-256（prime256v1 / secp256r1）+ SHA-256 | `minSdk 24` 上 `KeyFactory("EC")`、`Signature("SHA256withECDSA")` 原生可用，零依赖 |
+| 签名算法 | ECDSA P-256（prime256v1 / secp256r1）+ SHA-256 | `minSdk 29` 上 `KeyFactory("EC")`、`Signature("SHA256withECDSA")` 原生可用，零依赖 |
 | 签名编码 | DER | Java 默认 DER；Node 必须显式 `dsaEncoding: 'der'` 固定行为（Node v24 实测默认也是 DER，但不要依赖默认值） |
 | 私钥 | PKCS#8 PEM，仅存于发证机 | 不入仓库、不入 CI 制品 |
 | 公钥 | SPKI PEM，内置 APK | 可公开，泄漏无风险 |
 | 版本字节 | `ver = (keyId << 4) \| formatVersion` | 同时支持公钥轮换与格式演进；当前 `0x01` 表示 keyId=0、format=1 |
 | 文本编码 | Base64URL，无 padding | Node `base64url` 与 Java 端一致 |
 
-不使用 Ed25519：Android 原生 Ed25519 需 API 33+，本项目 `minSdk 24` 只能引入 BouncyCastle（约 +3MB）。RSA 也能零依赖，但签名更长、许可证更大；P-256 是体积与兼容性最合适的零依赖方案。
+不使用 Ed25519：Android 原生 Ed25519 需 API 33+，仍高于本项目 `minSdk 29`，只能引入 BouncyCastle（约 +3MB）。RSA 也能零依赖，但签名更长、许可证更大；P-256 是体积与兼容性最合适的零依赖方案。
 
 ### Base64 的 Android 兼容性
 
-`java.util.Base64` 从 **Android API 26** 才可用，而项目 `minSdk = 24`，当前也没有配置 core library desugaring。`android.util.Base64` 虽然 API 1 就有，但会让 `License.kt` 依赖 Android，破坏纯 JVM 单测。
+`java.util.Base64` 从 **Android API 26** 才可用。项目最低支持版本已从 API 24 提升到 **API 29**（Android 10），因此 `java.util.Base64` 现在可以直接使用，不再需要为核心逻辑引入兼容实现。
 
-因此推荐：
+不过仍建议把 Base64 放在 Android 适配层，`License.kt` 只接收 `ByteArray`，这样验签逻辑保持纯 JVM、可脱离设备单测：
 
-- 在 `core/device/Base64Url.kt` 实现一个约 30 行的严格 Base64URL 编解码器（纯 Kotlin，API 24 可用，JVM 可测）；
-- 或者把平台 Base64 放在 Android 适配层，`License.kt` 只接收 `ByteArray`，由测试使用 `java.util.Base64`。
+- 可选方案 A：`core/device/Base64Url.kt` 实现纯 Kotlin 编解码（无 Android 依赖，JVM 可测）；
+- 可选方案 B：直接在 Android 侧使用 `android.util.Base64`，纯逻辑层不接触字符串编码。
 
-首版采用前者，避免 API 26 限制与 Robolectric。
+两条路都不再有 API 下限障碍，按代码结构偏好选择即可。
 
 ## 3. 设备唯一值与设备码
 
@@ -617,7 +617,7 @@ androidId = 0123456789abcdef
 ```
 core/device/DeviceBind.kt          # 设备码 / deviceTag / 规范化（纯算法，无 Android 依赖，JVM 可测）
 core/device/DeviceIdentity.kt      # ANDROID_ID 读取 + 校验 + 缓存 + 机型摘要
-core/device/Base64Url.kt           # 严格 Base64URL 编解码（纯 Kotlin，API 24 可用）
+core/device/Base64Url.kt           # 严格 Base64URL 编解码（纯 Kotlin，JVM 可测；API 29 起也可直接用 java.util.Base64）
 core/device/License.kt             # 18 字节 header 解析 + ES256 验签 + 时间判定（纯逻辑）
 core/device/LicenseKeys.kt         # PEM/SPKI 解析、keyId -> PublicKey、资产加载适配
 core/device/LicenseStore.kt        # 持久化 + maxSeenDay/maxLicenseId + license_sha 自检
@@ -691,7 +691,7 @@ app/src/test/.../LicenseStoreTest.kt
 9. **覆盖所有入口**：`App.onCreate`、`MainActivity.onResume`、`ScriptRunner`、`ScheduledTaskWorker`、`ScheduleManager`、`TaskZip`；不要只改 UI。
 10. **单测先行**：先把第 10 节向量写成 `LicenseTest` / `DeviceBindTest`，再实现 `License.kt`，确保两端算法不漂移。
 11. **显式 `dsaEncoding: 'der'`**：不要依赖 Node 默认值；Java 端捕获 `SignatureException`，非法 DER 转 `BAD_SIGNATURE`，不要让异常冒到启动流程。
-12. **Base64 兼容 API 24**：不要在 App 里直接用 `java.util.Base64`（API 26）；用纯 Kotlin Base64URL 或 Android 适配层。
+12. **Base64 已无版本障碍**：`minSdk 29` 下 `java.util.Base64` 可直接使用；若希望验签逻辑保持纯 JVM，可在 Android 适配层解码后只把 `ByteArray` 交给 `License.kt`。
 13. **时间回拨**：到期判断用更新后的 `maxSeenDay`，不是 `today`；验签通过后即使过期也推进 `maxSeenDay` 和 `maxLicenseId`；时钟异常只允许用更高 `licenseId` 的新证恢复。
 14. **承认时间边界**：时间冻结、首次运行前回拨、清数据、root 都无法离线防；不要对外承诺“改时间一定无效”。
 15. **排除认证备份**：`device_auth` 偏好必须从 Auto Backup / D2D 迁移中排除，否则旧 `max_seen_day` 会被恢复。

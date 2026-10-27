@@ -26,26 +26,37 @@ object ImageApi {
 
     data class Point(val x: Int, val y: Int)
 
-    /** 调试日志钩子（引擎运行期注入，便于排查匹配问题） */
+    /** 匹配日志钩子：命中为 D（调试）、未命中为 W（警告）；引擎运行期注入 */
     @Volatile
-    var debugLogger: ((String) -> Unit)? = null
+    var debugLogger: ((Char, String) -> Unit)? = null
 
     @Volatile
     var cancellationCheck: (() -> Unit)? = null
 
     // —— JS 侧 Image 句柄：自增 id → Bitmap，避免把 Bitmap 暴露给 JS 引擎 ——
     private val images = ConcurrentHashMap<Int, Bitmap>()
+    // 图片来源名称（文件名 / "屏幕截图"）：仅在调试日志中标识模板路径，不参与匹配
+    private val imageNames = ConcurrentHashMap<Int, String>()
     private val templates = TemplateCache()
     private val screenGrays = ScreenGrayCache()
     private val nextId = AtomicInteger(1)
 
-    fun storeImage(bitmap: Bitmap): Int = nextId.getAndIncrement().also { images[it] = bitmap }
+    /** 存入图片句柄；[name] 用于日志中显示来源（文件名或“屏幕截图”） */
+    fun storeImage(bitmap: Bitmap, name: String = "截图"): Int =
+        nextId.getAndIncrement().also {
+            images[it] = bitmap
+            imageNames[it] = name
+        }
 
     fun image(id: Int?): Bitmap? = id?.let { images[it] }
+
+    /** 图片句柄的来源名称（文件名），未登记时返回 null */
+    fun imageName(id: Int): String? = imageNames[id]
 
     fun releaseImage(id: Int) {
         synchronized(templates) {
             images.remove(id)
+            imageNames.remove(id)
             templates.remove(id)
             screenGrays.removeImage(id)
         }
@@ -54,6 +65,7 @@ object ImageApi {
     fun clearImages() {
         synchronized(templates) {
             images.clear()
+            imageNames.clear()
             templates.clear()
             screenGrays.clear()
         }
@@ -61,12 +73,12 @@ object ImageApi {
 
     // ==================== 文件读写 ====================
 
-    /** 读图（相对路径基于脚本目录解析） */
+    /** 读图（相对路径基于脚本目录解析）；记录文件名，便于日志定位模板 */
     fun read(path: String, scriptDir: File): Int? {
         val f = resolve(path, scriptDir) ?: return null
         if (!f.isFile) return null
         val bmp = BitmapFactory.decodeFile(f.absolutePath) ?: return null
-        return storeImage(bmp)
+        return storeImage(bmp, f.name)
     }
 
     /** 保存图片；format 支持 png/jpg（默认按扩展名，quality 默认 100） */
@@ -102,6 +114,23 @@ object ImageApi {
         return try {
             storeImage(Bitmap.createBitmap(bmp, cx, cy, cw, ch))
         } catch (e: Exception) {
+            null
+        }
+    }
+
+    /** 按实际像素缩放图片，返回由调用方持有的新句柄。 */
+    fun resize(imageId: Int, width: Int, height: Int, filter: Boolean = true): Int? {
+        val source = image(imageId) ?: return null
+        if (width <= 0 || height <= 0 || width > 8192 || height > 8192) return null
+        return try {
+            val scaled = Bitmap.createScaledBitmap(source, width, height, filter)
+            val output = if (scaled === source) {
+                source.copy(source.config ?: Bitmap.Config.ARGB_8888, true) ?: return null
+            } else {
+                scaled
+            }
+            storeImage(output)
+        } catch (_: Exception) {
             null
         }
     }
@@ -216,6 +245,15 @@ object ImageApi {
         max: Int = 5
     ): List<Point> = findMatches(imageId, tplId, threshold, region, max).map { Point(it.x, it.y) }
 
+    /** 找图完整结果，含分数和模板边界，便于脚本按分数排序或输出调试信息。 */
+    fun findImageDetails(
+        imageId: Int,
+        tplId: Int,
+        threshold: Double = 0.9,
+        region: IntArray? = null,
+        max: Int = 5
+    ): List<Match> = findMatches(imageId, tplId, threshold, region, max)
+
     /** 模板是否出现在图中 */
     fun existsImage(
         imageId: Int,
@@ -273,24 +311,213 @@ object ImageApi {
         )
     }
 
+    // ==================== 双模板同行校验 ====================
+
+    /** 单个模板的匹配框；[x]/[y] 为中心，四边为模板在画面中的实际范围 */
+    data class MatchRect(
+        val x: Int,
+        val y: Int,
+        val left: Int,
+        val top: Int,
+        val right: Int,
+        val bottom: Int
+    )
+
+    /**
+     * 双模板匹配结果：
+     * - [sameRow] 为按容差判定的同行结论；
+     * - [midX]/[midY] 为两个匹配中心的中点，即“两个模板之间的坐标”；
+     * - [ax]/[ay]/[bx]/[by] 等为扁平化字段，便于跨桥接传递。
+     */
+    data class PairMatch(
+        val sameRow: Boolean,
+        val rowDelta: Int,
+        val tolerance: Int,
+        val midX: Int,
+        val midY: Int,
+        val dx: Int,
+        val dy: Int,
+        val a: MatchRect,
+        val b: MatchRect
+    )
+
+    /**
+     * 查找两个模板并校验是否在同一行，返回两者中心的中点。
+     *
+     * 性能：A 先全屏（或指定区域）搜索；B 优先在 A 所在的行带内搜索，
+     * 带高为 `hB + 2*tolerance`，找不到时回退一次全屏搜索，
+     * 以保证“找到了但不同行”仍能返回 sameRow=false。
+     *
+     * @param region [x, y, w, h]，两个模板共用
+     * @param rowTolerance 同行容差像素；<= 0 时按模板高度自动计算
+     */
+    fun findImagePair(
+        imageId: Int,
+        tplAId: Int,
+        tplBId: Int,
+        thresholdA: Double = 0.9,
+        thresholdB: Double = 0.9,
+        region: IntArray? = null,
+        rowTolerance: Int = 0
+    ): PairMatch? {
+        val tplA = image(tplAId) ?: return null
+        val tplB = image(tplBId) ?: return null
+
+        // 同一模板：取画面中按 X 排序的前两个“互不重叠”的位置（两个外观相同的控件）
+        // 注意：调用方即使传同一路径，也可能解析成两个不同句柄，
+        // 因此除 id 相等外还要比较图像内容是否同一份来源。
+        if (tplAId == tplBId || isSameSource(tplAId, tplBId)) {
+            // max 取 4 是为了在聚合后仍有足够候选可筛选；模板较大时相邻命中会被聚合掉
+            val hits = findMatches(imageId, tplAId, thresholdA, region, 4)
+            val distinct = distinctPositions(hits, tplA.width, tplA.height)
+            if (distinct.size < 2) return null
+            val sorted = distinct.sortedBy { it.x }
+            return buildPair(sorted[0], sorted[1], tplA, tplB, rowTolerance)
+        }
+
+        val a = findMatches(imageId, tplAId, thresholdA, region, 1).firstOrNull() ?: return null
+
+        // 自动容差：小控件用更严格的尺子
+        val tolerance = resolveTolerance(rowTolerance, tplA.height, tplB.height)
+        // B 优先在 A 的行带内搜索；带宽覆盖容差与自身高度
+        val band = rowBandOf(region, a, tplB.height, tolerance, imageWidth(imageId), imageHeight(imageId))
+        val b = (band?.let {
+            findMatches(imageId, tplBId, thresholdB, it, 1).firstOrNull()
+        }) ?: findMatches(imageId, tplBId, thresholdB, region, 1).firstOrNull() ?: return null
+
+        return buildPair(a, b, tplA, tplB, tolerance)
+    }
+
+    /** 同行容差：显式值优先，否则取较小模板高度的 30%，最少 4px */
+    internal fun resolveTolerance(requested: Int, heightA: Int, heightB: Int): Int =
+        if (requested > 0) requested else max(4, roundToInt(min(heightA, heightB) * 0.3))
+
+    /** 同行判定：中心 Y 差值不超过容差即为同一行（边界值算同行） */
+    internal fun isSameRow(rowDelta: Int, tolerance: Int): Boolean = rowDelta <= tolerance
+
+    /**
+     * 两个模板句柄是否来自同一份素材。
+     * 同一路径被解析两次会得到不同 id，但 [imageName] 相同；
+     * 截图之类没有来源名的句柄不在此判定，避免误判。
+     */
+    internal fun isSameSource(idA: Int, idB: Int): Boolean {
+        if (idA == idB) return true
+        val nameA = imageName(idA) ?: return false
+        val nameB = imageName(idB) ?: return false
+        return nameA == nameB && nameA != "屏幕截图"
+    }
+
+    /**
+     * 过滤掉互相重叠的命中，只保留彼此间距足够的位置。
+     * 模板匹配的相邻聚合对小模板不够严格，同一处可能残留多个候选；
+     * 只有中心在水平和垂直方向都相距半个模板以上时，才视为不同位置。
+     */
+    internal fun distinctPositions(hits: List<Match>, width: Int, height: Int): List<Match> {
+        if (hits.isEmpty()) return emptyList()
+        val halfW = (width / 2).coerceAtLeast(1)
+        val halfH = (height / 2).coerceAtLeast(1)
+        val kept = ArrayList<Match>()
+        for (hit in hits) {
+            val overlaps = kept.any { existing ->
+                kotlin.math.abs(existing.x - hit.x) < halfW && kotlin.math.abs(existing.y - hit.y) < halfH
+            }
+            if (!overlaps) kept.add(hit)
+        }
+        return kept
+    }
+
+    /** 两个匹配中心的中点 */
+    internal fun midPoint(ax: Int, ay: Int, bx: Int, by: Int): Pair<Int, Int> =
+        Pair((ax + bx) / 2, (ay + by) / 2)
+
+    /** 有符号差值 b - a */
+    internal fun delta(a: Int, b: Int): Int = b - a
+
+    private fun roundToInt(value: Double): Int = kotlin.math.round(value).toInt()
+
+    /** A 所在的行带；行带覆盖 A 的中心 ± 容差 ± B 的半高，并裁剪到画面内 */
+    private fun rowBandOf(
+        region: IntArray?,
+        a: Match,
+        heightB: Int,
+        tolerance: Int,
+        screenW: Int,
+        screenH: Int
+    ): IntArray? {
+        val full = clampRegion(region, screenW, screenH) ?: return null
+        val half = heightB / 2
+        val top = (a.y - tolerance - half).coerceAtLeast(full.top)
+        val bottom = (a.y + tolerance + half).coerceAtMost(full.bottom)
+        val height = bottom - top
+        // 行带过矮时放弃优化，交给调用方回退全屏搜索
+        if (height < heightB) return null
+        return intArrayOf(full.left, top, full.width(), height)
+    }
+
+    private fun imageWidth(imageId: Int): Int = image(imageId)?.width ?: 0
+    private fun imageHeight(imageId: Int): Int = image(imageId)?.height ?: 0
+
+    private fun buildPair(
+        a: Match,
+        b: Match,
+        tplA: android.graphics.Bitmap,
+        tplB: android.graphics.Bitmap,
+        tolerance: Int
+    ): PairMatch {
+        val toleranceValue = if (tolerance > 0) tolerance else resolveTolerance(0, tplA.height, tplB.height)
+        val rectA = toRect(a, tplA)
+        val rectB = toRect(b, tplB)
+        val rowDelta = kotlin.math.abs(a.y - b.y)
+        val mid = midPoint(a.x, a.y, b.x, b.y)
+        return PairMatch(
+            sameRow = isSameRow(rowDelta, toleranceValue),
+            rowDelta = rowDelta,
+            tolerance = toleranceValue,
+            midX = mid.first,
+            midY = mid.second,
+            dx = delta(a.x, b.x),
+            dy = delta(a.y, b.y),
+            a = rectA,
+            b = rectB
+        )
+    }
+
+    private fun toRect(match: Match, tpl: android.graphics.Bitmap): MatchRect = MatchRect(
+        x = match.x,
+        y = match.y,
+        left = match.x - tpl.width / 2,
+        top = match.y - tpl.height / 2,
+        right = match.x + tpl.width / 2,
+        bottom = match.y + tpl.height / 2
+    )
+
     /**
      * 由粗到细模板匹配，返回按位置排序的命中（坐标为模板中心）。
      * region 为 [x, y, w, h]；w/h ≤ 0 表示延伸到图像边界。
      */
-    fun findMatches(
-        imageId: Int,
+    fun findMatches(        imageId: Int,
         tplId: Int,
         threshold: Double,
         region: IntArray?,
         max: Int
     ): List<Match> {
+        // 模板来源名（文件名），用于日志定位；未知句柄退回 id
+        val tplName = imageName(tplId) ?: "image#$tplId"
+        // 无法进入匹配流程时同样按失败记 W，避免只看到“找不到”却不知道原因
+        fun fail(reason: String): List<Match> {
+            debugLogger?.invoke('W', "${tplName}找图失败 $reason")
+            return emptyList()
+        }
         if (max <= 0) return emptyList()
-        val screen = image(imageId) ?: return emptyList()
-        val tpl = image(tplId) ?: return emptyList()
-        val r = clampRegion(region, screen.width, screen.height) ?: return emptyList()
+        val screen = image(imageId) ?: return fail("原因=截屏句柄无效")
+        val tpl = image(tplId) ?: return fail("原因=模板句柄无效")
+        val r = clampRegion(region, screen.width, screen.height) ?: return fail("原因=搜索区域无效")
         val tw = tpl.width
         val th = tpl.height
-        if (tw <= 0 || th <= 0 || tw > r.width() || th > r.height()) return emptyList()
+        if (tw <= 0 || th <= 0) return fail("原因=模板尺寸无效")
+        if (tw > r.width() || th > r.height()) {
+            return fail("tpl=${tw}x$th region=${r.width()}x${r.height()} 原因=模板大于搜索区")
+        }
 
         val currentCheck = cancellationCheck ?: {}
         val bitmapGeneration = screen.generationId
@@ -313,11 +540,14 @@ object ImageApi {
             return Gray(width, height, pixels, currentCheck)
         }
         val prepared = synchronized(templates) {
-            if (images[tplId] !== tpl) return emptyList()
-            templates.getOrPut(tplId, tpl.generationId) { TemplateMatcher.PreparedTemplate(tpl.toGray()) }
-        }
+            if (images[tplId] !== tpl) null
+            else templates.getOrPut(tplId, tpl.generationId) {
+                TemplateMatcher.PreparedTemplate(tpl.toGray())
+            }
+        } ?: return fail("原因=模板已释放")
         return TemplateMatcher.find(
-            grayScreen, prepared, threshold, max, r.left, r.top, debugLogger, ::screenLevel
+            grayScreen, prepared, threshold, max, r.left, r.top, debugLogger, ::screenLevel,
+            tplName = tplName
         )
             .map { Match(it.x, it.y, it.score) }
     }

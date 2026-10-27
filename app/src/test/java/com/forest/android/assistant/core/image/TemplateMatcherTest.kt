@@ -169,4 +169,52 @@ class TemplateMatcherTest {
         assertEquals(97, exactRegion.x)
         assertEquals(92, exactRegion.y)
     }
+
+    /** 日志收集器：记录每次回调的级别与文本 */
+    private class LogCollector {
+        val lines = ArrayList<Pair<Char, String>>()
+        fun collect(level: Char, msg: String) {
+            lines.add(level to msg)
+        }
+    }
+
+    @Test fun successfulMatchLogsDebugWithTemplateName() {
+        val (screen, template) = fixture(61, 47, 37, 29)
+        val prepared = TemplateMatcher.PreparedTemplate(template)
+        val collector = LogCollector()
+        val hits = TemplateMatcher.find(screen, prepared, 0.99, 1, logger = collector::collect,
+            tplName = "按钮.png")
+        assertEquals(1, hits.size)
+        val (level, msg) = collector.lines.single()
+        assertEquals('D', level)
+        assertTrue("日志应包含文件名: $msg", msg.startsWith("按钮.png "))
+        assertTrue("日志应包含 match: $msg", msg.contains("match tpl=61x47"))
+    }
+
+    @Test fun failedMatchLogsWarningWithBestScore() {
+        // 纯色屏幕与带结构模板完全不匹配，应低于阈值并记录 W
+        val template = Gray(24, 20, IntArray(24 * 20) { Random(it).nextInt(256) })
+        val screen = Gray(120, 90, IntArray(120 * 90) { 200 })
+        val prepared = TemplateMatcher.PreparedTemplate(template)
+        val collector = LogCollector()
+        val hits = TemplateMatcher.find(screen, prepared, 0.99, 1, logger = collector::collect,
+            tplName = "缺失.png")
+        assertTrue(hits.isEmpty())
+        val (level, msg) = collector.lines.single()
+        assertEquals('W', level)
+        assertTrue("日志应包含文件名: $msg", msg.startsWith("缺失.png "))
+        assertTrue("日志应包含失败原因: $msg", msg.contains("找图失败"))
+        assertTrue("日志应包含最高分: $msg", msg.contains("best="))
+    }
+
+    @Test fun oversizedTemplateLogsWarning() {
+        val template = Gray(80, 60, IntArray(80 * 60) { 128 })
+        val screen = Gray(40, 30, IntArray(40 * 30) { 128 })
+        val prepared = TemplateMatcher.PreparedTemplate(template)
+        val collector = LogCollector()
+        assertTrue(TemplateMatcher.find(screen, prepared, 0.9, 1, logger = collector::collect).isEmpty())
+        val (level, msg) = collector.lines.single()
+        assertEquals('W', level)
+        assertTrue("应提示模板大于搜索区: $msg", msg.contains("模板大于搜索区"))
+    }
 }

@@ -1144,11 +1144,8 @@ object FloatyManager {
 
     /** 叠加窗口通用参数：置顶、不抢焦点、可触摸 */
     private fun overlayParams(gravity: Int, x: Int, y: Int): WindowManager.LayoutParams {
-        val windowType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
-            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-        else
-            @Suppress("DEPRECATION")
-            WindowManager.LayoutParams.TYPE_PHONE
+        // minSdk 29：悬浮窗类型固定为 TYPE_APPLICATION_OVERLAY
+        val windowType = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
         return WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.WRAP_CONTENT,

@@ -1,5 +1,7 @@
 package com.forest.android.assistant
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -132,7 +134,6 @@ class ScriptEditorActivity : ComponentActivity() {
     private fun EditorScreen() {
         var apiHelp by remember { mutableStateOf<ApiDocs.Item?>(null) }
         var showExamples by remember { mutableStateOf(false) }
-        var pendingReplacement by remember { mutableStateOf<Pair<String, String>?>(null) }
         val keyboard = LocalSoftwareKeyboardController.current
         Scaffold(
             containerColor = MaterialTheme.colorScheme.background,
@@ -250,29 +251,13 @@ class ScriptEditorActivity : ComponentActivity() {
         if (showExamples) {
             ScriptExamplesDialog(
                 onDismiss = { showExamples = false },
+                onCopy = { title, code ->
+                    if (copyExample(title, code)) showExamples = false
+                },
                 onInsert = { code, completeScript ->
                     insertAtCursor(code, completeWord = false, block = completeScript)
                     showExamples = false
-                },
-                onReplace = { title, code ->
-                    showExamples = false
-                    if (content.text.isBlank()) replaceWithExample(code)
-                    else pendingReplacement = title to code
                 }
-            )
-        }
-        pendingReplacement?.let { (title, code) ->
-            AlertDialog(
-                onDismissRequest = { pendingReplacement = null },
-                title = { Text("替换当前脚本？") },
-                text = { Text("将当前编辑内容替换为「$title」。点击顶部“保存”后才会写入脚本文件；返回或切到后台不会保存本次替换。") },
-                confirmButton = {
-                    TextButton(onClick = {
-                        replaceWithExample(code)
-                        pendingReplacement = null
-                    }) { Text("确认替换") }
-                },
-                dismissButton = { TextButton(onClick = { pendingReplacement = null }) { Text("取消") } }
             )
         }
         apiHelp?.let { item ->
@@ -290,10 +275,15 @@ class ScriptEditorActivity : ComponentActivity() {
                     }
                 },
                 confirmButton = {
-                    TextButton(onClick = {
-                        insertAtCursor(item.snippet)
-                        apiHelp = null
-                    }) { Text("插入示例") }
+                    Row {
+                        TextButton(onClick = {
+                            insertAtCursor(item.snippet)
+                            apiHelp = null
+                        }) { Text("插入示例") }
+                        TextButton(onClick = {
+                            if (copyExample(item.name, item.snippet)) apiHelp = null
+                        }) { Text("复制") }
+                    }
                 },
                 dismissButton = { TextButton(onClick = { apiHelp = null }) { Text("关闭") } }
             )
@@ -316,6 +306,20 @@ class ScriptEditorActivity : ComponentActivity() {
                 },
                 dismissButton = { TextButton(onClick = { showClearDialog = false }) { Text("取消") } }
             )
+        }
+    }
+
+    /** 复制不修改编辑内容、光标或保存状态，交由用户选择粘贴位置。 */
+    private fun copyExample(title: String, code: String): Boolean {
+        return try {
+            val clipboard = getSystemService(ClipboardManager::class.java)
+                ?: error("系统剪贴板不可用")
+            clipboard.setPrimaryClip(ClipData.newPlainText(title, code))
+            Toast.makeText(this, "已复制代码，可长按编辑器粘贴", Toast.LENGTH_SHORT).show()
+            true
+        } catch (_: Exception) {
+            Toast.makeText(this, "复制失败，请重试", Toast.LENGTH_SHORT).show()
+            false
         }
     }
 
@@ -373,15 +377,6 @@ class ScriptEditorActivity : ComponentActivity() {
         content = TextFieldValue(newText, TextRange(newCursor))
         dirty = true
         contentVersion++
-    }
-
-    private fun replaceWithExample(code: String) {
-        content = TextFieldValue(code.trimEnd() + "\n", TextRange(0))
-        dirty = true
-        contentVersion++
-        requiresExplicitSave = true
-        errorLine = 0
-        errorHint = null
     }
 
     /** 后台串行保存快照；旧请求不能覆盖更新的保存请求。 */

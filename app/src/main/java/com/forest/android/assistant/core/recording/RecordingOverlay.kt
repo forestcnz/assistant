@@ -29,9 +29,8 @@ class RecordingOverlay(
     private val wm = context.getSystemService(WindowManager::class.java)
     private val density = context.resources.displayMetrics.density
     private fun dp(value: Int) = (value * density).roundToInt()
-    private val windowType = if (Build.VERSION.SDK_INT >= 26)
-        WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else
-        @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_PHONE
+    // minSdk 29：悬浮窗类型固定为 TYPE_APPLICATION_OVERLAY
+    private val windowType = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
     private val title = TextView(context).apply {
         setTextColor(Color.WHITE)
         textSize = 12f
@@ -158,7 +157,8 @@ class RecordingOverlay(
         PixelFormat.TRANSLUCENT
     ).apply {
         gravity = Gravity.TOP or Gravity.START
-        if (Build.VERSION.SDK_INT >= 28) layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+        // minSdk 29：刘海屏模式常量自 API 28 起可用，无需版本判断
+        layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
         if (Build.VERSION.SDK_INT >= 30) setFitInsetsTypes(0)
     }
 }

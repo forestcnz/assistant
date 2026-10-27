@@ -55,6 +55,21 @@ object OcrScriptChecks {
                     check(typeof found.confidence === "number", "confidence");
                     var chinese = ocr.findTextContains(image, "立即购买");
                     check(chinese !== null, "Chinese lookup without options");
+                    var regions = [[15, 30, 450, 65], [15, 100, 450, 80]];
+                    var multiRegion = ocr.findTextAny(image, ["立即购买"], { regions: regions });
+                    check(multiRegion !== null && multiRegion.regionIndex === 1,
+                        "multi-region OCR 应返回命中区域下标");
+                    var waitedEnglish = waitText("Buy", { region: options.region, maxAttempts: 1 });
+                    check(waitedEnglish.ok && waitedEnglish.reason === "matched" &&
+                        waitedEnglish.value.matched === "Buy", "waitText 应返回文字命中");
+                    var waitedChinese = waitTextAny(["立即购买"], { regions: regions, maxAttempts: 1 });
+                    check(waitedChinese.ok && waitedChinese.value.regionIndex === 1,
+                        "waitTextAny 应返回多区域命中");
+                    var watch = watchText(["Buy"], {
+                        region: options.region, maxAttempts: 1, maxClicks: 1
+                    });
+                    check(!watch.ok && watch.reason === "attempt_limit" &&
+                        watch.lastError === "click_failed", "watchText 不得误报点击成功");
                     check(ocr.findTextContains(image, "立即购买", options) === null, "region excludes Chinese line");
                     check(ocr.findTextContains(image, "missing") === null, "missing query");
                     check(ocr.findTextContains(image, " \t\n【】★") === null, "symbol-only query");
