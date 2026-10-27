@@ -1,8 +1,8 @@
 # 雕雕助手脚本 API 完整参考
 
-本文按当前仓库的脚本引擎实现整理，包含 **72 个公开函数/方法**，另列公开属性、返回对象、配置字段及使用限制。适用于包含 `ocr.findTextContains` 的当前版本。
+本文按当前仓库的脚本引擎实现整理，包含 **81 个公开函数/方法**，另列公开属性、返回对象、配置字段及使用限制。
 
-接口实现以 [`ScriptEngine.kt`](../app/src/main/java/com/forest/android/assistant/core/engine/ScriptEngine.kt) 为准；编辑器补全和自动导出的 `.d.ts` 目前只覆盖其中一部分，不能代替本手册。以 `__` 开头的桥接函数属于内部实现，不是供任务脚本调用的 API；公开的脚本路径变量 `__scriptPath__` 单独说明。
+接口实现以 [`ScriptEngine.kt`](../app/src/main/java/com/forest/android/assistant/core/engine/ScriptEngine.kt) 为准；编辑器补全和自动导出的 `.d.ts` 提供签名与常用类型，本手册补充完整行为和边界。以 `__` 开头的桥接函数属于内部实现，不是供任务脚本调用的 API；公开的脚本路径变量 `__scriptPath__` 单独说明。
 
 ## 目录与方法索引
 
@@ -13,11 +13,12 @@
 | [无障碍](#accessibility) | `auto`、`auto.waitFor`、`auto.service`（属性） |
 | [点击与手势](#gestures) | `click`、`clickRandom`、`clickRetry`、`longClick`、`press`、`swipe`、`swipeRandom`、`gesture`、`gestures`、`gesturesAvailable` |
 | [截图](#capture) | `requestScreenCapture`、`requestScreenCaptureAsync`、`captureScreen` |
-| [图片基础操作](#image-basics) | `images.read`、`images.readAll`、`images.save`、`images.clip`、`images.pixel`、`images.width`、`images.height`、`images.release`、`images.releaseAll` |
-| [找图与找色](#image-search) | `images.findImage`、`images.findImageAny`、`images.findImagePair`、`images.findAllImages`、`images.existsImage`、`images.findImageInRegion`、`images.findImageWithText`、`images.findColor`、`images.findMultiColors` |
-| [轮询找图](#wait-image) | `waitImage`、`waitImageVanish`、`waitImageClick`、`waitImageAny` |
+| [图片基础操作](#image-basics) | `images.read`、`images.readAll`、`images.save`、`images.clip`、`images.resize`、`images.pixel`、`images.width`、`images.height`、`images.release`、`images.releaseAll` |
+| [找图与找色](#image-search) | `images.findImage`、`images.findImageDetails`、`images.matchTemplate`、`images.findImageAny`、`images.findImagePair`、`images.findAllImages`、`images.existsImage`、`images.findImageInRegion`、`images.findImageWithText`、`images.findColor`、`images.findMultiColors` |
+| [轮询找图](#wait-image) | `waitImage`、`waitImageVanish`、`waitImageClick`、`waitImageAny`、`clickImageUntilGone` |
 | [颜色工具](#colors) | `colors.parseColor`、`colors.rgb`、`colors.argb`、`colors.red`、`colors.green`、`colors.blue`、`colors.alpha`、`colors.toString`、`colors.isSimilar` |
-| [OCR](#ocr) | `ocr.init`、`ocr.ready`、`ocr.recognize`、`ocr.recognizeText`、`ocr.findText`、`ocr.findTextContains`、`ocr.findTextAny`、`ocr.findAllText`、`waitTextClick`、`OcrItem.centerX`、`OcrItem.centerY` |
+| [OCR](#ocr) | `ocr.init`、`ocr.ready`、`ocr.recognize`、`ocr.recognizeText`、`ocr.findText`、`ocr.findTextContains`、`ocr.findTextAny`、`ocr.findAllText`、`waitText`、`waitTextAny`、`waitTextClick`、`watchText`、`OcrItem.centerX`、`OcrItem.centerY` |
+| [通用等待与重试](#polling) | `waitScreen`、`retry` |
 | [坐标适配](#adapter) | `adapter.setDesignSize`、`adapter.reset`、`adapter.enabled`、`adapter.scale` |
 | [模块与脚本路径](#modules) | `require`、`__scriptPath__`（变量） |
 | [任务配置](#config) | `config.json` 的所有已读取字段 |
@@ -111,6 +112,15 @@ OCR 另有当前实现行为：裁剪后的宽或高小于 **8 个实际像素**
 | `OcrItem` | `confidence` | `number` | 模型返回的置信度；模型给出负值表示无有效置信度时，当前实现填 1，因此 1 不一定表示识别完全正确 |
 | `OcrItem` | `centerX()`、`centerY()` | `() => number` | 整行中心坐标，见第 10 节 |
 | `OcrItem` | `matched` | `string`，可选 | 仅 `ocr.findTextAny` 返回，表示实际命中的关键词原文 |
+| `OcrItem` | `regionIndex` | `number`，可选 | `options.regions` 中命中区域的下标，从 0 开始；未使用 `regions` 时为 -1 |
+| `ImageMatch` | `x`、`y` | `number` | 模板中心，使用当前 adapter 坐标 |
+| `ImageMatch` | `score` | `number` | 模板匹配分数，范围通常为 0～1；越大越相似 |
+| `ImageMatch` | `bounds` | `Rect` | 匹配模板的边界，使用当前 adapter 坐标 |
+| `WaitResult<T>` | `ok`、`reason` | `boolean`、`string` | 操作是否按目标条件结束，以及结束原因 |
+| `WaitResult<T>` | `value` | `T` 或 `null` | 最近一次命中的值；重试超时等情况可能保留之前的命中 |
+| `WaitResult<T>` | `attempts`、`misses`、`clicks`、`elapsedMs` | `number` | 截图/动作次数、连续未命中数、点击数、总耗时毫秒 |
+| `WaitResult<T>` | `lastError` | `string` 或 `null` | 最近的截图、OCR、图片模板或点击错误 |
+| `PollState` | `attempts`、`misses`、`clicks`、`elapsedMs`、`name` | `number`、`string` | 当前轮询/重试进度；`retry` 动作回调也会收到上次结果 `value` 和 `lastError` |
 | `AnyMatch` | `x`、`y` | `number` | 命中模板中心，可直接传给 `click` |
 | `AnyMatch` | `index` | `number` | 命中条目在传入数组中的下标（从 0 开始） |
 | `AnyMatch` | `name` | `string` | 条目 `name`；未指定时取路径字符串，句柄条目为空串 |
@@ -138,6 +148,24 @@ OCR 另有当前实现行为：裁剪后的宽或高小于 **8 个实际像素**
 | `FindColorOptions` | `threshold` | `number`，整数 | `16` | 每个 RGB 通道允许的绝对色差，建议 0～255；0 为精确色值，忽略 Alpha |
 | `FindColorOptions` | `region` | `Region` | 全图 | 首色/主色点的搜索区域 |
 | `OcrOptions` | `region` | `Region` | 全图 | OCR 区域 |
+| `OcrOptions` | `regions` | `Region[]` | 未设置 | 不能与 `region` 同时设置；按数组顺序检查多个区域，结果带 `regionIndex` |
+| `ScreenWaitOptions` | `timeoutMs` | `number`，毫秒 | `0` | 等待超时；`0` 表示不限时，使用 `maxAttempts` 可限制检查轮数 |
+| `ScreenWaitOptions` | `intervalMs` | `number`，毫秒 | `500` | 轮询周期，最小 50ms；OCR 等操作占用的时间计入周期 |
+| `ScreenWaitOptions` | `missLimit` | `number`，整数 | `0` | 连续未命中次数限制；`0` 不限，截图/OCR 失败不计入 |
+| `ScreenWaitOptions` | `confirmCount` | `number`，整数 | `1` | 连续命中多少次才确认条件；截图失败会打断连续确认 |
+| `ScreenWaitOptions` | `maxAttempts` | `number`，整数 | `0` | 最多检查次数；`0` 不限，至少检查一次 |
+| `ScreenWaitOptions` | `name` | `string` | `""` | 附在返回结果和重试回调状态里的步骤名 |
+| `ScreenWaitOptions` | `onRetry` | `function` | 未设置 | 每轮仍需重试时同步调用，接收原因和当前状态 |
+| `WatchOptions` | `maxClicks` | `number`，整数 | `0` | 点击次数上限；`0` 表示持续运行 |
+| `WatchOptions` | `delayMs` | `number`，毫秒 | `0` | 每次点击后等待时间 |
+| `RetryOptions` | `maxAttempts` | `number`，整数 | `3` | 操作尝试次数，包含首次；`0` 表示不限次数 |
+| `RetryOptions` | `timeoutMs`、`intervalMs`、`name`、`onRetry` | 同 `ScreenWaitOptions` | — | 整组操作的总超时、重试间隔与进度回调 |
+| `ImageLoopOptions` | `threshold` / `region` | `number` / `Region` | `0.9` / 全图 | 单张模板的阈值与搜索区域 |
+| `ImageLoopOptions` | `confirmCount` | `number`，整数 | `3` | 连续多少帧未找到时确认图片已消失 |
+| `ImageLoopOptions` | `maxClicks` | `number`，整数 | `0` | 点击次数上限；`0` 表示不设上限 |
+| `ImageLoopOptions` | `delayMs` | `number`，毫秒 | `0` | 每次点击后等待时间 |
+| `MatchTemplateOptions` | `threshold` / `region` / `max` | `number` / `Region` / `number` | `0.9` / 全图 / `5` | 匹配阈值、搜索区域和最多返回结果数 |
+| `ResizeOptions` | `filter` | `boolean` | `true` | 是否使用滤镜平滑缩放 |
 | `FindImageAnyOptions` | `threshold` | `number` | `0.9` | 条目未单独指定阈值时使用 |
 | `FindImageAnyOptions` | `region` | `Region` | 全图 | 所有条目共用的搜索区域 |
 | `WaitImageClickOptions` | `threshold` / `region` | | | 同 `FindImageOptions` |
@@ -146,8 +174,10 @@ OCR 另有当前实现行为：裁剪后的宽或高小于 **8 个实际像素**
 | `WaitImageAnyOptions` | `threshold` / `region` | | | 同 `FindImageAnyOptions` |
 | `WaitImageAnyOptions` | `missLimit` | `number`，整数 | `0` | 连续未找到多少次后返回 `null`；`0` 不限 |
 | `WaitTextClickOptions` | `region` | `Region` | 全图 | OCR 区域 |
+| `WaitTextClickOptions` | `regions` | `Region[]` | 未设置 | 按顺序检查多个 OCR 区域，命中后返回区域下标 |
 | `WaitTextClickOptions` | `delay` | `number`，毫秒 | `0` | 点击成功后额外等待 |
 | `WaitTextClickOptions` | `missLimit` | `number`，整数 | `0` | 连续未找到多少次后返回 `false`；`0` 不限 |
+| `WaitTextClickOptions` | `confirmCount` / `maxAttempts` | `number`，整数 | `1` / `0` | 连续命中确认次数／检查轮数上限；`maxAttempts: 0` 不限 |
 
 `ocr.*` 不读取 `threshold`、`ignoreCase`、`removeSpaces` 或 `engine` 等 options 字段。OCR 引擎用 `ocr.init(engine)` 指定；忽略空格及符号的查找使用 `ocr.findTextContains`，一次匹配多个关键词使用 `ocr.findTextAny`。
 
@@ -652,6 +682,28 @@ var crop = images.clip(img, 100, 200, 300, 120);
 if (crop) images.release(crop);
 ```
 
+### `images.resize`
+
+签名：`images.resize(img: ImageRef, width: number, height: number, options?: ResizeOptions): Image | null`。
+
+按实际像素尺寸生成新的图片句柄。模板大小不会因 `adapter` 自动改变；需要为其他分辨率准备模板时可以显式缩放，再用返回句柄匹配。
+
+| 参数 | 类型 | 必填 | 默认值 | 说明 |
+| --- | --- | --- | --- | --- |
+| `img` | `ImageRef` | 是 | — | 原图片 |
+| `width`、`height` | `number`，正整数 | 是 | — | 输出实际像素尺寸，单边最多 8192 |
+| `options.filter` | `boolean` | 否 | `true` | `true` 使用双线性滤镜，`false` 使用邻近像素缩放 |
+
+返回：新图片句柄；原图和缩放图须分别释放。尺寸无效、图片无效或内存不足时返回 `null`。
+
+```javascript
+var scaled = images.resize(template, 400, 120, { filter: true });
+if (scaled) {
+    log("缩放模板：", images.width(scaled), images.height(scaled));
+    images.release(scaled);
+}
+```
+
 ### `images.pixel`
 
 签名：`images.pixel(img: ImageRef, x: number, y: number): number | null`。
@@ -754,6 +806,40 @@ try {
 ```javascript
 var point = images.findImage(img, tpl, { threshold: 0.92, region: [0, 500, 1080, 800] });
 if (point) click(point.x, point.y);
+```
+
+### `images.matchTemplate`
+
+签名：`images.matchTemplate(img: ImageRef, tpl: ImageRef | string, options?: MatchTemplateOptions): ImageMatch[]`。
+
+返回达到阈值的匹配明细，按画面位置从上到下、从左到右排列。与 `findAllImages` 不同，结果保留每个匹配的分数和矩形边界。
+
+| 参数 | 类型 | 必填 | 默认值 | 说明 |
+| --- | --- | --- | --- | --- |
+| `img` | `ImageRef` | 是 | — | 被搜索的大图 |
+| `tpl` | `ImageRef` 或 `string` | 是 | — | 模板句柄或相对脚本目录的路径；路径只在本次调用内读取并释放 |
+| `options.threshold` | `number` | 否 | `0.9` | 最低相似度分数 |
+| `options.region` | `Region` | 否 | 全图 | 搜索区域 |
+| `options.max` | `number`，整数 | 否 | `5` | 最多返回的候选数；小于等于 0 返回空数组 |
+
+返回：`ImageMatch[]`，每项包含 `x`、`y`、`score` 和 `bounds`。无匹配或参数无效时返回空数组。多个结果按位置排序，不按分数排序；要取最高分结果请用 `images.findImageDetails`。分数用于比较模板相似度，不等同于识别正确概率。
+
+```javascript
+var matches = images.matchTemplate(shot, template, { threshold: 0.88, max: 3 });
+if (matches.length) {
+    log("最佳分数：", matches[0].score, JSON.stringify(matches[0].bounds));
+}
+```
+
+### `images.findImageDetails`
+
+签名：`images.findImageDetails(img: ImageRef, tpl: ImageRef | string, options?: MatchTemplateOptions): ImageMatch | null`。
+
+`images.matchTemplate` 的单结果简写，返回通过阈值的最高分匹配；无匹配时返回 `null`。
+
+```javascript
+var match = images.findImageDetails(shot, template, { threshold: 0.9 });
+if (match) log(match.x, match.y, match.score, JSON.stringify(match.bounds));
 ```
 
 ### `images.findImageAny`
@@ -1038,6 +1124,32 @@ if (hit && hit.name === "reward") {
 }
 ```
 
+### `clickImageUntilGone`
+
+签名：`clickImageUntilGone(tpl: ImageRef | string, options?: ImageLoopOptions): WaitResult<Point>`。
+
+反复截图定位并点击模板，连续 `confirmCount` 次有效截图未找到后返回 `reason: "gone"`。适合反复扫荡或领取，模板路径只在调用期间加载一次。
+
+| 参数 | 类型 | 必填 | 默认值 | 说明 |
+| --- | --- | --- | --- | --- |
+| `tpl` | `ImageRef` 或 `string` | 是 | — | 模板句柄或相对脚本目录的路径 |
+| `options.timeoutMs` | `number`，毫秒 | 否 | `0` | 最长等待时间；`0` 表示不限时 |
+| `options.intervalMs` | `number`，毫秒 | 否 | `500` | 检查周期，最小 50ms |
+| `options.confirmCount` | `number`，整数 | 否 | `3` | 连续多少次未匹配后确认已消失 |
+| `options.threshold` / `options.region` | `number` / `Region` | 否 | `0.9` / 全图 | 模板阈值与搜索区域 |
+| `options.maxClicks` | `number`，整数 | 否 | `0` | 点击上限；达到后以 `reason: "max_clicks"` 返回；`0` 不限 |
+| `options.delayMs` | `number`，毫秒 | 否 | `0` | 每次点击后等待 |
+| `options.maxAttempts` | `number`，整数 | 否 | `0` | 检查轮数上限；`0` 不限 |
+
+成功消失返回 `ok: true`；结果中的 `clicks` 是点击成功次数。截图失败不计为未命中。超时、轮数到达上限和截图授权失败会返回对应 `reason`。
+
+```javascript
+var result = clickImageUntilGone(sweep, {
+    name: "通天塔扫荡", confirmCount: 5, delayMs: 3000
+});
+log(result.reason, "扫荡次数：", result.clicks);
+```
+
 <a id="colors"></a>
 
 ## 9. 颜色工具
@@ -1318,15 +1430,15 @@ log("匹配数量：", matches.length);
 
 签名：`ocr.findTextAny(image: ImageRef, texts: string[], options?: OcrOptions): OcrItem | null`。
 
-**只执行一次 OCR**，判断每行是否包含关键词数组中的任意一个。
+在同一张输入图片中判断每行是否包含关键词数组中的任意一个；设置 `regions` 时按顺序检查区域，命中即返回。
 
 | 参数 | 类型 | 必填 | 默认值 | 说明 |
 | --- | --- | --- | --- | --- |
 | `image` | `ImageRef` | 是 | — | 输入图片，不直接接受路径 |
 | `texts` | `string[]` | 是 | — | 关键词数组；行顺序优先，同一行内取数组顺序的第一个命中词 |
-| `options` | `OcrOptions` | 否 | `{}` | 仅支持 `region = 全图` |
+| `options` | `OcrOptions` | 否 | `{}` | 可指定一个 `region`，或以 `regions` 按顺序指定多个区域 |
 
-返回：在 `OcrItem` 基础上多一个 `matched` 字段，表示实际命中的关键词**原文**。匹配规则与 `ocr.findTextContains` 完全一致：NFKC 规范化、只保留 Unicode 字母和数字、忽略大小写、逐行包含匹配、不跨行拼接。
+返回：在 `OcrItem` 基础上多一个 `matched` 字段，表示实际命中的关键词**原文**；设置 `regions` 时还会带 `regionIndex`。匹配规则与 `ocr.findTextContains` 完全一致：NFKC 规范化、只保留 Unicode 字母和数字、忽略大小写、逐行包含匹配、不跨行拼接。每个区域各运行一次 OCR，但共用传入的同一图片，不会重复截图。
 
 清理后为空的关键词会被忽略；关键词数组为空或全部清理后为空时返回 `null`，**且不触发 OCR**。
 
@@ -1336,6 +1448,53 @@ if (line) {
     log("命中：", line.matched, "原文：", line.text);
     click(line.centerX(), line.centerY());
 }
+```
+
+多个区域按优先级依次检查，返回命中区域在数组中的下标：
+
+```javascript
+var line = ocr.findTextAny(shot, ["确定", "同意"], {
+    regions: [[1702, 425, 192, 92], [601, 570, 324, 130]]
+});
+if (line) log("命中区域：", line.regionIndex, line.text);
+```
+
+### `waitText` / `waitTextAny`
+
+签名：`waitText(text: string, options?: ScreenWaitOptions & OcrOptions): WaitResult<OcrItem>`、`waitTextAny(texts: string[], options?: ScreenWaitOptions & OcrOptions): WaitResult<OcrItem>`。
+
+轮询截图与 OCR，出现匹配文字后返回结构化结果；不自动点击。两者均支持 `region` 与 `regions`，其中多区域按顺序检查。
+
+| 参数 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `text` / `texts` | `string` / `string[]` | — | 单个或多个关键词，匹配规则同 `ocr.findTextAny` |
+| `options.timeoutMs` | `number`，毫秒 | `0` | `0` 表示不限时 |
+| `options.intervalMs` | `number`，毫秒 | `500` | 轮询周期，最小 50ms |
+| `options.confirmCount` | `number`，整数 | `1` | 连续识别到多少次后才确认；截图或识别失败打断确认 |
+| `options.missLimit` | `number`，整数 | `0` | 连续成功 OCR 但无匹配的上限；`0` 不限 |
+| `options.maxAttempts` | `number`，整数 | `0` | 轮询次数上限；`0` 不限 |
+| `options.region` / `options.regions` | `Region` / `Region[]` | 全图 | 限制 OCR 范围；两个字段不能同时指定 |
+
+返回的 `WaitResult.value` 为 `OcrItem`。`reason` 为 `matched`、`timeout`、`miss_limit`、`attempt_limit`、`capture_error`、`ocr_error` 或 `invalid_argument`；失败时查看 `lastError`。
+
+```javascript
+var result = waitTextAny(["确定", "同意"], {
+    regions: regions, timeoutMs: 10000, intervalMs: 1000, confirmCount: 2
+});
+if (result.ok) click(result.value.centerX(), result.value.centerY());
+```
+
+### `watchText`
+
+签名：`watchText(texts: string[], options?: ScreenWaitOptions & OcrOptions & WatchOptions): WaitResult<OcrItem>`。
+
+持续轮询 OCR，匹配后点击文字整行中心，然后继续监听。默认无限运行，用户停止任务时退出；`maxClicks`、`missLimit`、`maxAttempts` 或 `timeoutMs` 可设定结束条件。每次只点击当前命中的一行，下一轮会重新截图。
+
+```javascript
+var result = watchText(["确定", "同意"], {
+    regions: regions, intervalMs: 500, delayMs: 300, maxClicks: 10
+});
+log("监听结束：", result.reason, "点击次数：", result.clicks);
 ```
 
 ### `waitTextClick`
@@ -1382,6 +1541,55 @@ log(item.centerX());
 
 ```javascript
 log(item.centerY());
+```
+
+<a id="polling"></a>
+
+## 通用等待与整组重试
+
+新轮询接口的 `timeoutMs`、`intervalMs`、`delayMs` 均使用毫秒；`timeoutMs: 0` 表示不限时，次数限制通过 `maxAttempts`、`missLimit` 设置。等待会在脚本停止时立即退出。图片句柄只在截图检查期间有效；`waitScreen` 回调应返回普通数据，不应返回当前截图对象。
+
+### `waitScreen`
+
+签名：`waitScreen<T>(check: (image: ImageRef, state: PollState) => T | null | false | undefined, options?: ScreenWaitOptions): WaitResult<T>`。
+
+每轮获取一张截图并传给同步 `check` 函数，自动释放截图。回调返回真值表示命中，返回 `false`、`null` 或 `undefined` 表示继续等待。适合组合检查多张图片或实现业务自己的跨帧状态判断。
+
+| 参数 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `check` | 同步函数 | — | 接收截图和本轮状态，返回命中值或未命中 |
+| `options.timeoutMs` | `number`，毫秒 | `0` | 超时；`0` 表示不限时 |
+| `options.intervalMs` | `number`，毫秒 | `500` | 检查周期，最小 50ms |
+| `options.confirmCount` | `number`，整数 | `1` | 连续命中次数；截图失败打断连续确认 |
+| `options.missLimit` | `number`，整数 | `0` | 连续有效截图未命中的次数上限；`0` 不限 |
+| `options.maxAttempts` | `number`，整数 | `0` | 截图检查次数上限；`0` 不限，至少检查一次 |
+| `options.name` | `string` | `""` | 附在结果及回调状态中的步骤名称 |
+| `options.onRetry` | 同步函数 | 未设置 | 每轮继续等待时调用，参数为原因与 `PollState` |
+
+返回 `WaitResult<T>`。`reason` 可能是 `matched`、`timeout`、`miss_limit`、`attempt_limit` 或 `capture_error`；授权失败会立即返回 `capture_error`。`onRetry` 的原因包括 `miss`、`capture_error` 和 `confirming`。
+
+```javascript
+var state = waitScreen(function(shot) {
+    var exhausted = images.findImage(shot, exhaustedTemplate, { threshold: 0.86 });
+    if (exhausted) return { name: "exhausted", point: exhausted };
+    var random = images.findImage(shot, randomTemplate, { threshold: 0.88 });
+    return random ? { name: "random", point: random } : null;
+}, { timeoutMs: 30000, intervalMs: 500, confirmCount: 2, name: "竞技场状态" });
+```
+
+### `retry`
+
+签名：`retry<T>(action: (attempt: number, state: PollState) => T | null | false | undefined, options?: RetryOptions): WaitResult<T>`。
+
+按顺序重复执行一个同步动作。动作返回真值即视为成功；返回 `false`、`null` 或 `undefined` 时等待后重试。适合重试“打开地图 → 前往地点 → 点击目标”等由脚本函数组成的一整步。抛出的异常会直接交给脚本运行器处理。
+
+`options.maxAttempts` 默认 `3`，包含首次执行；`0` 表示不限次数。`timeoutMs` 默认 `0`（不限时），`intervalMs` 默认 `500` 毫秒。返回的 `reason` 为 `completed`、`attempt_limit` 或 `timeout`。
+
+```javascript
+var result = retry(function(attempt) {
+    log("第 " + attempt + " 次尝试导航");
+    return click(1777, 24) && click(1103, 760);
+}, { maxAttempts: 5, intervalMs: 1000, name: "前往临安" });
 ```
 
 <a id="adapter"></a>
@@ -1594,7 +1802,7 @@ try {
 
 ### 15.1 JavaScript 环境
 
-脚本通过 QuickJS 运行。可使用引擎提供的标准 JavaScript 语法及对象，例如变量、函数、条件/循环、数组与字符串操作、`Math`、`Date`、`JSON`、`RegExp`、`Promise`。这些语言标准库的方法不属于本应用新增的 72 个 API。
+脚本通过 QuickJS 运行。可使用引擎提供的标准 JavaScript 语法及对象，例如变量、函数、条件/循环、数组与字符串操作、`Math`、`Date`、`JSON`、`RegExp`、`Promise`。这些语言标准库的方法不属于本应用的 81 个脚本 API。
 
 当前应用没有注入浏览器 DOM、`window`、`document`、`fetch`、`XMLHttpRequest`、Node.js `process` / `Buffer` / 文件系统、`setTimeout` / `setInterval`、Auto.js 的控件选择器、`app.launchPackage`、通用 `shell` 等能力。目标应用启动可使用任务的 `target` 配置；Root 兜底属于内部实现，不代表脚本可以调用任意 shell 命令。
 

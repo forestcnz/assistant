@@ -61,6 +61,42 @@ object NewApiChecks {
                 var shot = captureScreen();
                 check(shot !== null, "合成截屏应可用");
 
+                // ---- 图片缩放与模板分数/边界 ----
+                var resized = images.resize(batch.images.red, 20, 15);
+                check(resized !== null, "resize 应返回图片");
+                check(images.width(resized) === 20 && images.height(resized) === 15,
+                    "resize 尺寸应为 20x15");
+                images.release(resized);
+                var detail = images.findImageDetails(shot, batch.images.red, { threshold: 0.9 });
+                check(detail !== null && detail.score >= 0.99, "findImageDetails 应返回高分匹配");
+                check(detail.bounds.left === 40 && detail.bounds.top === 40,
+                    "匹配边界应回传模板左上角");
+                var details = images.matchTemplate(shot, batch.images.red, { threshold: 0.9, max: 2 });
+                check(details.length === 2 && details[0].x !== details[1].x,
+                    "matchTemplate 应返回两个不同位置");
+
+                // ---- 通用截图等待与整组重试 ----
+                var screenWait = waitScreen(function(frame, state) {
+                    check(state.attempts === 1, "waitScreen 状态应记录当前轮次");
+                    return images.width(frame) > 0 ? { width: images.width(frame) } : null;
+                }, { maxAttempts: 1 });
+                check(screenWait.ok && screenWait.reason === "matched" && screenWait.value.width === 640,
+                    "waitScreen 应返回命中结果");
+                var retryResult = retry(function(attempt, state) {
+                    check(state.attempts === attempt, "retry 状态应记录当前轮次");
+                    return attempt === 3;
+                }, { maxAttempts: 3, intervalMs: 50 });
+                check(retryResult.ok && retryResult.attempts === 3,
+                    "retry 应在第三次动作成功");
+
+                // 只在不含红色模板的区域找图，确认一次未命中即可结束。
+                var gone = clickImageUntilGone(RED, {
+                    region: [0, 300, 200, 100], threshold: 0.9,
+                    confirmCount: 1, maxAttempts: 1
+                });
+                check(gone.ok && gone.reason === "gone" && gone.clicks === 0,
+                    "clickImageUntilGone 应确认目标消失");
+
                 // ---- images.findImageAny：数组顺序即优先级 ----
                 var hit = images.findImageAny(shot, [
                     { tpl: batch.images.blue, threshold: 0.9, name: "blue" },

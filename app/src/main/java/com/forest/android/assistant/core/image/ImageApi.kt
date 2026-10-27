@@ -118,6 +118,23 @@ object ImageApi {
         }
     }
 
+    /** 按实际像素缩放图片，返回由调用方持有的新句柄。 */
+    fun resize(imageId: Int, width: Int, height: Int, filter: Boolean = true): Int? {
+        val source = image(imageId) ?: return null
+        if (width <= 0 || height <= 0 || width > 8192 || height > 8192) return null
+        return try {
+            val scaled = Bitmap.createScaledBitmap(source, width, height, filter)
+            val output = if (scaled === source) {
+                source.copy(source.config ?: Bitmap.Config.ARGB_8888, true) ?: return null
+            } else {
+                scaled
+            }
+            storeImage(output)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     /** 取像素色值（ARGB int），越界返回 null */
     fun pixel(imageId: Int, x: Int, y: Int): Int? {
         val bmp = image(imageId) ?: return null
@@ -227,6 +244,15 @@ object ImageApi {
         region: IntArray? = null,
         max: Int = 5
     ): List<Point> = findMatches(imageId, tplId, threshold, region, max).map { Point(it.x, it.y) }
+
+    /** 找图完整结果，含分数和模板边界，便于脚本按分数排序或输出调试信息。 */
+    fun findImageDetails(
+        imageId: Int,
+        tplId: Int,
+        threshold: Double = 0.9,
+        region: IntArray? = null,
+        max: Int = 5
+    ): List<Match> = findMatches(imageId, tplId, threshold, region, max)
 
     /** 模板是否出现在图中 */
     fun existsImage(

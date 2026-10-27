@@ -37,6 +37,13 @@ object OcrApi {
         fun centerY(): Int = (top + bottom) / 2
     }
 
+    /** OCR 调用结果：区分识别成功但无文字与识别失败。 */
+    data class Recognition(
+        val items: List<Item>,
+        val succeeded: Boolean,
+        val error: String? = null
+    )
+
     @Volatile
     private var ready = false
 
@@ -69,9 +76,13 @@ object OcrApi {
     }
 
     /** 识别图片中的全部文字（按行）；region 为 [x, y, w, h]，可空 */
-    fun recognize(bitmap: Bitmap, region: IntArray?): List<Item> {
-        if (!ready && !init(null)) return emptyList()
-        val client = recognizer ?: return emptyList()
+    fun recognize(bitmap: Bitmap, region: IntArray?): List<Item> =
+        recognizeResult(bitmap, region).items
+
+    /** 与 [recognize] 相同，但保留初始化、超时等失败状态供脚本等待 API 使用。 */
+    fun recognizeResult(bitmap: Bitmap, region: IntArray?): Recognition {
+        if (!ready && !init(null)) return Recognition(emptyList(), false, "OCR 初始化失败")
+        val client = recognizer ?: return Recognition(emptyList(), false, "OCR 引擎不可用")
 
         val cropRect = clampRegion(region, bitmap.width, bitmap.height)
         val target = if (cropRect != null) {
@@ -109,10 +120,10 @@ object OcrApi {
                     }
                 }
             }
-            items
+            Recognition(items, true)
         } catch (e: Exception) {
             Log.w(TAG, "OCR 识别失败: ${e.message}")
-            emptyList()
+            Recognition(emptyList(), false, e.message ?: "OCR 识别失败")
         } finally {
             if (target !== bitmap) target.recycle()
         }
@@ -160,6 +171,10 @@ object OcrApi {
         if (texts.none { OcrTextMatcher.normalize(it).isNotEmpty() }) return null
         return OcrTextMatcher.findContainsAny(recognize(bitmap, region), texts)
     }
+
+    /** 在已识别结果中匹配多关键词，避免多区域查找时重复运行 OCR。 */
+    fun findContainsAny(items: List<Item>, texts: List<String>): KeywordMatch? =
+        OcrTextMatcher.findContainsAny(items, texts)
 
     private fun clampRegion(region: IntArray?, w: Int, h: Int): Rect? {
         if (region == null || region.size < 4) return null

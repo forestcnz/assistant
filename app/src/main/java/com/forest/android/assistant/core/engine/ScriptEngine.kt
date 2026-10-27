@@ -127,7 +127,7 @@ object ScriptEngine {
                     checkStop(session)
                     defineGlobals(session, env)
                     // 末尾补 undefined 丢弃脚本完成值：否则函数/对象结果会走类型转换而报错
-                    evaluate<JsObject?>(PRELUDE + DISCARD_RESULT, "prelude.js")
+                    evaluate<JsObject?>(PRELUDE + ScriptApiExtensions.PRELUDE + DISCARD_RESULT, "prelude.js")
                     checkStop(session)
                     evaluate<JsObject?>(script + DISCARD_RESULT, env.scriptPath)
                     checkStop(session)
@@ -437,6 +437,21 @@ object ScriptEngine {
                 ocrItem(match.item) + listOf(match.keyword)
             } ?: emptyList<Any>()
         }
+        guard("__ocr_find_any_checked") { args ->
+            val imageId = (args.getOrNull(0) as? Number)?.toInt()
+                ?: return@guard listOf("invalid_image")
+            val bitmap = ImageApi.image(imageId) ?: return@guard listOf("invalid_image")
+            val texts = flattenStrings(args.getOrNull(1))
+            if (texts.isEmpty() || texts.none { com.forest.android.assistant.core.ocr.OcrTextMatcher.normalize(it).isNotEmpty() }) {
+                return@guard listOf("invalid_query")
+            }
+            val region = regionOf(args, 2)
+            val recognition = OcrApi.recognizeResult(bitmap, region)
+            if (!recognition.succeeded) return@guard listOf("ocr_error", recognition.error ?: "OCR 识别失败")
+            val match = OcrApi.findContainsAny(recognition.items, texts)
+                ?: return@guard listOf("miss")
+            listOf("matched", ocrItem(match.item) + listOf(match.keyword))
+        }
 
         // —— adapter 分辨率适配（API 第 6 节）——
         guard("__adapter_set") { args ->
@@ -505,6 +520,13 @@ object ScriptEngine {
             val h = numArg(args, 4).toInt()
             (ImageApi.clip(id, x, y, w, h) ?: -1).toLong()
         }
+        guard("__img_resize") { args ->
+            val id = (args.getOrNull(0) as? Number)?.toInt() ?: return@guard -1L
+            val width = (args.getOrNull(1) as? Number)?.toInt() ?: return@guard -1L
+            val height = (args.getOrNull(2) as? Number)?.toInt() ?: return@guard -1L
+            val filter = args.getOrNull(3) as? Boolean ?: true
+            (ImageApi.resize(id, width, height, filter) ?: -1).toLong()
+        }
         guard("__img_pixel") { args ->
             val id = (args.getOrNull(0) as? Number)?.toInt() ?: return@guard -1L
             val color = ImageApi.pixel(id, numArg(args, 1).toInt(), numArg(args, 2).toInt())
@@ -534,6 +556,26 @@ object ScriptEngine {
             val region = regionOf(args, 3)
             val max = (args.getOrNull(7) as? Number)?.toInt() ?: 5
             ImageApi.findAllImages(imageId, tplId, threshold, region, max).map { pt(it) }
+        }
+        guard("__img_match_details") { args ->
+            val imageId = (args.getOrNull(0) as? Number)?.toInt() ?: return@guard emptyList<Any>()
+            val templateId = (args.getOrNull(1) as? Number)?.toInt() ?: return@guard emptyList<Any>()
+            val threshold = (args.getOrNull(2) as? Number)?.toDouble() ?: return@guard emptyList<Any>()
+            val max = (args.getOrNull(7) as? Number)?.toInt() ?: 5
+            val templateWidth = ImageApi.width(templateId)
+            val templateHeight = ImageApi.height(templateId)
+            if (templateWidth <= 0 || templateHeight <= 0) return@guard emptyList<Any>()
+            ImageApi.findImageDetails(imageId, templateId, threshold, regionOf(args, 3), max).map { match ->
+                listOf(
+                    ScriptAdapter.toDesignX(match.x).toLong(),
+                    ScriptAdapter.toDesignY(match.y).toLong(),
+                    match.score,
+                    ScriptAdapter.toDesignX(match.x - templateWidth / 2).toLong(),
+                    ScriptAdapter.toDesignY(match.y - templateHeight / 2).toLong(),
+                    ScriptAdapter.toDesignX(match.x + templateWidth / 2).toLong(),
+                    ScriptAdapter.toDesignY(match.y + templateHeight / 2).toLong()
+                )
+            }
         }
         guard("__img_exists") { args ->
             val imageId = (args.getOrNull(0) as? Number)?.toInt() ?: return@guard false

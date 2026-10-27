@@ -398,6 +398,72 @@ object ScriptExamples {
                 delay: 1000
             });
         """.trimIndent()),
+        Item("OCR 多区域", "在同一张截图里按顺序检查多个区域，返回命中区域下标。", "OCR", """
+            var shot = captureScreen();
+            if (!shot) { toastLog("截图失败"); exit(); }
+            try {
+                var result = ocr.findTextAny(shot, ["确定", "同意"], {
+                    regions: [[1702, 425, 192, 92], [601, 570, 324, 130]]
+                });
+                if (result) log("区域", result.regionIndex, result.text);
+            } finally {
+                images.release(shot);
+            }
+        """.trimIndent()),
+        Item("等待文字", "等待文字命中但不自动点击；WaitResult 提供命中和超时原因。", "OCR", """
+            var result = waitTextAny(["确定", "同意"], {
+                regions: [[1702, 425, 192, 92], [601, 570, 324, 130]],
+                timeoutMs: 10000, intervalMs: 500, confirmCount: 2
+            });
+            if (result.ok) click(result.value.centerX(), result.value.centerY());
+            else log("等待结束：", result.reason, result.lastError);
+        """.trimIndent()),
+        Item("持续文字监听", "命中后点击并继续监听，可用 maxClicks 或 maxAttempts 限制运行。", "OCR", """
+            var result = watchText(["击败它们"], {
+                region: [37, 593, 801, 160], intervalMs: 500,
+                delayMs: 1000, maxClicks: 5, maxAttempts: 100
+            });
+            log("监听结束：", result.reason, "点击次数：", result.clicks);
+        """.trimIndent()),
+        Item("组合屏幕等待", "回调拿到本轮截图，可组合多个模板或自定义业务状态。", "判断", """
+            var result = waitScreen(function(shot) {
+                return images.findImageAny(shot, [
+                    { tpl: "images/次数耗尽.png", threshold: 0.86, name: "exhausted" },
+                    { tpl: "images/随机战.png", threshold: 0.88, name: "random" }
+                ]);
+            }, { timeoutMs: 30000, intervalMs: 500, confirmCount: 2 });
+            if (result.ok) log("状态：", result.value.name);
+            else log("等待结束：", result.reason);
+        """.trimIndent()),
+        Item("整组动作重试", "重试函数里的整组导航步骤；maxAttempts 包含第一次执行。", "判断", """
+            var result = retry(function(attempt) {
+                log("第 " + attempt + " 次导航");
+                return click(1777, 24) && click(1103, 760);
+            }, { maxAttempts: 3, intervalMs: 1000, name: "前往临安" });
+            log("导航重试结果：", result.reason);
+        """.trimIndent()),
+        Item("重复点击直到图片消失", "每轮重新定位和点击，连续多帧未找到后返回点击次数。", "找图", """
+            var result = clickImageUntilGone("images/sweep.png", {
+                threshold: 0.88, confirmCount: 5, delayMs: 1000,
+                maxClicks: 20, timeoutMs: 120000, name: "扫荡"
+            });
+            log("结束原因：", result.reason, "成功点击：", result.clicks);
+        """.trimIndent()),
+        Item("缩放与匹配分数", "显式缩放模板，并读取匹配分数和边界；缩放图需要单独释放。", "找图", """
+            var shot = captureScreen();
+            var template = images.read("images/button.png");
+            var scaled = null;
+            try {
+                if (!shot || !template) exit();
+                scaled = images.resize(template, 320, 100, { filter: true });
+                var matches = images.matchTemplate(shot, scaled, {
+                    threshold: 0.88, region: [0, 0, 1920, 1080], max: 3
+                });
+                if (matches.length) log(matches[0].score, JSON.stringify(matches[0].bounds));
+            } finally {
+                images.releaseAll(scaled, template, shot);
+            }
+        """.trimIndent()),
         Item("固定坐标重试", "点击通道未受理时自动重试；times 含首次，0 表示一直重试到停止。", "点击", """
             if (!clickRetry(1777, 24, 3, 500)) {
                 toastLog("打开地图失败");
@@ -427,11 +493,11 @@ object ScriptExamples {
 
     val completeExample = Item(
         title = "完整示例：全部 API",
-        description = "展示全部 72 个公开方法。会截图、OCR、保存演示图片及执行手势；运行前修改文字与点击坐标。",
+        description = "展示全部 81 个公开方法。会截图、OCR、保存演示图片及执行手势；运行前修改文字与点击坐标。",
         category = "完整示例",
         completeScript = true,
         code = """
-            // 完整 API 示例：全部 72 个公开函数/方法及公开属性。
+            // 完整 API 示例：全部 81 个公开函数/方法及公开属性。
             // 素材从本次截图生成，无需提前导入；图片保存到任务的 output/ 目录。
             // 会实际执行点击、滑动和多指手势，请先修改下方坐标与查询文字。
             var query = "确定";
@@ -467,7 +533,7 @@ object ScriptExamples {
             log("颜色：", colors.toString(red), colors.isSimilar(red, rgb, 16, "diff"));
             log("ARGB：", colors.alpha(argb), colors.red(argb), colors.green(argb), colors.blue(argb));
 
-            var shot = null, crop = null, template = null;
+            var shot = null, crop = null, template = null, resized = null;
             try {
                 // 5. 截图、尺寸、裁剪、保存、读取。clip/pixel 均使用真实像素。
                 shot = captureScreen();
@@ -481,6 +547,10 @@ object ScriptExamples {
                 }
                 template = images.read(output + "-template.png");
                 if (!template) { toastLog("演示素材读取失败"); exit(); }
+                resized = images.resize(template,
+                    Math.max(1, Math.floor(images.width(template) / 2)),
+                    Math.max(1, Math.floor(images.height(template) / 2)));
+                log("缩放图片：", resized ? images.width(resized) + "x" + images.height(resized) : null);
                 log("保存截图：", images.save(shot, output + "-screen.png", "png", 100));
                 // 批量读图：一次加载多个素材并检查缺失
                 var batch = images.readAll({ template: output + "-template.png" });
@@ -491,6 +561,8 @@ object ScriptExamples {
                 var options = { region: region, threshold: 0.88 };
                 var point = images.findImage(shot, template, options);
                 log("匹配中心：", JSON.stringify(point));
+                log("匹配明细：", JSON.stringify(images.findImageDetails(shot, template, options)));
+                log("全部匹配明细：", JSON.stringify(images.matchTemplate(shot, template, { threshold: 0.88, max: 3 })));
                 // 多模板：数组顺序即优先级，首个命中即返回
                 log("多模板匹配：", JSON.stringify(images.findImageAny(shot, [
                     { tpl: template, threshold: 0.88, name: "demo" }
@@ -533,6 +605,8 @@ object ScriptExamples {
                 // 多关键词：一次识别命中任意关键词，返回带 matched 的 OcrItem
                 var anyText = ocr.findTextAny(shot, [query, "取消"], { region: region });
                 log("多关键词 OCR：", anyText ? anyText.matched : null);
+                var anyRegionText = ocr.findTextAny(shot, [query, "取消"], { regions: [region] });
+                log("多区域 OCR：", anyRegionText ? anyRegionText.regionIndex : null);
                 log("找图后识字：", JSON.stringify(images.findImageWithText(shot, template, { threshold: 0.88, padding: 8 })));
 
                 // 9. 等图出现/消失：超时和间隔单位均为秒。目标不消失时返回 false。
@@ -544,6 +618,20 @@ object ScriptExamples {
                     { tpl: template, threshold: 0.88, name: "demo" }
                 ], 0, 0.5)));
                 log("等文字点击：", waitTextClick([query], 0, 0.5, { region: region }));
+                log("等待文字：", JSON.stringify(waitText(query, { region: region, maxAttempts: 1 })));
+                log("等待任一文字：", JSON.stringify(waitTextAny([query, "取消"], { regions: [region], maxAttempts: 1 })));
+                log("通用屏幕等待：", JSON.stringify(waitScreen(function(frame) {
+                    return images.findImage(frame, template, options);
+                }, { maxAttempts: 1 })));
+                log("文字监听：", JSON.stringify(watchText([query], {
+                    region: region, maxAttempts: 1, maxClicks: 1
+                })));
+                log("重复点击直到图片消失：", JSON.stringify(clickImageUntilGone(template, {
+                    threshold: 0.88, region: region, confirmCount: 1, maxAttempts: 1
+                })));
+                log("整组动作重试：", JSON.stringify(retry(function(attempt) {
+                    return attempt === 1;
+                }, { maxAttempts: 1 })));
 
                 // 10. 点击与手势：这里会实际操作屏幕，坐标按上方设计分辨率。
                 log("点击：", click(x, y));
@@ -561,7 +649,7 @@ object ScriptExamples {
             } finally {
                 // 11. 正常结束或提前退出时释放本示例持有的图片，再取消坐标适配。
                 // releaseAll 接受句柄、数组和对象，按内部 id 去重。
-                images.releaseAll(template, crop, shot);
+                images.releaseAll(resized, template, crop, shot);
                 adapter.reset();
             }
             toastLog("完整 API 示例结束");
