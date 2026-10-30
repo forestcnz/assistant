@@ -887,6 +887,7 @@ var images = {
         return __pt(__img_find_multi(__img(img), __parseColor(firstColor), flat, __opt(options, 'threshold', 16),
             r[0], r[1], r[2], r[3]));
     },
+    supportsShapeMatching: true,
     // 双模板同行校验：两个模板各用自己的阈值查找，返回中点与同行结论
     findImagePair: function(img, tplA, tplB, options) {
         var r = __regionArgs(options);

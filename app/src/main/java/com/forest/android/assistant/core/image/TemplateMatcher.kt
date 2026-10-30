@@ -41,7 +41,8 @@ internal object TemplateMatcher {
         logger: ((Char, String) -> Unit)? = null,
         screenLevelProvider: ((Int) -> Gray)? = null,
         /** 模板来源名称（文件名），仅用于日志 */
-        tplName: String? = null
+        tplName: String? = null,
+        coarseTargetSize: Int = 12
     ): List<Match> {
         // 日志前缀：模板来源文件名，便于区分多个模板
         val logPrefix = tplName?.let { "$it " } ?: ""
@@ -60,8 +61,9 @@ internal object TemplateMatcher {
         val tplStats = prepared.stats
         val localRegion = Rect(0, 0, grayScreen.w, grayScreen.h)
 
-        // 粗搜倍数：让粗图模板边长约 12px，兼顾速度与特征保留
-        val scale = max(1, min(tw, th) / 12)
+        // 粗搜倍数：默认让粗图模板边长约 12px；形状模式可选择更稀疏的粗层。
+        require(coarseTargetSize > 0)
+        val scale = max(1, min(tw, th) / coarseTargetSize)
         val cs = screenLevelProvider?.invoke(scale) ?: grayScreen.downsample(scale)
         val ct = prepared.level(scale, grayScreen.checkCancelled)
         val coarseRegion = Rect(0, 0, cs.w, cs.h)
