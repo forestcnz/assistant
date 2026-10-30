@@ -27,6 +27,7 @@ class ImageApiInstrumentation : Instrumentation() {
     private var onlyOcr = false
     private var onlyStop = false
     private var onlyNewApi = false
+    private var onlyShape = false
 
     override fun onCreate(arguments: Bundle?) {
         super.onCreate(arguments)
@@ -35,6 +36,7 @@ class ImageApiInstrumentation : Instrumentation() {
         onlyOcr = arguments?.getString("onlyOcr") == "true"
         onlyStop = arguments?.getString("onlyStop") == "true"
         onlyNewApi = arguments?.getString("onlyNewApi") == "true"
+        onlyShape = arguments?.getString("onlyShape") == "true"
         Log.i(TAG, "Instrumentation onCreate; starting test thread")
         start()
     }
@@ -45,6 +47,15 @@ class ImageApiInstrumentation : Instrumentation() {
         Log.i(TAG, "Instrumentation base onStart returned")
         val result = Bundle()
         try {
+            if (onlyShape) {
+                report("Shape matching across image APIs")
+                testShapeMatchingWithScaledAndInvertedBitmap()
+                report("Mutable Bitmap shape cache invalidation")
+                testMutableBitmapGenerationInvalidatesScreenGrayCache()
+                result.putString("stream", "图片轮廓匹配回归通过")
+                finish(Activity.RESULT_OK, result)
+                return
+            }
             if (onlyNewApi) {
                 report("New script APIs end-to-end")
                 NewApiChecks.run(targetContext)
@@ -174,6 +185,46 @@ class ImageApiInstrumentation : Instrumentation() {
             ImageApi.releaseImage(templateId)
             screen.recycle()
             template.recycle()
+        }
+    }
+
+    /** 验证各找图入口在真实 Bitmap 上共用轮廓匹配，倍率与实际边界一致。 */
+    private fun testShapeMatchingWithScaledAndInvertedBitmap() {
+        val template = Bitmap.createBitmap(20, 24, Bitmap.Config.ARGB_8888)
+        val templatePixels = IntArray(20 * 24) { Color.WHITE }
+        for (y in 4..19) for (x in 4..6) templatePixels[y * 20 + x] = Color.BLACK
+        for (x in 4..15) for (y in 5..7) templatePixels[y * 20 + x] = Color.BLACK
+        for (y in 12..19) for (x in 13..15) templatePixels[y * 20 + x] = Color.BLACK
+        template.setPixels(templatePixels, 0, 20, 0, 0, 20, 24)
+        val scaled = Bitmap.createScaledBitmap(template, 30, 36, true)
+        val screen = Bitmap.createBitmap(130, 95, Bitmap.Config.ARGB_8888)
+        screen.eraseColor(Color.BLACK)
+        val pixels = IntArray(30 * 36)
+        scaled.getPixels(pixels, 0, 30, 0, 0, 30, 36)
+        // 反转模板的明暗：形状保持一致，单纯比较亮度的算法无法达到此阈值。
+        for (i in pixels.indices) pixels[i] = Color.rgb(255 - Color.red(pixels[i]),
+            255 - Color.green(pixels[i]), 255 - Color.blue(pixels[i]))
+        screen.setPixels(pixels, 0, 30, 64, 32, 30, 36)
+        val screenId = ImageApi.storeImage(screen)
+        val templateId = ImageApi.storeImage(template)
+        try {
+            val scales = listOf(0.75, 1.0, 1.5)
+            checkEquals(ImageApi.Point(79, 50), ImageApi.findImage(screenId, templateId, 0.8,
+                intArrayOf(50, 20, 60, 60), scales))
+            val detail = ImageApi.findImageDetails(screenId, templateId, 0.8, null, 1, scales).single()
+            checkEquals(30, detail.width)
+            checkEquals(36, detail.height)
+            check(ImageApi.existsImage(screenId, templateId, 0.8, null, scales))
+            checkEquals(ImageApi.Point(79, 50), ImageApi.findAllImages(screenId, templateId,
+                0.8, null, 1, scales).single())
+            checkEquals(null, ImageApi.findImage(screenId, templateId, 0.8,
+                intArrayOf(0, 0, 40, 40), scales))
+        } finally {
+            ImageApi.releaseImage(screenId)
+            ImageApi.releaseImage(templateId)
+            screen.recycle()
+            template.recycle()
+            scaled.recycle()
         }
     }
 

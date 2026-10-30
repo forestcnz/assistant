@@ -337,7 +337,7 @@ images.matchTemplate = function(image, tpl, options) {
     try {
         var r = __regionArgs(options);
         var raw = __img_match_details(__img(image), __img(template),
-            __opt(options, 'threshold', 0.9), r[0], r[1], r[2], r[3], __opt(options, 'max', 5));
+            __opt(options, 'threshold', 0.9), r[0], r[1], r[2], r[3], __opt(options, 'max', 5), __opt(options, 'scales', [1]));
         var out = [];
         if (raw) for (var i = 0; i < raw.length; i++) {
             var m = raw[i];

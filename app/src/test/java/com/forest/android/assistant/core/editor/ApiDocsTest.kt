@@ -53,7 +53,7 @@ class ApiDocsTest {
         assertTrue("缺少 clickRetry 声明", dts.contains("declare function clickRetry("))
         // 对象成员
         assertTrue("缺少 images.findImageAny 声明", dts.contains("findImageAny: (...args: any[]) => any;"))
-        assertTrue("缺少 images.findImagePair 声明", dts.contains("findImagePair: (...args: any[]) => any;"))
+        assertTrue("缺少 images.findImagePair 声明", dts.contains("findImagePair(img: ImageRef, tplA: ImageRef | string, tplB: ImageRef | string, options?: FindImagePairOptions): PairMatch | null;"))
         assertTrue("缺少 images.readAll 声明", dts.contains("readAll: (...args: any[]) => any;"))
         assertTrue("缺少 images.releaseAll 声明", dts.contains("releaseAll: (...args: any[]) => any;"))
         assertTrue(dts.contains("findTextAny(image: any, texts: string[], options?: OcrOptions): OcrItem | null;"))
@@ -62,8 +62,8 @@ class ApiDocsTest {
         assertTrue("缺少 TemplateEntry", dts.contains("interface TemplateEntry"))
         assertTrue("缺少 ReadAllResult", dts.contains("interface ReadAllResult"))
         assertTrue("缺少 PairMatch", dts.contains("interface PairMatch"))
-        assertTrue("缺少形状模式选项", dts.contains("mode?: 'pixel' | 'shape'; scales?: number[]"))
         assertTrue("缺少 MatchRect", dts.contains("interface MatchRect"))
+        assertTrue("缺少轮廓倍率参数", dts.contains("interface FindImageOptions { threshold?: number; region?: Region; scales?: number[]; }"))
         assertTrue("OcrItem 缺少 matched 字段", dts.contains("matched?: string"))
     }
 }

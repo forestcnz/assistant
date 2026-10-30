@@ -19,7 +19,7 @@ import com.forest.android.assistant.core.image.TemplateMatcher.Gray
  * 匹配算法：灰度化 + 归一化互相关（NCC），由粗到细多级搜索：
  * 1. 粗搜：模板缩到约 12px，滑动打分，用原始数组堆选择邻近去重后的候选；
  * 2. 精搜：逐级缩小定位范围，最终以原分辨率 NCC 判分，再过滤和聚合命中。
- * 纯 Kotlin 实现；findImagePair 的可选 shape 模式使用 Sobel 轮廓和多尺度模板。
+ * 纯 Kotlin 实现，避免引入 OpenCV（AAR 117MB，APK 会涨到 80MB+）；后续需要多尺度/复杂找色时可替换实现。
  * 对应脚本 API 见 docs/README.md 第 5.4 节。
  */
 object ImageApi {
@@ -39,7 +39,6 @@ object ImageApi {
     private val imageNames = ConcurrentHashMap<Int, String>()
     private val templates = TemplateCache()
     private val screenGrays = ScreenGrayCache()
-    private val shapeEdges = ScreenGrayCache()
     private val nextId = AtomicInteger(1)
 
     /** 存入图片句柄；[name] 用于日志中显示来源（文件名或“屏幕截图”） */
@@ -60,7 +59,6 @@ object ImageApi {
             imageNames.remove(id)
             templates.remove(id)
             screenGrays.removeImage(id)
-            shapeEdges.removeImage(id)
         }
     }
 
@@ -70,7 +68,6 @@ object ImageApi {
             imageNames.clear()
             templates.clear()
             screenGrays.clear()
-            shapeEdges.clear()
         }
     }
 
@@ -229,15 +226,16 @@ object ImageApi {
     // ==================== 找图（模板匹配） ====================
 
     /** 命中结果：x/y 为模板中心坐标，score 为相似度 */
-    data class Match(val x: Int, val y: Int, val score: Double)
+    data class Match(val x: Int, val y: Int, val score: Double, val width: Int = 0, val height: Int = 0)
 
     /** 找图：返回匹配中心点 */
     fun findImage(
         imageId: Int,
         tplId: Int,
         threshold: Double = 0.9,
-        region: IntArray? = null
-    ): Point? = findMatches(imageId, tplId, threshold, region, 1).firstOrNull()?.let { Point(it.x, it.y) }
+        region: IntArray? = null,
+        scales: List<Double> = listOf(1.0)
+    ): Point? = findMatches(imageId, tplId, threshold, region, 1, scales).firstOrNull()?.let { Point(it.x, it.y) }
 
     /** 全部匹配位置（相邻命中已聚合），按从左到右、从上到下排序 */
     fun findAllImages(
@@ -245,8 +243,9 @@ object ImageApi {
         tplId: Int,
         threshold: Double = 0.9,
         region: IntArray? = null,
-        max: Int = 5
-    ): List<Point> = findMatches(imageId, tplId, threshold, region, max).map { Point(it.x, it.y) }
+        max: Int = 5,
+        scales: List<Double> = listOf(1.0)
+    ): List<Point> = findMatches(imageId, tplId, threshold, region, max, scales).map { Point(it.x, it.y) }
 
     /** 找图完整结果，含分数和模板边界，便于脚本按分数排序或输出调试信息。 */
     fun findImageDetails(
@@ -254,16 +253,18 @@ object ImageApi {
         tplId: Int,
         threshold: Double = 0.9,
         region: IntArray? = null,
-        max: Int = 5
-    ): List<Match> = findMatches(imageId, tplId, threshold, region, max)
+        max: Int = 5,
+        scales: List<Double> = listOf(1.0)
+    ): List<Match> = findMatches(imageId, tplId, threshold, region, max, scales)
 
     /** 模板是否出现在图中 */
     fun existsImage(
         imageId: Int,
         tplId: Int,
         threshold: Double = 0.9,
-        region: IntArray? = null
-    ): Boolean = findMatches(imageId, tplId, threshold, region, 1).isNotEmpty()
+        region: IntArray? = null,
+        scales: List<Double> = listOf(1.0)
+    ): Boolean = findMatches(imageId, tplId, threshold, region, 1, scales).isNotEmpty()
 
     /** 图文联合匹配结果：匹配中心 + 匹配矩形 + 图内识别文字与逐条文本 */
     data class MatchWithText(
@@ -287,18 +288,21 @@ object ImageApi {
         tplId: Int,
         threshold: Double = 0.9,
         region: IntArray? = null,
-        padding: Int = 0
+        padding: Int = 0,
+        scales: List<Double> = listOf(1.0)
     ): MatchWithText? {
         val screen = image(imageId) ?: return null
         val tpl = image(tplId) ?: return null
-        val best = findMatches(imageId, tplId, threshold, region, 1).firstOrNull() ?: return null
+        val best = findMatches(imageId, tplId, threshold, region, 1, scales).firstOrNull() ?: return null
 
         // 匹配矩形 = 中心 ± 模板一半，再按 padding 外扩并裁剪到图片范围
         val pad = padding.coerceIn(0, 200)
-        val left = (best.x - tpl.width / 2 - pad).coerceAtLeast(0)
-        val top = (best.y - tpl.height / 2 - pad).coerceAtLeast(0)
-        val right = (best.x + tpl.width / 2 + pad).coerceAtMost(screen.width)
-        val bottom = (best.y + tpl.height / 2 + pad).coerceAtMost(screen.height)
+        val matchWidth = best.width.takeIf { it > 0 } ?: tpl.width
+        val matchHeight = best.height.takeIf { it > 0 } ?: tpl.height
+        val left = (best.x - matchWidth / 2 - pad).coerceAtLeast(0)
+        val top = (best.y - matchHeight / 2 - pad).coerceAtLeast(0)
+        val right = (best.x - matchWidth / 2 + matchWidth + pad).coerceAtMost(screen.width)
+        val bottom = (best.y - matchHeight / 2 + matchHeight + pad).coerceAtMost(screen.height)
         if (right - left <= 0 || bottom - top <= 0) return null
 
         val items = OcrApi.recognize(screen, intArrayOf(left, top, right - left, bottom - top))
@@ -362,83 +366,37 @@ object ImageApi {
         thresholdB: Double = 0.9,
         region: IntArray? = null,
         rowTolerance: Int = 0,
-        mode: String = "pixel",
-        scales: List<Double> = ShapeMatcher.defaultScales
+        scales: List<Double> = listOf(1.0)
     ): PairMatch? {
-        require(mode == "pixel" || mode == "shape") { "findImagePair mode must be pixel or shape" }
         val tplA = image(tplAId) ?: return null
         val tplB = image(tplBId) ?: return null
-        if (mode == "shape") {
-            return findShapePair(imageId, tplAId, tplBId, tplA, tplB, thresholdA, thresholdB, region, rowTolerance, scales)
-        }
 
         // 同一模板：取画面中按 X 排序的前两个“互不重叠”的位置（两个外观相同的控件）
         // 注意：调用方即使传同一路径，也可能解析成两个不同句柄，
         // 因此除 id 相等外还要比较图像内容是否同一份来源。
         if (tplAId == tplBId || isSameSource(tplAId, tplBId)) {
             // max 取 4 是为了在聚合后仍有足够候选可筛选；模板较大时相邻命中会被聚合掉
-            val hits = findMatches(imageId, tplAId, thresholdA, region, 4)
-            val distinct = distinctPositions(hits, tplA.width, tplA.height)
+            val hits = findMatches(imageId, tplAId, thresholdA, region, 4, scales)
+            val distinct = distinctScaledPositions(hits)
             if (distinct.size < 2) return null
             val sorted = distinct.sortedBy { it.x }
             return buildPair(sorted[0], sorted[1], tplA, tplB, rowTolerance)
         }
 
-        val a = findMatches(imageId, tplAId, thresholdA, region, 1).firstOrNull() ?: return null
+        val a = findMatches(imageId, tplAId, thresholdA, region, 1, scales).firstOrNull() ?: return null
 
         // 自动容差：小控件用更严格的尺子
-        val tolerance = resolveTolerance(rowTolerance, tplA.height, tplB.height)
+        // 行带须覆盖 B 的所有倍率；最终同行容差由实际命中的 A、B 尺寸计算。
+        val largestBHeight = max(1, kotlin.math.round(tplB.height * (scales.maxOrNull() ?: 1.0)).toInt())
+        val bandTolerance = resolveTolerance(rowTolerance, a.height, largestBHeight)
         // B 优先在 A 的行带内搜索；带宽覆盖容差与自身高度
-        val band = rowBandOf(region, a, tplB.height, tolerance, imageWidth(imageId), imageHeight(imageId))
+        val band = rowBandOf(region, a, largestBHeight,
+            bandTolerance, imageWidth(imageId), imageHeight(imageId))
         val b = (band?.let {
-            findMatches(imageId, tplBId, thresholdB, it, 1).firstOrNull()
-        }) ?: findMatches(imageId, tplBId, thresholdB, region, 1).firstOrNull() ?: return null
+            findMatches(imageId, tplBId, thresholdB, it, 1, scales).firstOrNull()
+        }) ?: findMatches(imageId, tplBId, thresholdB, region, 1, scales).firstOrNull() ?: return null
 
-        return buildPair(a, b, tplA, tplB, tolerance)
-    }
-
-    private fun findShapePair(
-        imageId: Int, tplAId: Int, tplBId: Int, tplA: Bitmap, tplB: Bitmap,
-        thresholdA: Double, thresholdB: Double, region: IntArray?, rowTolerance: Int, scales: List<Double>
-    ): PairMatch? {
-        ShapeMatcher.validateScales(scales)
-        val screen = image(imageId) ?: return null
-        val r = clampRegion(region, screen.width, screen.height) ?: return null
-        val check = cancellationCheck ?: {}
-        val key = ScreenGrayCache.Key(imageId, r.left, r.top, r.right, r.bottom, 1, screen.generationId)
-        val pixels = shapeEdges.getOrPut(key, { images[imageId] === screen }) {
-            ShapeMatcher.edges(screen.toGray(r)).px
-        }
-        val search = ShapeMatcher.Search(Gray(r.width(), r.height(), pixels, check))
-        val hitsA = search.find(tplA.toGray(), thresholdA, scales)
-        val hitsB = search.find(tplB.toGray(), thresholdB, scales)
-        fun report(name: String?, hits: List<ShapeMatcher.Match>) {
-            debugLogger?.invoke(if (hits.isEmpty()) 'W' else 'D',
-                "${name ?: "模板"} shape matches=${hits.size} best=${hits.firstOrNull()?.score ?: "-"}")
-        }
-        report(imageName(tplAId), hitsA)
-        report(imageName(tplBId), hitsB)
-        val sameSource = tplAId == tplBId || isSameSource(tplAId, tplBId)
-        val candidates = hitsA.flatMap { a -> hitsB.mapNotNull { b ->
-            // 同一素材必须对应两个不重叠的实例。
-            if (sameSource && a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom) null
-            else a to b
-        } }.sortedByDescending { (a, b) -> a.score + b.score }
-        val selected = candidates.firstOrNull { (a, b) ->
-            isSameRow(abs(a.y - b.y), resolveTolerance(rowTolerance, a.height, b.height))
-        } ?: candidates.firstOrNull() ?: return null
-        val (first, second) = selected
-        val (a, b) = if (sameSource && first.x > second.x) second to first else first to second
-        fun rect(m: ShapeMatcher.Match) = MatchRect(
-            m.x + r.left, m.y + r.top, m.left + r.left, m.top + r.top, m.right + r.left, m.bottom + r.top
-        )
-        val rectA = rect(a)
-        val rectB = rect(b)
-        val tolerance = resolveTolerance(rowTolerance, a.height, b.height)
-        val rowDelta = abs(a.y - b.y)
-        val mid = midPoint(rectA.x, rectA.y, rectB.x, rectB.y)
-        return PairMatch(isSameRow(rowDelta, tolerance), rowDelta, tolerance, mid.first, mid.second,
-            delta(a.x, b.x), delta(a.y, b.y), rectA, rectB)
+        return buildPair(a, b, tplA, tplB, rowTolerance)
     }
 
     /** 同行容差：显式值优先，否则取较小模板高度的 30%，最少 4px */
@@ -475,6 +433,18 @@ object ImageApi {
                 kotlin.math.abs(existing.x - hit.x) < halfW && kotlin.math.abs(existing.y - hit.y) < halfH
             }
             if (!overlaps) kept.add(hit)
+        }
+        return kept
+    }
+
+    /** 不同倍率的命中框按各自尺寸去重，避免同一处轮廓被当作两个位置。 */
+    private fun distinctScaledPositions(hits: List<Match>): List<Match> {
+        val kept = ArrayList<Match>()
+        for (hit in hits) {
+            if (kept.none { existing ->
+                    kotlin.math.abs(existing.x - hit.x) < max(1, min(existing.width, hit.width) / 2) &&
+                        kotlin.math.abs(existing.y - hit.y) < max(1, min(existing.height, hit.height) / 2)
+                }) kept.add(hit)
         }
         return kept
     }
@@ -517,7 +487,7 @@ object ImageApi {
         tplB: android.graphics.Bitmap,
         tolerance: Int
     ): PairMatch {
-        val toleranceValue = if (tolerance > 0) tolerance else resolveTolerance(0, tplA.height, tplB.height)
+        val toleranceValue = if (tolerance > 0) tolerance else resolveTolerance(0, a.height, b.height)
         val rectA = toRect(a, tplA)
         val rectB = toRect(b, tplB)
         val rowDelta = kotlin.math.abs(a.y - b.y)
@@ -535,24 +505,24 @@ object ImageApi {
         )
     }
 
-    private fun toRect(match: Match, tpl: android.graphics.Bitmap): MatchRect = MatchRect(
-        x = match.x,
-        y = match.y,
-        left = match.x - tpl.width / 2,
-        top = match.y - tpl.height / 2,
-        right = match.x + tpl.width / 2,
-        bottom = match.y + tpl.height / 2
-    )
+    private fun toRect(match: Match, tpl: android.graphics.Bitmap): MatchRect {
+        val width = match.width.takeIf { it > 0 } ?: tpl.width
+        val height = match.height.takeIf { it > 0 } ?: tpl.height
+        val left = match.x - width / 2
+        val top = match.y - height / 2
+        return MatchRect(match.x, match.y, left, top, left + width, top + height)
+    }
 
     /**
      * 由粗到细模板匹配，返回按位置排序的命中（坐标为模板中心）。
      * region 为 [x, y, w, h]；w/h ≤ 0 表示延伸到图像边界。
      */
-    fun findMatches(        imageId: Int,
+    fun findMatches(imageId: Int,
         tplId: Int,
         threshold: Double,
         region: IntArray?,
-        max: Int
+        max: Int,
+        scales: List<Double> = listOf(1.0)
     ): List<Match> {
         // 模板来源名（文件名），用于日志定位；未知句柄退回 id
         val tplName = imageName(tplId) ?: "image#$tplId"
@@ -568,22 +538,37 @@ object ImageApi {
         val tw = tpl.width
         val th = tpl.height
         if (tw <= 0 || th <= 0) return fail("原因=模板尺寸无效")
-        if (tw > r.width() || th > r.height()) {
+        if (scales.isEmpty() || scales.size > 8 || scales.any { !it.isFinite() || it < 0.25 || it > 4.0 }) {
+            return fail("原因=倍率无效")
+        }
+        val usable = scales.filter { scale ->
+            max(1, kotlin.math.round(tw * scale).toInt()) <= r.width() &&
+                max(1, kotlin.math.round(th * scale).toInt()) <= r.height()
+        }.distinctBy { scale ->
+            max(1, kotlin.math.round(tw * scale).toInt()) to max(1, kotlin.math.round(th * scale).toInt())
+        }
+        if (usable.isEmpty()) {
             return fail("tpl=${tw}x$th region=${r.width()}x${r.height()} 原因=模板大于搜索区")
         }
 
         val currentCheck = cancellationCheck ?: {}
         val bitmapGeneration = screen.generationId
-        val baseKey = ScreenGrayCache.Key(
-            imageId, r.left, r.top, r.right, r.bottom, 1, bitmapGeneration
-        )
         val retainScreenCache = { images[imageId] === screen }
-        val basePixels = screenGrays.getOrPut(baseKey, retainScreenCache) { screen.toGray(r).px }
+        val baseKey = ScreenGrayCache.Key(imageId, 0, 0, screen.width, screen.height, 1, bitmapGeneration, true)
+        val allEdges = screenGrays.getOrPut(baseKey, retainScreenCache) {
+            ShapePixels.edges(screen.toGray()).px
+        }
+        val basePixels = IntArray(r.width() * r.height())
+        for (y in 0 until r.height()) {
+            currentCheck()
+            allEdges.copyInto(basePixels, y * r.width(), (r.top + y) * screen.width + r.left,
+                (r.top + y) * screen.width + r.right)
+        }
         val grayScreen = Gray(r.width(), r.height(), basePixels, currentCheck)
         fun screenLevel(scale: Int): Gray {
             if (scale == 1) return grayScreen
             val key = ScreenGrayCache.Key(
-                imageId, r.left, r.top, r.right, r.bottom, scale, bitmapGeneration
+                imageId, r.left, r.top, r.right, r.bottom, scale, bitmapGeneration, true
             )
             val pixels = screenGrays.getOrPut(key, retainScreenCache) {
                 grayScreen.downsample(scale, currentCheck).px
@@ -592,17 +577,39 @@ object ImageApi {
             val height = max(1, r.height() / scale)
             return Gray(width, height, pixels, currentCheck)
         }
-        val prepared = synchronized(templates) {
-            if (images[tplId] !== tpl) null
-            else templates.getOrPut(tplId, tpl.generationId) {
-                TemplateMatcher.PreparedTemplate(tpl.toGray())
+        val templateGray by lazy { tpl.toGray() }
+        val candidates = ArrayList<Match>()
+        for (scale in usable) {
+            currentCheck()
+            val prepared = if (scale == 1.0) {
+                synchronized(templates) {
+                    if (images[tplId] !== tpl) null
+                    else templates.getOrPut(tplId, tpl.generationId) {
+                        TemplateMatcher.PreparedTemplate(ShapePixels.edges(templateGray))
+                    }
+                }
+            } else {
+                // 其他倍率的临时模板复用本次调用的预处理结果；不会保留旧脚本会话。
+                TemplateMatcher.PreparedTemplate(ShapePixels.edges(ShapePixels.scaled(templateGray, scale)))
+            } ?: return fail("原因=模板已释放")
+            // 空白模板没有可供比较的轮廓，避免把纯色区域当作任意图片命中。
+            if (prepared.gray.px.all { it == 0 }) continue
+            TemplateMatcher.find(grayScreen, prepared, threshold, max, r.left, r.top,
+                screenLevelProvider = ::screenLevel).forEach { hit ->
+                candidates.add(Match(hit.x, hit.y, hit.score, prepared.gray.w, prepared.gray.h))
             }
-        } ?: return fail("原因=模板已释放")
-        return TemplateMatcher.find(
-            grayScreen, prepared, threshold, max, r.left, r.top, debugLogger, ::screenLevel,
-            tplName = tplName
-        )
-            .map { Match(it.x, it.y, it.score) }
+        }
+        val result = ArrayList<Match>()
+        for (hit in candidates.sortedByDescending { it.score }) {
+            if (result.none { existing ->
+                    kotlin.math.abs(hit.x - existing.x) < max(1, min(hit.width, existing.width) / 2) &&
+                        kotlin.math.abs(hit.y - existing.y) < max(1, min(hit.height, existing.height) / 2)
+                }) result.add(hit)
+        }
+        val ordered = if (max == 1) result.take(1) else result.sortedWith(compareBy({ it.y }, { it.x })).take(max)
+        debugLogger?.invoke(if (ordered.isEmpty()) 'W' else 'D',
+            "$tplName ${if (ordered.isEmpty()) "找图失败" else "shape match"} thr=$threshold")
+        return ordered
     }
 
     // ==================== 内部工具 ====================

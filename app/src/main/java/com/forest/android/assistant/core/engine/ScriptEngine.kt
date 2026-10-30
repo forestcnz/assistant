@@ -547,7 +547,7 @@ object ScriptEngine {
             val tplId = resolveTemplate(args.getOrNull(1), scriptDir) ?: return@guard null
             val threshold = (args.getOrNull(2) as? Number)?.toDouble() ?: return@guard null
             val region = regionOf(args, 3)
-            ImageApi.findImage(imageId, tplId, threshold, region)?.let { pt(it) }
+            ImageApi.findImage(imageId, tplId, threshold, region, scalesOf(args, 7))?.let { pt(it) }
         }
         guard("__img_find_all") { args ->
             val imageId = (args.getOrNull(0) as? Number)?.toInt() ?: return@guard emptyList<Any>()
@@ -555,7 +555,7 @@ object ScriptEngine {
             val threshold = (args.getOrNull(2) as? Number)?.toDouble() ?: return@guard emptyList<Any>()
             val region = regionOf(args, 3)
             val max = (args.getOrNull(7) as? Number)?.toInt() ?: 5
-            ImageApi.findAllImages(imageId, tplId, threshold, region, max).map { pt(it) }
+            ImageApi.findAllImages(imageId, tplId, threshold, region, max, scalesOf(args, 8)).map { pt(it) }
         }
         guard("__img_match_details") { args ->
             val imageId = (args.getOrNull(0) as? Number)?.toInt() ?: return@guard emptyList<Any>()
@@ -565,15 +565,17 @@ object ScriptEngine {
             val templateWidth = ImageApi.width(templateId)
             val templateHeight = ImageApi.height(templateId)
             if (templateWidth <= 0 || templateHeight <= 0) return@guard emptyList<Any>()
-            ImageApi.findImageDetails(imageId, templateId, threshold, regionOf(args, 3), max).map { match ->
+            ImageApi.findImageDetails(imageId, templateId, threshold, regionOf(args, 3), max, scalesOf(args, 8)).map { match ->
+                val width = match.width.takeIf { it > 0 } ?: templateWidth
+                val height = match.height.takeIf { it > 0 } ?: templateHeight
                 listOf(
                     ScriptAdapter.toDesignX(match.x).toLong(),
                     ScriptAdapter.toDesignY(match.y).toLong(),
                     match.score,
-                    ScriptAdapter.toDesignX(match.x - templateWidth / 2).toLong(),
-                    ScriptAdapter.toDesignY(match.y - templateHeight / 2).toLong(),
-                    ScriptAdapter.toDesignX(match.x + templateWidth / 2).toLong(),
-                    ScriptAdapter.toDesignY(match.y + templateHeight / 2).toLong()
+                    ScriptAdapter.toDesignX(match.x - width / 2).toLong(),
+                    ScriptAdapter.toDesignY(match.y - height / 2).toLong(),
+                    ScriptAdapter.toDesignX(match.x - width / 2 + width).toLong(),
+                    ScriptAdapter.toDesignY(match.y - height / 2 + height).toLong()
                 )
             }
         }
@@ -581,7 +583,7 @@ object ScriptEngine {
             val imageId = (args.getOrNull(0) as? Number)?.toInt() ?: return@guard false
             val tplId = resolveTemplate(args.getOrNull(1), scriptDir) ?: return@guard false
             val threshold = (args.getOrNull(2) as? Number)?.toDouble() ?: return@guard false
-            ImageApi.existsImage(imageId, tplId, threshold, regionOf(args, 3))
+            ImageApi.existsImage(imageId, tplId, threshold, regionOf(args, 3), scalesOf(args, 7))
         }
         guard("__img_find_with_text") { args ->
             val imageId = (args.getOrNull(0) as? Number)?.toInt() ?: return@guard null
@@ -589,7 +591,7 @@ object ScriptEngine {
             val threshold = (args.getOrNull(2) as? Number)?.toDouble() ?: return@guard null
             val region = regionOf(args, 3)
             val padding = (args.getOrNull(7) as? Number)?.toInt() ?: 0
-            val m = ImageApi.findImageWithText(imageId, tplId, threshold, region, padding)
+            val m = ImageApi.findImageWithText(imageId, tplId, threshold, region, padding, scalesOf(args, 8))
                 ?: return@guard null
             // [x, y, left, top, right, bottom, text, items]，由 JS 侧组装成 Match 对象
             listOf(
@@ -621,14 +623,9 @@ object ScriptEngine {
             val thresholdB = (args.getOrNull(4) as? Number)?.toDouble() ?: 0.9
             val region = regionOf(args, 5)              // 读取 5..8 四个分量
             val rowTolerance = (args.getOrNull(9) as? Number)?.toInt() ?: 0
-            val mode = args.getOrNull(10) as? String ?: "pixel"
-            val scaleArg = args.getOrNull(11)
-            val scales = if (scaleArg == null) listOf(0.75, 1.0, 1.25, 1.5) else {
-                require(scaleArg is List<*>) { "scales must be an array" }
-                scaleArg.map { require(it is Number) { "scales must contain numbers" }; it.toDouble() }
-            }
+            // 所有找图入口均采用轮廓匹配，倍率参数传入同一个匹配入口。
             val pair = ImageApi.findImagePair(
-                imageId, tplA, tplB, thresholdA, thresholdB, region, rowTolerance, mode, scales
+                imageId, tplA, tplB, thresholdA, thresholdB, region, rowTolerance, scalesOf(args, 10)
             ) ?: return@guard null
             listOf(
                 if (pair.sameRow) 1L else 0L,
@@ -683,6 +680,11 @@ object ScriptEngine {
 
     private fun numArg(args: Array<Any?>, index: Int): Long =
         (args.getOrNull(index) as? Number)?.toLong() ?: 0L
+
+    /** JS 侧的倍率数组传到统一找图入口；无效条目交给匹配器拒绝。 */
+    private fun scalesOf(args: Array<Any?>, index: Int): List<Double> =
+        (args.getOrNull(index) as? List<*>)?.map { (it as? Number)?.toDouble() ?: Double.NaN }
+            ?: listOf(1.0)
 
     /** JS 数组 → 字符串列表（非字符串项转成文本，null/undefined 忽略） */
     private fun flattenStrings(arg: Any?): List<String> = when (arg) {
@@ -836,12 +838,12 @@ var images = {
     findImage: function(img, tpl, options) {
         var r = __regionArgs(options);
         return __pt(__img_find(__img(img), __tplRef(tpl), __opt(options, 'threshold', 0.9),
-            r[0], r[1], r[2], r[3]));
+            r[0], r[1], r[2], r[3], __opt(options, 'scales', [1])));
     },
     findAllImages: function(img, tpl, options) {
         var r = __regionArgs(options);
         var raw = __img_find_all(__img(img), __tplRef(tpl), __opt(options, 'threshold', 0.9),
-            r[0], r[1], r[2], r[3], __opt(options, 'max', 5));
+            r[0], r[1], r[2], r[3], __opt(options, 'max', 5), __opt(options, 'scales', [1]));
         var out = [];
         if (raw) for (var i = 0; i < raw.length; i++) out.push({ x: raw[i][0], y: raw[i][1] });
         return out;
@@ -849,18 +851,18 @@ var images = {
     existsImage: function(img, tpl, options) {
         var r = __regionArgs(options);
         return __img_exists(__img(img), __tplRef(tpl), __opt(options, 'threshold', 0.9),
-            r[0], r[1], r[2], r[3]);
+            r[0], r[1], r[2], r[3], __opt(options, 'scales', [1]));
     },
     findImageInRegion: function(img, tpl, x, y, w, h, threshold) {
         return __pt(__img_find(__img(img), __tplRef(tpl), threshold === undefined ? 0.9 : threshold,
-            x, y, w === undefined ? -1 : w, h === undefined ? -1 : h));
+            x, y, w === undefined ? -1 : w, h === undefined ? -1 : h, [1]));
     },
     // 找图 + 对匹配区域做 OCR：返回 { x, y, bounds, text, items }
     findImageWithText: function(img, tpl, options) {
         var r = __regionArgs(options);
         var padding = __opt(options, 'padding', 0);
         var raw = __img_find_with_text(__img(img), __tplRef(tpl),
-            __opt(options, 'threshold', 0.9), r[0], r[1], r[2], r[3], padding);
+            __opt(options, 'threshold', 0.9), r[0], r[1], r[2], r[3], padding, __opt(options, 'scales', [1]));
         if (!raw) return null;
         var items = [];
         if (raw[7]) for (var i = 0; i < raw[7].length; i++) items.push(__ocrItem(raw[7][i]));
@@ -893,8 +895,7 @@ var images = {
             __opt(options, 'thresholdA', __opt(options, 'threshold', 0.9)),
             __opt(options, 'thresholdB', __opt(options, 'threshold', 0.9)),
             r[0], r[1], r[2], r[3],
-            __opt(options, 'rowTolerance', 0),
-            __opt(options, 'mode', 'pixel'), __opt(options, 'scales', null));
+            __opt(options, 'rowTolerance', 0), __opt(options, 'scales', [1]));
         if (!raw) return null;
         function rect(x, y, l, t, rr, b) {
             return {
@@ -1138,7 +1139,8 @@ function __findAnyIn(shot, entries, options) {
         if (tpl === -1) continue;                        // 无效句柄/路径读取失败：跳过该条目
         var p = images.findImage(shot, e.tpl, {
             threshold: (e.threshold === undefined || e.threshold === null) ? base : e.threshold,
-            region: region
+            region: region,
+            scales: __opt(options, 'scales', [1])
         });
         if (p) return { x: p.x, y: p.y, index: i, name: e.name };
     }

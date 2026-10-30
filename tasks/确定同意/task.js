@@ -34,7 +34,6 @@ try {
             try {
                 // 每个字符独立设置阈值；中心 Y 差不超过 20 个实际截图像素视为同行。
                 var pair = images.findImagePair(shot, loaded.images.confirmFirst, loaded.images.confirmLast, {
-                    mode: "shape",
                     scales: [0.75, 1, 1.25, 1.5],
                     thresholdA: 0.82, // 确.png：两种字号共用此轮廓模板。
                     thresholdB: 0.82, // 定.png
@@ -43,7 +42,6 @@ try {
                 var label = "确定";
                 if (!pair || !pair.sameRow) {
                     pair = images.findImagePair(shot, loaded.images.confirmFirst, loaded.images.acknowledgeLast, {
-                        mode: "shape",
                         scales: [0.75, 1, 1.25, 1.5],
                         thresholdA: 0.82, // 确.png
                         thresholdB: 0.82, // 认.png
@@ -53,7 +51,6 @@ try {
                 }
                 if (!pair || !pair.sameRow) {
                     pair = images.findImagePair(shot, loaded.images.agreeFirst, loaded.images.agreeLast, {
-                        mode: "shape",
                         scales: [0.75, 1, 1.25, 1.5],
                         thresholdA: 0.82, // 同.png
                         thresholdB: 0.82, // 意.png

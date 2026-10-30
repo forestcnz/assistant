@@ -105,6 +105,29 @@ class TemplateMatcherTest {
         assertEquals(Match(41, 45, 1.0), best)
     }
 
+    @Test fun lowVarianceTemplatesKeepTheOriginalNccFallbackScore() {
+        val random = Random(707)
+        // 包含纯色以及方差小于 1、但像素并不完全相同的模板。
+        for (width in listOf(1, 2, 7, 24)) {
+            val height = 5
+            val screen = Gray(width + 4, height + 3,
+                IntArray((width + 4) * (height + 3)) { random.nextInt(256) })
+            for (templatePixels in listOf(
+                IntArray(width * height) { 80 },
+                IntArray(width * height) { if (it == 0) 81 else 80 }
+            )) {
+                val template = Gray(width, height, templatePixels)
+                val stats = template.stats()
+                assertTrue(stats.varSum < 1.0)
+                for (y in 0..3) for (x in 0..4) {
+                    // 原实现最终取相同的 MAD 分数，要求逐位一致。
+                    assertEquals(screen.madSim(x, y, template),
+                        screen.ncc(x, y, template, stats), 0.0)
+                }
+            }
+        }
+    }
+
     @Test fun cancellationInterruptsCoarseAndFineWork() {
         val failure = IllegalStateException("cancelled")
         var checks = 0

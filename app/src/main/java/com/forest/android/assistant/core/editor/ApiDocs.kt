@@ -65,7 +65,7 @@ object ApiDocs {
         Item(
             "images.findImage", "images.findImage(img, tpl, options?)",
             "images.findImage(captureScreen(), \"images/btn.png\", { threshold: 0.9 })",
-            "模板匹配，返回匹配中心 Point"
+            "按图片内容轮廓匹配，支持 options.scales，返回匹配中心 Point"
         ),
         Item(
             "images.findAllImages", "images.findAllImages(img, tpl, options?)",
@@ -212,9 +212,9 @@ object ApiDocs {
 
         Item(
             "images.findImagePair", "images.findImagePair(img, tplA, tplB, options?)",
-            "images.findImagePair(shot, \"images/装备.png\", \"images/技能.png\")",
-            "查找两个模板并校验同行，返回中点 midX/midY 和 sameRow。任一模板未找到返回 null。options 支持 threshold/thresholdA/thresholdB/region/rowTolerance；mode 默认 pixel，shape 为轮廓多尺度匹配，scales 默认 [0.75,1,1.25,1.5]，支持 1～12 个 0.5～2 的比例。默认同行容差按实际匹配高度的30%（最小4px），可用 rowTolerance 覆盖。shape 会增加耗时，复杂背景与不同字体仍可能失败。",
-            "declare function findImagePair(img: any, tplA: any, tplB: any, options?: any): any | null;"
+            "images.findImagePair(shot, first, last, { scales: [0.75, 1, 1.25, 1.5] })",
+            "按图片内容轮廓匹配两个模板并校验同行；scales 支持不同字号，返回实际命中尺寸的边界。",
+            "findImagePair(img: ImageRef, tplA: ImageRef | string, tplB: ImageRef | string, options?: FindImagePairOptions): PairMatch | null;"
         ),
 
         // —— adapter ——
@@ -264,10 +264,12 @@ object ApiDocs {
         appendLine("interface WaitTextClickOptions extends OcrOptions { delay?: number; missLimit?: number; maxAttempts?: number; confirmCount?: number; name?: string; onRetry?: (reason: string, state: PollState) => void; }")
         appendLine("interface WatchOptions { maxClicks?: number; delayMs?: number; }")
         appendLine("interface RetryOptions { timeoutMs?: number; intervalMs?: number; maxAttempts?: number; name?: string; onRetry?: (reason: string, state: PollState) => void; }")
-        appendLine("interface ImageLoopOptions { timeoutMs?: number; intervalMs?: number; confirmCount?: number; maxAttempts?: number; name?: string; onRetry?: (reason: string, state: PollState) => void; threshold?: number; region?: Region; maxClicks?: number; delayMs?: number; }")
-        appendLine("interface FindImagePairOptions { threshold?: number; thresholdA?: number; thresholdB?: number; region?: Region; rowTolerance?: number; mode?: 'pixel' | 'shape'; scales?: number[]; }")
+        appendLine("interface ImageLoopOptions { timeoutMs?: number; intervalMs?: number; confirmCount?: number; maxAttempts?: number; name?: string; onRetry?: (reason: string, state: PollState) => void; threshold?: number; region?: Region; scales?: number[]; maxClicks?: number; delayMs?: number; }")
+        // 所有找图接口共用轮廓匹配，倍率按输入顺序尝试。
+        appendLine("interface FindImageOptions { threshold?: number; region?: Region; scales?: number[]; }")
+        appendLine("interface FindImagePairOptions extends FindImageOptions { thresholdA?: number; thresholdB?: number; rowTolerance?: number; }")
         appendLine("interface ResizeOptions { filter?: boolean; }")
-        appendLine("interface MatchTemplateOptions { threshold?: number; region?: Region; max?: number; }")
+        appendLine("interface MatchTemplateOptions extends FindImageOptions { max?: number; }")
         appendLine("interface ImageMatch extends Point { score: number; bounds: Rect; }")
         // 多模板匹配结果：index 为传入数组下标，name 为条目 name/路径
         appendLine("interface AnyMatch { x: number; y: number; index: number; name: string; }")
@@ -288,7 +290,6 @@ object ApiDocs {
         }
         appendLine()
         appendLine("declare const images: {")
-        appendLine("    readonly supportsShapeMatching: boolean;")
         items.filter { it.name.startsWith("images.") }.forEach {
             appendLine("    /** ${it.doc} */")
             val declaration = it.declaration?.takeUnless { value -> value.startsWith("declare ") }

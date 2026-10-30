@@ -9,7 +9,8 @@ internal class ScreenGrayCache(private val maxBytes: Long = 16L * 1024 * 1024) {
         val right: Int,
         val bottom: Int,
         val scale: Int,
-        val generationId: Int = 0
+        val generationId: Int = 0,
+        val shape: Boolean = false
     )
 
     private val entries = LinkedHashMap<Key, IntArray>(16, 0.75f, true)

@@ -139,12 +139,15 @@ OCR 另有当前实现行为：裁剪后的宽或高小于 **8 个实际像素**
 | --- | --- | --- | --- | --- |
 | `FindImageOptions` | `threshold` | `number` | `0.9` | 模板匹配阈值，通常取 0～1，越高越严格；不是百分数 |
 | `FindImageOptions` | `region` | `Region` | 全图 | 搜索区域 |
+| `FindImageOptions` | `scales` | `number[]` | `[1]` | 按图片轮廓匹配时尝试的模板倍率；最多 8 个，单个倍率限 0.25～4 |
 | `FindAllImagesOptions` | `threshold` | `number` | `0.9` | 同上 |
 | `FindAllImagesOptions` | `region` | `Region` | 全图 | 同上 |
 | `FindAllImagesOptions` | `max` | `number`，整数 | `5` | 最多返回的匹配点数；小于等于 0 返回空数组 |
+| `FindAllImagesOptions` | `scales` | `number[]` | `[1]` | 同 `FindImageOptions` |
 | `FindImageWithTextOptions` | `threshold` | `number` | `0.9` | 找图阈值，不是 OCR 置信度 |
 | `FindImageWithTextOptions` | `region` | `Region` | 全图 | 找图范围 |
 | `FindImageWithTextOptions` | `padding` | `number`，整数 | `0` | 找到模板后，OCR 区域四周外扩的实际像素数；限制到 0～200 |
+| `FindImageWithTextOptions` | `scales` | `number[]` | `[1]` | 同 `FindImageOptions` |
 | `FindColorOptions` | `threshold` | `number`，整数 | `16` | 每个 RGB 通道允许的绝对色差，建议 0～255；0 为精确色值，忽略 Alpha |
 | `FindColorOptions` | `region` | `Region` | 全图 | 首色/主色点的搜索区域 |
 | `OcrOptions` | `region` | `Region` | 全图 | OCR 区域 |
@@ -165,9 +168,11 @@ OCR 另有当前实现行为：裁剪后的宽或高小于 **8 个实际像素**
 | `ImageLoopOptions` | `maxClicks` | `number`，整数 | `0` | 点击次数上限；`0` 表示不设上限 |
 | `ImageLoopOptions` | `delayMs` | `number`，毫秒 | `0` | 每次点击后等待时间 |
 | `MatchTemplateOptions` | `threshold` / `region` / `max` | `number` / `Region` / `number` | `0.9` / 全图 / `5` | 匹配阈值、搜索区域和最多返回结果数 |
+| `MatchTemplateOptions` | `scales` | `number[]` | `[1]` | 同 `FindImageOptions` |
 | `ResizeOptions` | `filter` | `boolean` | `true` | 是否使用滤镜平滑缩放 |
 | `FindImageAnyOptions` | `threshold` | `number` | `0.9` | 条目未单独指定阈值时使用 |
 | `FindImageAnyOptions` | `region` | `Region` | 全图 | 所有条目共用的搜索区域 |
+| `FindImageAnyOptions` | `scales` | `number[]` | `[1]` | 所有条目共用的模板倍率 |
 | `WaitImageClickOptions` | `threshold` / `region` | | | 同 `FindImageOptions` |
 | `WaitImageClickOptions` | `delay` | `number`，毫秒 | `0` | 点击成功后额外等待 |
 | `WaitImageClickOptions` | `missLimit` | `number`，整数 | `0` | 连续未找到多少次后返回 `false`；`0` 不限 |
@@ -686,7 +691,7 @@ if (crop) images.release(crop);
 
 签名：`images.resize(img: ImageRef, width: number, height: number, options?: ResizeOptions): Image | null`。
 
-按实际像素尺寸生成新的图片句柄。模板大小不会因 `adapter` 自动改变；需要为其他分辨率准备模板时可以显式缩放，再用返回句柄匹配。
+按实际像素尺寸生成新的图片句柄。模板大小不会因 `adapter` 自动改变；找图时可使用 `options.scales` 尝试多个倍率，也可以先显式缩放再用返回句柄匹配。
 
 | 参数 | 类型 | 必填 | 默认值 | 说明 |
 | --- | --- | --- | --- | --- |
@@ -787,7 +792,7 @@ try {
 
 ## 7. 找图与找色
 
-找图使用灰度模板匹配，默认阈值为 `0.9`。模板需与目标的实际像素尺寸相符：坐标适配不会缩放模板，也不提供任意旋转或尺寸变化的匹配。找图成功返回模板中心；返回结果不包含匹配分数。
+找图使用灰度边缘轮廓匹配，默认阈值为 `0.9`。默认按模板实际像素尺寸匹配；可通过 `scales` 显式尝试其他倍率，坐标适配不会自动缩放模板，不支持任意旋转。`findImage` 成功返回模板中心；返回结果不包含匹配分数。
 
 `tpl` 接受有效图片句柄或文件路径。反复查找时建议先 `images.read()` 一次并复用句柄；传路径会在每次调用时重新读取并登记图片句柄。
 
@@ -893,32 +898,25 @@ if (state && state.name === "exhausted") {
 | `options.thresholdB` | `number` | 否 | — | 单独覆盖 B 的阈值 |
 | `options.region` | `Region` | 否 | 全图 | 两个模板共用的搜索区域 |
 | `options.rowTolerance` | `number`，整数 | 否 | 自动 | 同行判定的像素容差；`<= 0` 使用自动值 |
-| `options.mode` | `"pixel" \| "shape"` | 否 | `"pixel"` | `shape` 先提取 Sobel 轮廓，再按多个比例缩放模板匹配；原像素模式行为不变 |
-| `options.scales` | `number[]` | 否 | `[0.75, 1, 1.25, 1.5]` | 仅用于 `shape`，1～12 个有限数，每个在 0.5～2 范围内；非法值报错 |
+| `options.scales` | `number[]` | 否 | `[1]` | 两个模板共用的倍率，最多 8 个，每个在 0.25～4 范围内 |
 
 **同行判定**：两个匹配框中心的 Y 差值不超过容差。容差默认按较小模板高度的 30% 自动计算（最小 4px），大小不同的控件用同一把尺子会出错。
-
-`shape` 模式使用缩放后的实际匹配框计算中心和默认同行容差，`rowTolerance` 仍以实际截图像素计。形状模式会在每个模板的最多四个候选中优先选择同行的一对；相同素材必须对应两个不重叠的实例。它弱化颜色、明暗反转及平滑背景差异，不是 OCR，也不能保证忽略复杂背景或兼容所有字体。缩放比例越多，搜索越慢，建议按界面限定 `region`。两种模式的分数不可直接等同，形状阈值应结合正反样本验证。
-
-新版引擎提供 `images.supportsShapeMatching === true`。旧版会忽略未知选项，使用形状模式的脚本应先检查此属性，避免误用旧算法：
-
-```javascript
-if (images.supportsShapeMatching !== true) {
-    toastLog("请先更新支持形状匹配的 APP");
-    exit();
-}
-var pair = images.findImagePair(shot, "images/确.png", "images/认.png", {
-    mode: "shape", scales: [0.75, 1, 1.25, 1.5],
-    thresholdA: 0.82, thresholdB: 0.82, rowTolerance: 20
-});
-if (pair && pair.sameRow) click(pair.midX, pair.midY);
-```
 
 返回：`PairMatch`，字段见 1.5 节 `PairMatch`。
 
 任一模板未找到、模板无效或路径读取失败时返回 `null`。两个参数是**同一份素材**（同一句柄或同一路径）时，取画面中按 X 排序的前两个互不重叠的位置配对，用于两个外观相同的控件；只有一个匹配时返回 `null`。
 
 性能说明：A 先全区域搜索；B 优先在 A 所在的行带内搜索，找不到时回退一次全区域搜索，保证「找到了但不同行」仍能返回 `sameRow: false`。
+
+所有找图 API（包括单模板、多模板、轮询、双模板和图文匹配）现在都按灰度边缘轮廓比较图片内容；`findColor` / `findMultiColors` 仍按颜色找点。形状匹配对明暗反转不敏感，但字体结构、笔画粗细和模板周围背景边缘仍会影响得分。`scales` 用来匹配不同尺寸，结果边界使用命中倍率的实际尺寸，区域与结果坐标仍遵循 adapter。纯色、无轮廓的模板不会命中。
+
+```javascript
+var pair = images.findImagePair(shot, loaded.images.confirmFirst, loaded.images.confirmLast, {
+    scales: [0.75, 1, 1.25, 1.5],
+    thresholdA: 0.8, thresholdB: 0.8, rowTolerance: 20
+});
+if (pair && pair.sameRow) click(pair.midX, pair.midY);
+```
 
 ```javascript
 var pair = images.findImagePair(shot, "images/装备.png", "images/技能.png", {
@@ -1776,7 +1774,7 @@ try {
 
 ### 14.2 预加载模板并及时释放每次截图
 
-准备与目标界面实际像素尺寸相符的 `images/button.png`。该示例不会把截图失败误认为目标消失，并且每次只保留当前截图。
+准备包含目标内容轮廓的 `images/button.png`。该示例不会把截图失败误认为目标消失，并且每次只保留当前截图；需要适配其他字号时可添加 `scales`。
 
 ```javascript
 adapter.reset();

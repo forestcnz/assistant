@@ -1,6 +1,7 @@
 name: Bump version on dev -> master merge
 
-# dev 通过 PR 合并进 master 后，minor 位 +1（中间位）：1.1.2 -> 1.2.0
+# dev 通过 PR 合并进 master 后，minor 位 +1（中间位）：1.1.2 -> 1.2.0，
+# 随后把升过版本的 master 同步回 dev，保证两条分支版本号一致。
 on:
   pull_request:
     types:
@@ -54,3 +55,55 @@ jobs:
           git commit -m "Bump version to ${NEW_VERSION} [skip version bump]" \
             -m "Automated minor bump from ${OLD_VERSION} to ${NEW_VERSION} after merging dev into master (PR #${PR_NUMBER:-manual})."
           git push origin HEAD:master
+
+      - name: Sync dev with bumped master
+        shell: bash
+        env:
+          NEW_VERSION: ${{ steps.bump.outputs.new }}
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # dev 可能与 master 并发有新的 patch 自增提交，推送被拒时重新拉取并重试
+          for attempt in 1 2 3; do
+            git fetch origin master dev
+            git checkout -B dev origin/dev
+
+            # 提交信息带 [skip version bump]，即使同步提交触发了 dev 工作流也不会再自增一次
+            if git merge --no-edit \
+              -m "Sync dev with master after version bump to ${NEW_VERSION} [skip version bump]" \
+              origin/master; then
+              :
+            else
+              # 只允许版本文件的冲突，且统一以 master 上的新版本号为准
+              unexpected=0
+              while IFS= read -r file; do
+                [[ -z "${file}" ]] && continue
+                if [[ "${file}" != "gradle.properties" && "${file}" != "app/build.gradle.kts" ]]; then
+                  echo "::error::Unexpected merge conflict in ${file}"
+                  unexpected=1
+                fi
+              done < <(git diff --name-only --diff-filter=U)
+
+              if [[ "${unexpected}" -ne 0 ]]; then
+                git merge --abort
+                exit 1
+              fi
+
+              git checkout --theirs -- gradle.properties app/build.gradle.kts
+              git add gradle.properties app/build.gradle.kts
+              git commit -m "Sync dev with master after version bump to ${NEW_VERSION} [skip version bump]"
+            fi
+
+            if git push origin HEAD:dev; then
+              exit 0
+            fi
+
+            echo "Push to dev was rejected, retrying (${attempt}/3)..."
+            sleep $((attempt * 5))
+          done
+
+          echo "::error::Failed to sync dev with master after 3 attempts"
+          exit 1
