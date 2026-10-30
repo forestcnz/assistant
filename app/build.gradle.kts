@@ -18,7 +18,7 @@ android {
         targetSdk = 37
         testInstrumentationRunner = "com.forest.android.assistant.core.image.ImageApiInstrumentation"
         versionCode = providers.gradleProperty("appVersionCode").orElse("1").get().toInt()
-        versionName = providers.gradleProperty("appVersionName").orElse("1.3.10").get()
+        versionName = providers.gradleProperty("appVersionName").orElse("1.3.11").get()
     }
 
     // 正式签名密钥不入库（仓库是公开的）。CI 由 workflow 从 RELEASE_KEYSTORE_BASE64 解码成文件，
