@@ -763,6 +763,12 @@ object FloatyManager {
         val d = context.resources.displayMetrics.density
         Log.i(TAG, "展开面板, 任务数=${tasks.size}, 运行中=${runningTask ?: "无"}")
 
+        // 使用当前显示区域限制面板高度；任务列表和工具区滚动，底部关闭入口始终留在窗口内。
+        @Suppress("DEPRECATION")
+        val displaySize = android.graphics.Point().also { wm.defaultDisplay.getSize(it) }
+        val maxPanelHeight = (displaySize.y - 32 * d).toInt().coerceAtLeast(1)
+        val panelW = (284 * d).toInt().coerceAtMost((displaySize.x - 32 * d).toInt()).coerceAtLeast(1)
+
         val panel = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             background = roundedBackground(COLOR_BG, 16 * d, 1 * d, 0x22FFFFFF)
@@ -792,6 +798,8 @@ object FloatyManager {
         )
         panel.addView(header)
         panel.addView(divider(context))
+
+        val content = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
 
         // —— 任务列表（双列紧凑格子，可滚动，最长 42% 屏高） ——
         val list = LinearLayout(context).apply {
@@ -842,7 +850,7 @@ object FloatyManager {
             ))
             isFillViewport = false
         }
-        panel.addView(
+        content.addView(
             scroll,
             LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
@@ -851,7 +859,7 @@ object FloatyManager {
         )
 
         // —— 底部：工具图标区（两行三列，保留足够的触摸区域） ——
-        panel.addView(divider(context))
+        content.addView(divider(context))
         val tools = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             // 左右内边距 8dp 对称（每个按钮 marginEnd 6dp + 行末 padding 2dp）
@@ -890,7 +898,7 @@ object FloatyManager {
                 buttons.forEach { addView(it) }
             })
         }
-        panel.addView(tools)
+        content.addView(tools)
 
         // 运行中：提供停止入口（与胶囊上的停止键等价）
         if (runningTask != null) {
@@ -915,13 +923,33 @@ object FloatyManager {
                     LinearLayout.LayoutParams.WRAP_CONTENT
                 )
             )
-            panel.addView(stopRow)
+            content.addView(stopRow)
         }
 
+        val footerDivider = divider(context)
+        val footer = closeLauncherRow(context)
+        val measureWidth = View.MeasureSpec.makeMeasureSpec(panelW, View.MeasureSpec.EXACTLY)
+        val measureHeight = View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+        header.measure(measureWidth, measureHeight)
+        footer.measure(measureWidth, measureHeight)
+        val maxContentHeight = (maxPanelHeight - header.measuredHeight - footer.measuredHeight -
+                2 * (6 * d).toInt() - 2 * (1 * d).toInt().coerceAtLeast(1)).coerceAtLeast(1)
+        // 内容超高时只压缩滚动区域，避免工具或任务数量把关闭按钮挤到屏外。
+        val contentScroll = object : ScrollView(context) {
+            override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+                super.onMeasure(widthMeasureSpec,
+                    View.MeasureSpec.makeMeasureSpec(maxContentHeight, View.MeasureSpec.AT_MOST))
+            }
+        }.apply {
+            addView(content)
+            isFillViewport = false
+        }
+        panel.addView(contentScroll)
+
         // —— 底部：关闭悬浮窗（关闭后需回 App「工具」页重新开启） ——
-        panel.addView(divider(context))
+        panel.addView(footerDivider)
         panel.addView(
-            closeLauncherRow(context),
+            footer,
             LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
@@ -933,9 +961,10 @@ object FloatyManager {
         // （displayMetrics 高 2064 vs 实际 1920，最大窗口度量 1030x2064 vs 实际 1080x1920），
         // 会导致「看起来不居中」；交由系统按真实显示帧居中最稳，也不再需要布局监听校正。
         // 注意：CENTER 重力下 params.x/y 是「相对屏幕中心的偏移量」，头部拖动直接累加偏移。
-        val panelW = (284 * d).toInt().coerceAtMost((context.resources.displayMetrics.widthPixels - 32 * d).toInt()).coerceAtLeast(1)
         val params = overlayParams(Gravity.CENTER, x = 0, y = 0)
         params.width = panelW
+        // 半隐藏悬浮球需要 NO_LIMITS，面板则必须受屏幕边界约束。
+        params.flags = params.flags and WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS.inv()
         try {
             wm.addView(panel, params)
             panelView = panel
