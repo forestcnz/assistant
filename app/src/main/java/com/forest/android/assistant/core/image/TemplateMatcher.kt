@@ -356,6 +356,9 @@ internal object TemplateMatcher {
          * 此时退化为平均绝对差相似度，避免大面积为纯色背景的模板漏检。
          */
         fun ncc(x0: Int, y0: Int, tpl: Gray, ts: S): Double {
+            // 模板近似平坦：退化为平均绝对差；窗口平坦但模板有结构：判为不相似
+            // 低方差模板最终仍使用色差分数，直接计算可避免同一窗口被遍历两次。
+            if (ts.varSum < MIN_VARIANCE) return madSim(x0, y0, tpl)
             val n = (tpl.w * tpl.h).toDouble()
             var sumI = 0.0
             var sumI2 = 0.0
@@ -374,8 +377,6 @@ internal object TemplateMatcher {
             }
             val meanI = sumI / n
             val varI = sumI2 - sumI * meanI
-            // 模板近似平坦：退化为平均绝对差；窗口平坦但模板有结构：判为不相似
-            if (ts.varSum < MIN_VARIANCE) return madSim(x0, y0, tpl)
             if (varI < MIN_VARIANCE) return 0.0
             val den = sqrt(varI * ts.varSum)
             return ((dot - sumI * ts.mean) / den).coerceIn(-1.0, 1.0)

@@ -37,6 +37,8 @@ object NewApiChecks {
         val screen = buildScreen(red, blue, textBitmap)
         ScriptAdapter.setRealSize(W, H)
         try {
+            // 图片内容使用相同轮廓，倍率在 JS 包装层应能透传到双模板接口。
+            runShapeScript(baseDir)
             runScript(baseDir, "new-api.js", screen, """
                 function check(ok, message) { if (!ok) throw new Error(message); }
                 adapter.setDesignSize(640, 480);
@@ -272,9 +274,62 @@ object NewApiChecks {
             "$name 执行失败：${outcome.kind} ${outcome.message}\n" +
                     synchronized(logs) { logs.takeLast(15) }.joinToString("\n")
         }
-        check(synchronized(logs) { logs.any { it.startsWith("NEW_API_OK") || it.startsWith("WAIT_SEMANTICS_OK") } }) {
+        check(synchronized(logs) { logs.any { it.startsWith("NEW_API_OK") || it.startsWith("WAIT_SEMANTICS_OK") || it.startsWith("SHAPE_API_OK") } }) {
             "$name 未输出成功标记：${synchronized(logs) { logs.takeLast(15) }}"
         }
+    }
+
+    private fun runShapeScript(baseDir: File) {
+        val first = makeGlyph(false)
+        val last = makeGlyph(true)
+        val shot = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(shot)
+        canvas.drawColor(Color.WHITE)
+        val enlargedFirst = Bitmap.createScaledBitmap(first, 30, 36, true)
+        val enlargedLast = Bitmap.createScaledBitmap(last, 30, 36, true)
+        canvas.drawBitmap(enlargedFirst, 130f, 160f, null)
+        canvas.drawBitmap(enlargedLast, 210f, 160f, null)
+        val firstPath = File(baseDir, "glyph-first.png").also { save(first, it) }.absolutePath.replace('\\', '/')
+        val lastPath = File(baseDir, "glyph-last.png").also { save(last, it) }.absolutePath.replace('\\', '/')
+        try {
+            runScript(baseDir, "shape-api.js", shot, """
+                function check(ok, message) { if (!ok) throw new Error(message); }
+                adapter.setDesignSize(640, 480);
+                var first = images.read("$firstPath"), last = images.read("$lastPath");
+                var frame = captureScreen();
+                var pair = images.findImagePair(frame, first, last, {
+                    scales: [0.75, 1, 1.5], thresholdA: 0.8,
+                    thresholdB: 0.8, region: [110, 140, 150, 80], rowTolerance: 20
+                });
+                check(pair && pair.sameRow, '轮廓双模板应同行命中');
+                check(pair.a.left === 130 && pair.a.right === 160, 'A 边界应对应缩放尺寸');
+                check(pair.b.left === 210 && pair.b.right === 240, 'B 边界应对应缩放尺寸');
+                check(pair.midX === 185 && pair.midY === 178, '中点应对应实际命中的位置');
+                var detail = images.findImageDetails(frame, first, { scales: [1.5], threshold: 0.8 });
+                check(detail && detail.bounds.left === 130, '单模板明细应使用同一轮廓规则');
+                check(images.findImage(frame, first, { scales: [0] }) === null, '无效倍率应拒绝');
+                images.releaseAll(frame, first, last);
+                log('SHAPE_API_OK');
+            """.trimIndent())
+        } finally {
+            first.recycle()
+            last.recycle()
+            enlargedFirst.recycle()
+            enlargedLast.recycle()
+            shot.recycle()
+        }
+    }
+
+    /** 构造两种不同的笔画轮廓，供多倍率匹配回归使用。 */
+    private fun makeGlyph(last: Boolean): Bitmap {
+        val bmp = Bitmap.createBitmap(20, 24, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bmp)
+        canvas.drawColor(Color.WHITE)
+        val paint = Paint().apply { color = Color.BLACK }
+        canvas.drawRect(4f, 4f, 7f, 20f, paint)
+        canvas.drawRect(4f, if (last) 11f else 5f, 16f, if (last) 14f else 8f, paint)
+        canvas.drawRect(if (last) 11f else 13f, 12f, 16f, 20f, paint)
+        return bmp
     }
 
     /** 构造纯色方块模板（带少量噪点，避免完全平坦导致 NCC 退化） */
@@ -284,6 +339,11 @@ object NewApiChecks {
         canvas.drawColor(color)
         val paint = Paint().apply { this.color = Color.WHITE }
         canvas.drawRect(4f, 4f, 12f, 10f, paint)
+        // 颜色不再参与找图判分；蓝色模板增加不同的笔画，供双模板回归区分形状。
+        if (color == Color.BLUE) {
+            canvas.drawRect(22f, 7f, 27f, 25f, paint)
+            canvas.drawRect(17f, 20f, 35f, 25f, paint)
+        }
         return bmp
     }
 
