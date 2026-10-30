@@ -2,6 +2,7 @@ name: Bump version on dev -> master merge
 
 # dev 通过 PR 合并进 master 后，minor 位 +1（中间位）：1.1.2 -> 1.2.0，
 # 随后把升过版本的 master 同步回 dev，保证两条分支版本号一致。
+# 同步成功后根据 master 的版本号创建标签。
 on:
   pull_request:
     types:
@@ -13,6 +14,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 concurrency:
   group: bump-version-master
@@ -41,6 +43,7 @@ jobs:
           mode: minor
 
       - name: Commit and push
+        id: publish-master
         shell: bash
         env:
           OLD_VERSION: ${{ steps.bump.outputs.old }}
@@ -55,8 +58,10 @@ jobs:
           git commit -m "Bump version to ${NEW_VERSION} [skip version bump]" \
             -m "Automated minor bump from ${OLD_VERSION} to ${NEW_VERSION} after merging dev into master (PR #${PR_NUMBER:-manual})."
           git push origin HEAD:master
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Sync dev with bumped master
+        id: sync-dev
         shell: bash
         env:
           NEW_VERSION: ${{ steps.bump.outputs.new }}
@@ -98,6 +103,7 @@ jobs:
             fi
 
             if git push origin HEAD:dev; then
+              echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
               exit 0
             fi
 
@@ -107,3 +113,69 @@ jobs:
 
           echo "::error::Failed to sync dev with master after 3 attempts"
           exit 1
+
+      - name: Tag synced master version
+        id: tag-version
+        shell: bash
+        env:
+          MASTER_SHA: ${{ steps.publish-master.outputs.sha }}
+          SYNCED_DEV_SHA: ${{ steps.sync-dev.outputs.sha }}
+          NEW_VERSION: ${{ steps.bump.outputs.new }}
+        run: |
+          set -euo pipefail
+
+          git fetch origin master dev
+          master_sha=$(git rev-parse origin/master)
+          if [[ "$master_sha" != "$MASTER_SHA" ]]; then
+            echo "::error::master changed after the version bump; refusing to tag an unverified commit"
+            exit 1
+          fi
+
+          # 从远端 master 的版本文件读取标签名称，并核对本次成功同步的 dev 提交。
+          master_props=$(git show origin/master:gradle.properties)
+          git merge-base --is-ancestor "$SYNCED_DEV_SHA" origin/dev || {
+            echo "::error::dev no longer contains the synced commit"
+            exit 1
+          }
+          dev_props=$(git show "$SYNCED_DEV_SHA":gradle.properties)
+          master_version=$(sed -n 's/^appVersionName=//p' <<< "$master_props")
+          dev_version=$(sed -n 's/^appVersionName=//p' <<< "$dev_props")
+          master_code=$(sed -n 's/^appVersionCode=//p' <<< "$master_props")
+          dev_code=$(sed -n 's/^appVersionCode=//p' <<< "$dev_props")
+          if [[ ! "$master_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ||
+                "$master_version" != "$NEW_VERSION" ||
+                "$dev_version" != "$master_version" ||
+                "$dev_code" != "$master_code" ]]; then
+            echo "::error::master and dev versions are not synchronized; refusing to create a tag"
+            exit 1
+          fi
+          git merge-base --is-ancestor "$master_sha" "$SYNCED_DEV_SHA" || {
+            echo "::error::synced dev commit does not contain the tagged master commit"
+            exit 1
+          }
+
+          tag="v${master_version}"
+          # 重跑时允许已有标签指向同一提交；禁止覆盖其他提交上的同名标签。
+          remote_tag=$(git ls-remote --tags origin "refs/tags/$tag" | awk 'NR == 1 { print $1 }')
+          if [[ -n "$remote_tag" ]]; then
+            remote_target=$(git ls-remote --tags origin "refs/tags/$tag^{}" | awk 'NR == 1 { print $1 }')
+            remote_target=${remote_target:-$remote_tag}
+            if [[ "$remote_target" != "$master_sha" ]]; then
+              echo "::error::${tag} already exists on another commit; refusing to move it"
+              exit 1
+            fi
+            echo "${tag} already points to ${master_sha}"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -a "$tag" "$master_sha" -m "Release $tag"
+            git push origin "refs/tags/$tag"
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      # GITHUB_TOKEN 推送标签不会触发其他 push 工作流，显式派发已有的发布流程。
+      - name: Start Android release for tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag-version.outputs.tag }}
+        run: gh workflow run android-release.yml --ref "$TAG"
