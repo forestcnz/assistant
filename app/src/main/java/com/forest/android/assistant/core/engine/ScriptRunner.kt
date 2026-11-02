@@ -48,7 +48,11 @@ object ScriptRunner {
 
     data class RunState(
         val taskName: String? = null,
-        val running: Boolean = false
+        val running: Boolean = false,
+        /** 队列执行进度（1-based）；0 = 单任务运行或空闲 */
+        val queueIndex: Int = 0,
+        /** 队列任务总数；1 = 单任务运行 */
+        val queueTotal: Int = 0
     )
 
     private val _state = MutableStateFlow(RunState())
@@ -105,8 +109,8 @@ object ScriptRunner {
     init {
         // 悬浮条[停止]按钮 → 中断脚本
         FloatyManager.onStopClicked = { stop() }
-        // 悬浮球面板选任务 → 直接运行
-        FloatyManager.onTaskSelected = { name -> appContext?.let { run(it, name) } }
+        // 悬浮球面板选任务 → 按点选顺序依次运行（只选一个即普通运行）
+        FloatyManager.onTasksSelected = { names -> appContext?.let { runQueue(it, names) } }
         // 悬浮球面板[关闭悬浮窗]：运行中先停止任务，再隐藏并记下用户意愿（下次启动不再自动显示）
         FloatyManager.onLauncherClose = {
             appContext?.let { ctx ->
@@ -145,6 +149,11 @@ object ScriptRunner {
             if (st.running && st.taskName != null) st.taskName!! to runStartedAt else null
         }
         ConsoleOverlay.onStop = { stop() }
+        // 控制台底部队列进度（如「2/3」）；单任务运行返回 null
+        ConsoleOverlay.runningProgress = {
+            val st = _state.value
+            if (st.running && st.queueTotal > 1) "${st.queueIndex}/${st.queueTotal}" else null
+        }
     }
 
     /** 供宿主/打包等模块写入运行日志 */
@@ -218,52 +227,150 @@ object ScriptRunner {
 
     /** 运行任务（异步）：重复运行被忽略 */
     fun run(context: Context, taskName: String) {
+        runQueue(context, listOf(taskName))
+    }
+
+    /**
+     * 顺序运行多个任务（异步）：按列表顺序逐个执行，重复运行被忽略。
+     * 悬浮球面板多选任务时走这里；任一任务出错或被停止即中止剩余任务。
+     */
+    fun runQueue(context: Context, taskNames: List<String>) {
         if (_state.value.running) return
+        val queue = normalizeQueue(taskNames)
+        if (queue.isEmpty()) return
         CoroutineScope(SupervisorJob() + Dispatchers.Default).launch {
-            runAndWait(context, taskName)
+            runSequenceAndWait(context, queue)
         }
     }
+
+    /** 队列规范化：去空、去重，保留点选顺序（同名任务只执行一次） */
+    private fun normalizeQueue(taskNames: List<String>): List<String> =
+        taskNames.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
 
     /**
      * 运行任务并等待结束（定时任务 Worker 也复用本方法）。
      * @param source 触发来源（手动/定时任务），写入日志便于区分
      * @return 是否正常执行（未运行/读取失败返回 false）
      */
-    suspend fun runAndWait(context: Context, taskName: String, source: String = "手动"): Boolean {
+    suspend fun runAndWait(context: Context, taskName: String, source: String = "手动"): Boolean =
+        runSequenceAndWait(context, listOf(taskName), source)
+
+    /**
+     * 顺序执行任务队列并等待全部结束（单任务 [runAndWait] 是 queue.size == 1 的特例）。
+     * 队列共用一份停止标志与协程 Job：停止按钮会中断当前任务并结束整个队列；
+     * 运行态（悬浮条/控制台/保活服务/StateFlow）由本方法统一维护，
+     * 单个任务只负责更新「当前任务 + 队列进度」。
+     */
+    suspend fun runSequenceAndWait(
+        context: Context,
+        taskNames: List<String>,
+        source: String = "手动"
+    ): Boolean {
+        val queue = normalizeQueue(taskNames)
+        if (queue.isEmpty()) return false
         if (com.forest.android.assistant.core.recording.RecordingService.active) {
-            addLog('W', "正在录制操作，请完成录制后再运行任务: $taskName")
+            addLog('W', "正在录制操作，请完成录制后再运行任务: ${queue.first()}")
             return false
         }
         if (_state.value.running) {
-            addLog('W', "已有任务在运行，跳过: $taskName")
+            addLog('W', "已有任务在运行，跳过: ${queue.first()}")
             return false
         }
         val app = context.applicationContext
+        appContext = app
+        val runJob = coroutineContext[Job]       // 供悬浮条/界面停止按钮取消整个队列
+        val stopRequested = AtomicBoolean(false)
+        job = runJob
+        runStopRequested = stopRequested
+        val queueMode = queue.size > 1
+        if (queueMode) addLog('I', "▶ 顺序执行 ${queue.size} 个任务：${queue.joinToString(" → ")}")
+        var executed = false
+        try {
+            for ((index, taskName) in queue.withIndex()) {
+                if (stopRequested.get() || runJob?.isCancelled == true) break
+                val result = runSingleTask(app, taskName, source, stopRequested, index + 1, queue.size)
+                executed = executed || result != TaskResult.SKIPPED
+                // 出错/被停止：中止队列，剩下的任务不再执行
+                if (result == TaskResult.FAILED || result == TaskResult.STOPPED) {
+                    val remaining = queue.drop(index + 1)
+                    if (remaining.isNotEmpty()) {
+                        addLog('W', "队列中止，未执行：${remaining.joinToString("、")}")
+                    }
+                    break
+                }
+            }
+        } finally {
+            // 停止会取消协程：清理与状态复位必须全部放在 NonCancellable 块内，
+            // 否则 withContext 之后（协程已取消）的语句不会执行，UI 会卡在运行中
+            withContext(NonCancellable + Dispatchers.Main) {
+                restoreCaptureOverlaysNow()
+                // 回到空闲态；用户没开启悬浮控件时直接隐藏，不留残留
+                FloatyManager.clearRunning(app)
+                if (!_launcherEnabled.value) FloatyManager.hideLauncher()
+                _state.value = RunState(null, running = false)
+                runStopRequested = null
+                job = null
+                runStartedAt = 0L
+                // 以下清理同样必须在 NonCancellable 内：停止任务时协程已取消，
+                // 写在外面的语句不会执行（曾导致保活服务/通知栏残留）
+                ScriptAdapter.clear()
+                ScriptForegroundService.stop(app)
+            }
+        }
+        return executed
+    }
+
+    /** 队列中单个任务的执行结果（决定队列是否继续） */
+    private enum class TaskResult {
+        /** 未执行（脚本读取失败），队列继续下一个 */
+        SKIPPED,
+
+        /** 正常结束 / exit() / 到达设定时长，队列继续 */
+        DONE,
+
+        /** 脚本出错，队列中止 */
+        FAILED,
+
+        /** 被停止，队列中止 */
+        STOPPED
+    }
+
+    /**
+     * 执行队列中的单个任务（脚本 + 循环设置 + 运行历史）。
+     * 全局运行态（悬浮条/保活服务/StateFlow）由队列层维护，
+     * 这里只更新当前任务与队列进度，以免任务间出现「空闲态」闪烁。
+     */
+    private suspend fun runSingleTask(
+        app: Context,
+        taskName: String,
+        source: String,
+        stopRequested: AtomicBoolean,
+        queueIndex: Int,
+        queueTotal: Int
+    ): TaskResult {
         val script = try {
             TaskManager.scriptFile(app, taskName).readText()
         } catch (e: Exception) {
             addLog('E', "读取脚本失败: ${e.message}")
-            return false
+            return TaskResult.SKIPPED
         }
         val config = TaskManager.readConfig(app, taskName)
 
-        appContext = app
         val startedAt = System.currentTimeMillis()
         val startedElapsed = SystemClock.elapsedRealtime()
         runStartedAt = startedAt                 // 悬浮窗/控制台据此显示运行计时
         var lastOutcome: ScriptEngine.RunOutcome? = null
-        val runJob = coroutineContext[Job]       // 供悬浮条/界面停止按钮取消本次运行
-        val stopRequested = AtomicBoolean(false)
+        val runJob = coroutineContext[Job]       // 队列协程 Job（停止会取消它）
         val timedOut = AtomicBoolean(false)
         var timerJob: Job? = null
-        job = runJob
-        runStopRequested = stopRequested
-        _state.value = RunState(taskName, running = true)
+        _state.value = RunState(taskName, running = true, queueIndex = queueIndex, queueTotal = queueTotal)
         val loop = config.loop
         val sourceTag = if (source != "手动") "（$source）" else ""
         val isScheduled = source != "手动"
+        // 队列模式给每条日志加序号前缀，便于看懂当前进度
+        val queueTag = if (queueTotal > 1) "[$queueIndex/$queueTotal] " else ""
         _lastError.value = null
-        addLog('I', "▶ 启动任务: $taskName$sourceTag" +
+        addLog('I', "▶ ${queueTag}启动任务: $taskName$sourceTag" +
             if (loop.mode != TaskLoop.Mode.COUNT || loop.count > 1) "（${loop.describe()}）" else "")
 
         try {
@@ -294,8 +401,12 @@ object ScriptRunner {
             // 运行期保活：常驻前台服务（低优先级通知 + 状态自检 + 通知栏停止）
             ScriptForegroundService.start(app, taskName)
             withContext(Dispatchers.Main) {
-                // 悬浮控件进入运行态，在屏幕左下角显示任务名与停止按钮。
-                FloatyManager.setRunning(app, taskName)
+                // 悬浮控件进入运行态，在屏幕左下角显示任务名、队列进度与停止按钮。
+                FloatyManager.setRunning(
+                    app,
+                    taskName,
+                    if (queueTotal > 1) "$queueIndex/$queueTotal" else null
+                )
             }
 
             var iteration = 0L
@@ -373,24 +484,14 @@ object ScriptRunner {
                 "本次耗时 " + (if (durationMs < 1000) durationMs.toString() + "ms" else "%.1fs".format(durationMs / 1000.0)) +
                         "（" + historyOutcome.label + "，已记入运行历史）"
             )
-            // 停止会取消协程：清理与状态复位必须全部放在 NonCancellable 块内，
-            // 否则 withContext 之后（协程已取消）的语句不会执行，UI 会卡在运行中
-            withContext(NonCancellable + Dispatchers.Main) {
-                restoreCaptureOverlaysNow()
-                // 回到空闲态；用户没开启悬浮控件时直接隐藏，不留残留
-                FloatyManager.clearRunning(app)
-                if (!_launcherEnabled.value) FloatyManager.hideLauncher()
-                _state.value = RunState(null, running = false)
-                runStopRequested = null
-                job = null
-                runStartedAt = 0L
-                // 以下清理同样必须在 NonCancellable 内：停止任务时协程已取消，
-                // 写在外面的语句不会执行（曾导致保活服务/通知栏残留）
-                ScriptAdapter.clear()
-                ScriptForegroundService.stop(app)
-            }
         }
-        return true
+        // 队列根据结果决定是否继续：到达设定时长视为正常结束，继续执行后续任务
+        return when {
+            stopRequested.get() || runJob?.isCancelled == true -> TaskResult.STOPPED
+            lastOutcome?.kind == ScriptEngine.OutcomeKind.ERROR -> TaskResult.FAILED
+            lastOutcome?.kind == ScriptEngine.OutcomeKind.STOPPED && !timedOut.get() -> TaskResult.STOPPED
+            else -> TaskResult.DONE
+        }
     }
 
     /**
@@ -452,7 +553,10 @@ object ScriptRunner {
         }
     }
 
-    /** 停止当前任务（悬浮条停止按钮 / 悬浮球面板 / UI 停止按钮共用） */
+    /**
+     * 停止当前任务（悬浮条停止按钮 / 悬浮球面板 / UI 停止按钮共用）。
+     * 队列执行时与队列共享同一份停止标志与 Job，因此会中断当前任务并结束整个队列。
+     */
     fun stop() {
         val name = _state.value.taskName ?: return
         addLog('I', "停止任务: $name")
