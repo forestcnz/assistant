@@ -837,7 +837,8 @@ object FloatyManager {
                 if (selected.isEmpty() || runningTask != null) return@setOnClickListener
                 val queue = selected.toList()
                 Log.i(TAG, "悬浮球面板执行所选任务: ${queue.joinToString(" → ")}")
-                hideTaskPanel()
+                // 启动任务前同步移除面板，避免第一步手势落在尚未退出的悬浮窗上。
+                hideTaskPanel(immediate = true)
                 onTasksSelected?.invoke(queue)
             }
         }
@@ -882,7 +883,8 @@ object FloatyManager {
                             // 长按 = 立即单独运行（保留原来「一步启动」的习惯）
                             if (runningTask == null) {
                                 Log.i(TAG, "悬浮球面板长按立即运行: $name")
-                                hideTaskPanel()
+                                // 长按立即运行也要先完成面板移除。
+                                hideTaskPanel(immediate = true)
                                 onTasksSelected?.invoke(listOf(name))
                             }
                         }
@@ -1248,10 +1250,10 @@ object FloatyManager {
         }
     }
 
-    private fun hideTaskPanel(restoreBall: Boolean = true) {
+    private fun hideTaskPanel(restoreBall: Boolean = true, immediate: Boolean = false) {
         panelView?.let {
             try {
-                windowManager?.removeView(it)
+                if (immediate) windowManager?.removeViewImmediate(it) else windowManager?.removeView(it)
             } catch (_: Exception) {
             }
         }

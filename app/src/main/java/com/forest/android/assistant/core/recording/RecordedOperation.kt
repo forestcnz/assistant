@@ -64,9 +64,11 @@ object RecordingScript {
     ): String = buildString {
         appendLine("// 操作录制 · 屏幕 ${width}×${height}，坐标单位为实际像素")
         appendLine("// 回放方式：${mode.label}；点击找图仅搜索各步骤记录的页面范围。")
-        appendLine("// 请在相同分辨率、方向及起始界面运行。sleep 为上一步完成后的等待。")
+        appendLine("// 请在相同分辨率、方向及起始界面运行。首步等待悬浮面板退出，其余 sleep 为上一步完成后的等待。")
         appendLine("auto.waitFor();")
         appendLine("adapter.reset();")
+        // 从悬浮面板启动任务后，给窗口移除和桌面恢复留出合成时间。
+        if (steps.isNotEmpty()) appendLine("sleep(500);")
         steps.forEachIndexed { index, step ->
             val n = index + 1
             val point = step.points.first()
