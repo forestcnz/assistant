@@ -13,7 +13,6 @@ import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
-import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -62,7 +61,6 @@ object FloatyManager {
     // 配色（悬浮窗自成体系，不跟随 App 主题，保证在任何应用之上都可读）
     private const val COLOR_BG = 0xFF1D2B46.toInt()
     private const val COLOR_BG_SOLID = 0xFF3563D9.toInt()
-    private const val COLOR_ACCENT = 0xFFADC6FF.toInt()
     private const val COLOR_TEXT = 0xFFFFFFFF.toInt()
     private const val COLOR_TEXT_DIM = 0xFFBAC9E4.toInt()
     private const val COLOR_RUNNING = 0xFF78D8C7.toInt()

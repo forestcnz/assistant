@@ -1,11 +1,8 @@
 package com.forest.android.assistant.core.gesture
 
 import android.accessibilityservice.AccessibilityService
-import android.accessibilityservice.GestureDescription
-import android.graphics.Path
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
-import com.forest.android.assistant.core.engine.ScriptRunner
 
 /**
  * 无障碍服务：仅用于手势派发（坐标点击/滑动/手势），不解析控件树。

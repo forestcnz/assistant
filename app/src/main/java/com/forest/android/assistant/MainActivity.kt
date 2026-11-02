@@ -1,7 +1,6 @@
 package com.forest.android.assistant
 
 import android.content.ComponentName
-import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.provider.Settings
@@ -87,8 +86,6 @@ import com.forest.android.assistant.core.gesture.AccessibilityGuard
 import com.forest.android.assistant.core.gesture.ScriptAccessibilityService
 import com.forest.android.assistant.core.image.ScreenCapture
 import com.forest.android.assistant.core.recording.RecordingService
-import com.forest.android.assistant.core.recording.RecordingMode
-import com.forest.android.assistant.core.gesture.GestureClient
 import com.forest.android.assistant.core.task.ScheduleManager
 import com.forest.android.assistant.core.task.RunHistory
 import com.forest.android.assistant.core.task.TaskManager
@@ -692,7 +689,7 @@ class MainActivity : ComponentActivity() {
                 onConfirm = {
                     renamePreview = null
                     if (task == null) return@RenameRefPreviewDialog
-                    val renamed = TaskManager.renameImageWithScript(this, task, preview)
+                    val renamed = TaskManager.renameImageWithScript(preview)
                     if (renamed != null) {
                         val synced = preview.plan?.replacementCount ?: 0
                         val tip = if (synced > 0) "已重命名为 ${renamed.name}，同步脚本 $synced 处引用"

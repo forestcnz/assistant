@@ -414,16 +414,15 @@ object TaskManager {
      */
     fun previewImageRename(context: Context, taskName: String, file: File, rawName: String): ImageRenamePreview? {
         val resolved = resolveImageName(file, rawName) ?: return null
-        if (resolved == file.name) return null
         val target = File(file.parentFile, resolved)
         if (target.exists()) return null
         val script = scriptFile(context, taskName).takeIf { it.isFile }
         val plan = script?.let { ScriptRefSync.plan(it.readText(), file.name, resolved) }
-        return ImageRenamePreview(file, resolved, target, script, plan)
+        return ImageRenamePreview(file, resolved, script, plan)
     }
 
     /** 重命名素材并同步脚本引用；成功返回新文件，失败返回 null */
-    fun renameImageWithScript(context: Context, taskName: String, preview: ImageRenamePreview): File? {
+    fun renameImageWithScript(preview: ImageRenamePreview): File? {
         val target = renameImage(preview.file, preview.newName) ?: return null
         val plan = preview.plan
         if (plan != null && plan.hasChanges) {
@@ -442,12 +441,9 @@ object TaskManager {
     data class ImageRenamePreview(
         val file: File,
         val newName: String,
-        val target: File,
         val scriptFile: File?,
         val plan: ScriptRefSync.Plan?
-    ) {
-        fun hasScriptChanges(): Boolean = plan?.hasChanges == true
-    }
+    )
 
     /** 解析最终文件名：非法或未变化返回 null */
     private fun resolveImageName(file: File, rawName: String): String? {

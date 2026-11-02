@@ -13,7 +13,6 @@ import com.forest.android.assistant.core.image.ScreenCapture
 import com.forest.android.assistant.core.ocr.OcrApi
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.ensureActive
 import kotlin.coroutines.coroutineContext
 import kotlin.random.Random
 import java.io.File
