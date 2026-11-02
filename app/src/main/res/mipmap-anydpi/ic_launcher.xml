@@ -2,5 +2,6 @@
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
     <!-- 最低支持 API 29，默认图标直接使用自适应图标。 -->
     <background android:drawable="@color/launcher_background" />
-    <foreground android:drawable="@drawable/ic_launcher_bird" />
+    <!-- 与悬浮窗使用同一份 Logo 资源。 -->
+    <foreground android:drawable="@drawable/ic_brand_mark" />
 </adaptive-icon>
