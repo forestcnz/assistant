@@ -42,9 +42,6 @@ object FloatyManager {
     /** 用户是否希望显示悬浮球（默认 true = 首次启动自动开启） */
     private const val KEY_ENABLED = "enabled"
 
-    /** 是否已自动引导过悬浮窗授权（只自动跳一次，避免每次启动都抢屏） */
-    private const val KEY_ASKED_OVERLAY = "asked_overlay"
-
     /** 松手贴边后留在屏内的边距（未半隐藏时） */
     private const val SNAP_MARGIN_DP = 6
 
@@ -77,13 +74,6 @@ object FloatyManager {
 
     fun setEnabledByUser(context: Context, enabled: Boolean) {
         prefs(context).edit().putBoolean(KEY_ENABLED, enabled).apply()
-    }
-
-    fun wasOverlayAsked(context: Context): Boolean =
-        prefs(context).getBoolean(KEY_ASKED_OVERLAY, false)
-
-    fun markOverlayAsked(context: Context) {
-        prefs(context).edit().putBoolean(KEY_ASKED_OVERLAY, true).apply()
     }
 
     private var windowManager: WindowManager? = null

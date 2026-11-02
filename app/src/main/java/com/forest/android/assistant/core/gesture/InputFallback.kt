@@ -32,14 +32,6 @@ object InputFallback {
         }
     }
 
-    /** 长按兜底 */
-    fun longPress(x: Float, y: Float, durationMs: Long = 600): Boolean {
-        if (!available()) return false
-        val xi = x.toInt()
-        val yi = y.toInt()
-        return exec("input swipe $xi $yi $xi $yi $durationMs")
-    }
-
     /** 滑动兜底 */
     fun swipe(
         x1: Float, y1: Float, x2: Float, y2: Float, durationMs: Long = 500

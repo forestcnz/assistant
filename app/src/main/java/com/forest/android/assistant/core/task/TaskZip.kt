@@ -131,16 +131,6 @@ object TaskZip {
         }
     }
 
-    /** 与旧调用方兼容。 */
-    fun importTask(context: Context, uri: Uri, onError: (String) -> Unit = {}): String? = try {
-        val result = importArchive(context, uri)
-        if (result.imported.isEmpty()) onError(result.skipped.joinToString("；").ifBlank { "没有可导入的任务" })
-        result.imported.firstOrNull()
-    } catch (e: Exception) {
-        onError("导入失败: ${e.message}")
-        null
-    }
-
     private fun extract(context: Context, uri: Uri, temp: File) {
         var entries = 0
         var totalBytes = 0L
