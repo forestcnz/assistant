@@ -17,6 +17,7 @@ import com.forest.android.assistant.core.image.ScreenCapture
 import com.forest.android.assistant.core.runner.ScriptForegroundService
 import com.forest.android.assistant.core.task.RunHistory
 import com.forest.android.assistant.core.task.TaskManager
+import com.forest.android.assistant.core.task.TaskLoop
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -35,6 +36,7 @@ import java.util.Date
 import java.util.Locale
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * 脚本运行器：串联 任务脚本 → 引擎执行 → 悬浮控制条（状态/停止）→ 运行日志。
@@ -91,6 +93,7 @@ object ScriptRunner {
     private val restoreCaptureOverlaysRunnable = Runnable { restoreCaptureOverlaysNow() }
 
     private var job: Job? = null
+    @Volatile private var runStopRequested: AtomicBoolean? = null
     private var appContext: Context? = null
 
     /** 日志去重：同内容 500ms 内只保留一条 */
@@ -246,18 +249,37 @@ object ScriptRunner {
 
         appContext = app
         val startedAt = System.currentTimeMillis()
+        val startedElapsed = SystemClock.elapsedRealtime()
         runStartedAt = startedAt                 // 悬浮窗/控制台据此显示运行计时
         var lastOutcome: ScriptEngine.RunOutcome? = null
-        job = coroutineContext[Job]              // 供悬浮条/界面停止按钮取消本次运行
+        val runJob = coroutineContext[Job]       // 供悬浮条/界面停止按钮取消本次运行
+        val stopRequested = AtomicBoolean(false)
+        val timedOut = AtomicBoolean(false)
+        var timerJob: Job? = null
+        job = runJob
+        runStopRequested = stopRequested
         _state.value = RunState(taskName, running = true)
-        val total = config.loopCount.coerceAtLeast(1)
+        val loop = config.loop
         val sourceTag = if (source != "手动") "（$source）" else ""
         val isScheduled = source != "手动"
         _lastError.value = null
-        addLog('I', "▶ 启动任务: $taskName$sourceTag" + if (total > 1) "（循环 $total 次）" else "")
-        if (isScheduled) preflightCapabilities(app)
+        addLog('I', "▶ 启动任务: $taskName$sourceTag" +
+            if (loop.mode != TaskLoop.Mode.COUNT || loop.count > 1) "（${loop.describe()}）" else "")
 
         try {
+            // 按时长运行使用独立计时协程，到点中断当前 JS；间隔只等待剩余时长。
+            if (loop.mode == TaskLoop.Mode.DURATION) {
+                timerJob = CoroutineScope(coroutineContext + Dispatchers.Default).launch {
+                    delay((loop.durationSec * 1000L -
+                        (SystemClock.elapsedRealtime() - startedElapsed)).coerceAtLeast(0L))
+                    if (!stopRequested.get()) {
+                        timedOut.set(true)
+                        addLog('I', "已达到设定执行时间：${loop.durationSec} 秒")
+                        ScriptEngine.cancel()
+                    }
+                }
+            }
+            if (isScheduled) preflightCapabilities(app)
             // 分辨率适配：注入真机尺寸并清空上次运行残留的设计基准
             ScriptAdapter.clear()
             screenSize(app)?.let { (w, h) -> ScriptAdapter.setRealSize(w, h) }
@@ -276,51 +298,56 @@ object ScriptRunner {
                 FloatyManager.setRunning(app, taskName)
             }
 
-            var iteration = 0
-            while (true) {
+            var iteration = 0L
+            while (loop.shouldStartNext(iteration, SystemClock.elapsedRealtime() - startedElapsed)) {
                 iteration++
-                if (total > 1) addLog('I', "第 $iteration/$total 次执行")
+                val label = if (loop.mode == TaskLoop.Mode.COUNT) "$iteration/${loop.count}" else "$iteration"
+                val repeated = loop.mode != TaskLoop.Mode.COUNT || loop.count > 1
+                if (repeated) addLog('I', "第 $label 次执行")
 
                 // 目标应用：每次循环前确保其在前台（config.json 的 target）
                 config.target?.let { launchTarget(app, it) }
 
-                val outcome = ScriptEngine.execute(env(taskName, isScheduled), script)
+                val outcome = ScriptEngine.execute(env(taskName, isScheduled), script) { timedOut.get() }
                 lastOutcome = outcome
 
                 val summary = when (outcome.kind) {
                     ScriptEngine.OutcomeKind.FINISHED -> "任务完成 ✓"
                     ScriptEngine.OutcomeKind.EXITED -> "任务退出（exit()）"
-                    ScriptEngine.OutcomeKind.STOPPED -> "任务已停止"
+                    ScriptEngine.OutcomeKind.STOPPED -> if (timedOut.get() && !stopRequested.get()) "执行时间已到" else "任务已停止"
                     ScriptEngine.OutcomeKind.ERROR -> "任务出错: ${outcome.message}"
                 }
                 addLog(
                     when (outcome.kind) {
                         ScriptEngine.OutcomeKind.ERROR -> 'E'
-                        ScriptEngine.OutcomeKind.STOPPED -> 'W'
+                        ScriptEngine.OutcomeKind.STOPPED -> if (timedOut.get() && !stopRequested.get()) 'I' else 'W'
                         else -> 'I'
                     },
-                    if (total > 1) "第 $iteration/$total 次 — $summary" else "■ $taskName — $summary"
+                    if (repeated) "第 $label 次 — $summary" else "■ $taskName — $summary"
                 )
 
-                // 出错/停止/已达次数则结束循环
+                // 出错/停止/已达次数或时长则结束循环
                 if (outcome.kind == ScriptEngine.OutcomeKind.ERROR ||
                     outcome.kind == ScriptEngine.OutcomeKind.STOPPED ||
-                    iteration >= total
+                    !loop.shouldStartNext(iteration, SystemClock.elapsedRealtime() - startedElapsed)
                 ) break
 
-                if (config.loopIntervalSec > 0) {
-                    addLog('D', "等待 ${config.loopIntervalSec}s 后进入下一次循环")
-                    delay(config.loopIntervalSec * 1000L)
+                if (loop.intervalSec > 0) {
+                    addLog('D', "等待 ${loop.intervalSec}s 后进入下一次循环")
+                    delay(loop.nextDelayMs(SystemClock.elapsedRealtime() - startedElapsed))
                 }
             }
         } finally {
+            timerJob?.cancel()
             // 运行历史：耗时 / 退出原因 / 异常堆栈（文件 IO 非挂起，取消后仍会执行）
             val durationMs = System.currentTimeMillis() - startedAt
             val result = lastOutcome
+            val reachedTimeLimit = timedOut.get() && !stopRequested.get()
             val historyOutcome = when {
-                result == null || result.kind == ScriptEngine.OutcomeKind.STOPPED -> RunHistory.Outcome.STOPPED
-                result.kind == ScriptEngine.OutcomeKind.ERROR -> RunHistory.Outcome.ERROR
-                result.kind == ScriptEngine.OutcomeKind.EXITED -> RunHistory.Outcome.EXITED
+                result?.kind == ScriptEngine.OutcomeKind.ERROR -> RunHistory.Outcome.ERROR
+                stopRequested.get() || (!reachedTimeLimit && (runJob?.isCancelled == true || result == null ||
+                    result.kind == ScriptEngine.OutcomeKind.STOPPED)) -> RunHistory.Outcome.STOPPED
+                result?.kind == ScriptEngine.OutcomeKind.EXITED -> RunHistory.Outcome.EXITED
                 else -> RunHistory.Outcome.FINISHED
             }
             if (historyOutcome == RunHistory.Outcome.ERROR) {
@@ -337,7 +364,8 @@ object ScriptRunner {
                 outcome = historyOutcome,
                 durationMs = durationMs,
                 source = source,
-                message = result?.message,
+                message = if (reachedTimeLimit && historyOutcome == RunHistory.Outcome.FINISHED)
+                    "已达到设定执行时间" else result?.message,
                 stack = result?.stack
             )
             addLog(
@@ -353,6 +381,8 @@ object ScriptRunner {
                 FloatyManager.clearRunning(app)
                 if (!_launcherEnabled.value) FloatyManager.hideLauncher()
                 _state.value = RunState(null, running = false)
+                runStopRequested = null
+                job = null
                 runStartedAt = 0L
                 // 以下清理同样必须在 NonCancellable 内：停止任务时协程已取消，
                 // 写在外面的语句不会执行（曾导致保活服务/通知栏残留）
@@ -427,6 +457,7 @@ object ScriptRunner {
         val name = _state.value.taskName ?: return
         addLog('I', "停止任务: $name")
         // 先置停止标志并中断 VM：纯 JS 忙循环立即结束，绑定函数内的阻塞循环随后退出
+        runStopRequested?.set(true)
         ScriptEngine.cancel()
         // 再取消引擎协程：打断 evaluate/await 等挂起点（quickjs-kt 也会据此中断求值）
         job?.cancel()

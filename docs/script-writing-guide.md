@@ -56,7 +56,7 @@
 tasks/
 └── 任务名称/
     ├── task.js          # 任务入口
-    ├── config.json      # 名称、设计尺寸和宿主执行次数
+    ├── config.json      # 名称、设计尺寸与整个任务的循环设置
     ├── 任务名称.txt     # 可选：原始操作说明
     └── images/          # 图片素材；纯坐标或 OCR 任务可以没有
         ├── 入口.png
@@ -73,7 +73,9 @@ tasks/
   "desc": "说明主要流程、循环次数和结束条件",
   "designSize": [1920, 1080],
   "loop": {
+    "mode": "count",
     "count": 1,
+    "durationSec": 60,
     "interval": 0
   }
 }
@@ -81,7 +83,7 @@ tasks/
 
 当前五个任务使用 1920 × 1080 设计坐标；新任务应按坐标采集时的分辨率设置。`config.json` 由宿主读取，不会自动生成脚本可访问的 `config` 变量。需要自动启动应用时，另行填写已知的 `target` 包名。
 
-脚本内部控制 15 次、30 轮或无限循环时，通常将宿主的 `loop.count` 保持为 `1`。它表示整份脚本的执行次数，不能与内部循环混淆；`0` 也不表示无限循环。
+脚本内部控制 15 次、30 轮或无限循环时，通常将宿主的 `loop.mode` 保持为 `count`、`loop.count` 保持为 `1`。宿主循环表示整份脚本重新执行的轮数，不能与内部循环混淆；需要循环整份脚本时可在任务菜单「循环执行」中选次数、运行时间或手动停止。`count: 0` 不表示无限循环。
 
 ## 4. 初始化、坐标和点击
 
@@ -127,7 +129,7 @@ function clickStep(x, y, stepName) {
 
 `click` 返回 `true` 只表示操作通道报告点击完成，不代表已领取奖励或已经进入新界面。需要确认业务结果的步骤，要继续识别对应状态。图片点击失败后重新截图定位，通常比一直重复旧坐标更合适。
 
-时间单位：`sleep` 和 `auto.waitFor` 使用毫秒；`waitImage`、`waitImageVanish` 的超时与间隔使用秒；配置的 `loop.interval` 也使用秒。
+时间单位：`sleep` 和 `auto.waitFor` 使用毫秒；`waitImage`、`waitImageVanish` 的超时与间隔使用秒；配置的 `loop.interval` 和 `loop.durationSec` 也使用秒。
 
 ## 5. 每张图片独立写匹配阈值
 

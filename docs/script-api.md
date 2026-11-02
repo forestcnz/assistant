@@ -49,7 +49,7 @@
 | `waitImageClick` / `waitImageAny` / `waitTextClick` 的 `timeout` / `interval` | **秒**，可用小数 |
 | `waitImageClick` / `waitImageAny` / `waitTextClick` 的 `options.delay` | 毫秒 |
 | `clickRetry` 的 `interval` / `duration` | 毫秒 |
-| `config.json` 的 `loop.interval` | 秒，整数 |
+| `config.json` 的 `loop.interval` / `loop.durationSec` | 秒，整数 |
 
 截图、OCR、找图和手势调用会等待当前操作完成。轮询超时是循环检查的截止时间，不能中断一次已经开始的截图或识别，因此总耗时可能超过设置值。
 
@@ -1708,7 +1708,9 @@ log("当前脚本：", __scriptPath__);
   "target": "",
   "designSize": [1080, 1920],
   "loop": {
+    "mode": "count",
     "count": 1,
+    "durationSec": 60,
     "interval": 0
   }
 }
@@ -1722,11 +1724,13 @@ log("当前脚本：", __scriptPath__);
 | `designSize` | `[number, number]` | 否 | 不启用 | 设计基准宽高，正整数；缺失、`null` 或格式不正确时不启用 |
 | `designSize[0]` | `number`，整数 | 条件必填 | `0` | 基准宽度，需大于 0 才有效 |
 | `designSize[1]` | `number`，整数 | 条件必填 | `0` | 基准高度，需大于 0 才有效 |
-| `loop` | `object` | 否 | `{}` | 多轮执行设置 |
-| `loop.count` | `number`，整数 | 否 | `1` | 执行总轮数，最小为 1；0 不表示无限循环 |
-| `loop.interval` | `number`，整数 | 否 | `0` | 两轮之间的间隔秒数，最小为 0 |
+| `loop` | `object` | 否 | `{}` | 整个任务的循环设置 |
+| `loop.mode` | `"count"` / `"duration"` / `"untilStopped"` | 否 | `"count"` | 按次数、按总执行时长或一直执行到手动停止；未知值按 `count` 处理 |
+| `loop.count` | `number`，整数 | 否 | `1` | `count` 模式的总轮数，最小为 1；0 不表示无限循环 |
+| `loop.durationSec` | `number`，整数 | 否 | `60` | `duration` 模式从任务启动起的总运行秒数，最小为 1 |
+| `loop.interval` | `number`，整数 | 否 | `0` | 两轮之间的间隔秒数，最小为 0；按时长运行时也计入总时长 |
 
-每轮建立新的 JS 上下文，普通脚本变量不跨轮保留；该轮结束时清理图片句柄。正常结束和 `exit()` 均可继续下一轮；脚本出错或收到停止请求时结束多轮执行。配置文件不存在或解析失败时采用默认配置。
+任务菜单的「循环执行」可配置这些字段；老任务未设置 `mode` 时仍按 `count` 执行。每轮建立新的 JS 上下文，普通脚本变量不跨轮保留；该轮结束时清理图片句柄。正常结束和 `exit()` 均可继续下一轮；脚本出错或收到停止请求时结束整个任务。按时长运行使用单调时钟计时，到时会中断正在执行的 JS 或轮间等待，运行历史记为完成；原生截图、OCR 等正在进行的操作需等其返回才能结束。配置文件不存在或解析失败时采用默认配置。
 
 <a id="examples"></a>
 
