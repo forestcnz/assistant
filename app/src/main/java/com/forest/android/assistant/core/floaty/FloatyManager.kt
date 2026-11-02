@@ -521,7 +521,9 @@ object FloatyManager {
             android.widget.ImageView(context).apply {
                 setImageResource(com.forest.android.assistant.R.drawable.ic_brand_mark)
                 scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
-                setPadding((1 * d).toInt(), (1 * d).toInt(), (1 * d).toInt(), (1 * d).toInt())
+                // 悬浮球只有 35dp，把角色放大到可辨认的尺寸。
+                scaleX = 1.55f
+                scaleY = 1.55f
             },
             android.widget.FrameLayout.LayoutParams(size, size)
         )
