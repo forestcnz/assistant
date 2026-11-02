@@ -61,7 +61,9 @@ object ScriptEngine {
     /** 单次运行的取消会话：绑定函数内的阻塞循环轮询此标志实现快速中断 */
     private class Session(
         /** 运行所在协程的 Job（测试环境可能为 null） */
-        val job: Job?
+        val job: Job?,
+        /** 宿主的总运行时长到期后，即使 VM 尚未附加也应立即停止。 */
+        val deadlineReached: () -> Boolean
     ) {
         @Volatile
         var cancelled = false
@@ -115,8 +117,8 @@ object ScriptEngine {
      * 执行脚本并阻塞至结束（挂起函数，宿主取消协程亦可中断）。
      * 绑定函数同步阻塞执行引擎线程，与脚本顺序执行语义一致。
      */
-    suspend fun execute(env: ScriptEnv, script: String): RunOutcome {
-        val session = Session(coroutineContext[Job])
+    suspend fun execute(env: ScriptEnv, script: String, deadlineReached: () -> Boolean = { false }): RunOutcome {
+        val session = Session(coroutineContext[Job], deadlineReached)
         activeSession = session
         val outcome: RunOutcome = try {
             ImageApi.debugLogger = { level, msg -> env.onLog(level, msg) }
@@ -219,7 +221,8 @@ object ScriptEngine {
 
     /** 检查停止标志；绑定函数内的长循环/休眠周期性调用 */
     private fun checkStop(session: Session) {
-        if (session.cancelled) throw ScriptStoppedException()
+        if (session.cancelled || session.job?.isActive == false || session.deadlineReached())
+            throw ScriptStoppedException()
     }
 
     /** 注入全局 Bridge：JS 函数名 → Kotlin 实现（全部同步绑定） */

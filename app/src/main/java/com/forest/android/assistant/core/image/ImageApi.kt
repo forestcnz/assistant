@@ -418,25 +418,6 @@ object ImageApi {
         return nameA == nameB && nameA != "屏幕截图"
     }
 
-    /**
-     * 过滤掉互相重叠的命中，只保留彼此间距足够的位置。
-     * 模板匹配的相邻聚合对小模板不够严格，同一处可能残留多个候选；
-     * 只有中心在水平和垂直方向都相距半个模板以上时，才视为不同位置。
-     */
-    internal fun distinctPositions(hits: List<Match>, width: Int, height: Int): List<Match> {
-        if (hits.isEmpty()) return emptyList()
-        val halfW = (width / 2).coerceAtLeast(1)
-        val halfH = (height / 2).coerceAtLeast(1)
-        val kept = ArrayList<Match>()
-        for (hit in hits) {
-            val overlaps = kept.any { existing ->
-                kotlin.math.abs(existing.x - hit.x) < halfW && kotlin.math.abs(existing.y - hit.y) < halfH
-            }
-            if (!overlaps) kept.add(hit)
-        }
-        return kept
-    }
-
     /** 不同倍率的命中框按各自尺寸去重，避免同一处轮廓被当作两个位置。 */
     private fun distinctScaledPositions(hits: List<Match>): List<Match> {
         val kept = ArrayList<Match>()

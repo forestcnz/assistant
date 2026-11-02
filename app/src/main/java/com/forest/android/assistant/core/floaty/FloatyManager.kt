@@ -28,7 +28,8 @@ import android.widget.TextView
  * 贴边后空闲球半隐藏：约一半探出屏外，点击先弹出完整显示，再次点击才展开面板；
  * 半隐藏位置会持久化，重启后保持贴边形态。
  *
- * 展开的面板按「任务 / 工具」分区：任务列表可滚动，工具区提供取点、取色、选范围、截图、日志和录制，
+ * 展开的面板按「任务 / 工具」分区：任务列表可滚动并支持多选（点选顺序即队列执行顺序），
+ * 工具区提供取点、取色、选范围、截图、日志和录制，
  * 底部提供「关闭悬浮窗」入口（关闭后可在 App「工具」页重新开启）。
  * 对应设计 docs/README.md 第 4.5 节「悬浮与调试工具」。
  */
@@ -42,9 +43,6 @@ object FloatyManager {
     /** 用户是否希望显示悬浮球（默认 true = 首次启动自动开启） */
     private const val KEY_ENABLED = "enabled"
 
-    /** 是否已自动引导过悬浮窗授权（只自动跳一次，避免每次启动都抢屏） */
-    private const val KEY_ASKED_OVERLAY = "asked_overlay"
-
     /** 松手贴边后留在屏内的边距（未半隐藏时） */
     private const val SNAP_MARGIN_DP = 6
 
@@ -54,6 +52,9 @@ object FloatyManager {
     /** 运行条尺寸：宽度约为上一版 213dp 的一半。 */
     private const val RUNNING_BAR_WIDTH_DP = 107
     private const val RUNNING_BAR_HEIGHT_DP = 35
+
+    /** 队列执行时的运行条宽度：适当加宽，保证「进度 + 任务名」可读 */
+    private const val RUNNING_BAR_QUEUE_WIDTH_DP = 148
 
     /** 贴边半隐藏：探出屏外的部分占球宽的比例（剩余半圆留在屏内，可点击弹出） */
     private const val PEEK_HIDDEN_RATIO = 0.5f
@@ -77,13 +78,6 @@ object FloatyManager {
 
     fun setEnabledByUser(context: Context, enabled: Boolean) {
         prefs(context).edit().putBoolean(KEY_ENABLED, enabled).apply()
-    }
-
-    fun wasOverlayAsked(context: Context): Boolean =
-        prefs(context).getBoolean(KEY_ASKED_OVERLAY, false)
-
-    fun markOverlayAsked(context: Context) {
-        prefs(context).edit().putBoolean(KEY_ASKED_OVERLAY, true).apply()
     }
 
     private var windowManager: WindowManager? = null
@@ -112,13 +106,17 @@ object FloatyManager {
     @Volatile
     private var runningTask: String? = null
 
+    /** 队列执行进度（如「2/3」）；null = 单任务运行或空闲 */
+    @Volatile
+    private var runningProgress: String? = null
+
     /** 点击[停止]时的回调（任务运行中） */
     @Volatile
     var onStopClicked: (() -> Unit)? = null
 
-    /** 悬浮球面板中选择任务后的回调 */
+    /** 悬浮球面板中选择任务后的回调（多选：按列表顺序依次执行） */
     @Volatile
-    var onTaskSelected: ((String) -> Unit)? = null
+    var onTasksSelected: ((List<String>) -> Unit)? = null
 
     /** 任务列表提供者（由宿主注入，避免 core 层循环依赖） */
     @Volatile
@@ -389,8 +387,11 @@ object FloatyManager {
         }
     }
 
-    /** 切换到运行态：左下角矩形条显示任务名和单击停止按钮。 */
-    fun setRunning(context: Context, taskName: String) {
+    /**
+     * 切换到运行态：左下角矩形条显示任务名和单击停止按钮。
+     * @param progress 队列进度（如「2/3」），单任务运行传 null
+     */
+    fun setRunning(context: Context, taskName: String, progress: String? = null) {
         hideTaskPanel()
         if (capsuleView?.isAttachedToWindow != true) {
             if (!showLauncher(context)) {
@@ -403,14 +404,16 @@ object FloatyManager {
             idleDockedSide = dockedSide
         }
         runningTask = taskName
+        runningProgress = progress
         dockedSide = DockSide.NONE
         renderCapsule(context)
-        Log.i(TAG, "悬浮控件进入运行态: $taskName")
+        Log.i(TAG, "悬浮控件进入运行态: $taskName${progress?.let { "（$it）" } ?: ""}")
     }
 
     /** 回到空闲态（任务结束/停止后调用） */
     fun clearRunning(context: Context) {
         runningTask = null
+        runningProgress = null
         val savedPosition = idlePosition
         dockedSide = idleDockedSide
         capsuleParams?.let { params ->
@@ -549,7 +552,7 @@ object FloatyManager {
     /** 左下角任务条：任务名占剩余空间，停止按钮可单击。 */
     private fun runningBar(context: Context, task: String): View {
         val d = context.resources.displayMetrics.density
-        val width = (RUNNING_BAR_WIDTH_DP * d).toInt()
+        val width = ((if (runningProgress != null) RUNNING_BAR_QUEUE_WIDTH_DP else RUNNING_BAR_WIDTH_DP) * d).toInt()
             .coerceAtMost((context.resources.displayMetrics.widthPixels - 24 * d).toInt())
             .coerceAtLeast(1)
         val bar = LinearLayout(context).apply {
@@ -558,8 +561,10 @@ object FloatyManager {
             background = roundedBackground(COLOR_BG, 7 * d, 1 * d, 0x33FFFFFF)
             setPadding((5 * d).toInt(), 0, (4 * d).toInt(), 0)
         }
+        // 队列执行时在任务名前标注进度（如「2/3」），让用户知道还有几个任务待执行
+        val label = runningProgress?.let { "[$it] $task" } ?: task
         bar.addView(
-            textView(context, task, 11f, COLOR_TEXT).apply {
+            textView(context, label, 11f, COLOR_TEXT).apply {
                 maxLines = 1
                 ellipsize = android.text.TextUtils.TruncateAt.END
                 setPadding((2 * d).toInt(), 0, (2 * d).toInt(), 0)
@@ -745,8 +750,10 @@ object FloatyManager {
 
     /**
      * 展开/收起面板（每次展开重新读取任务列表与运行状态）。
-     * 布局：卡片式，自上而下 = 头部（选择任务 + 关闭） / 任务列表（双列紧凑格子，可滚动） /
-     * 工具图标区（两行，每行 3 个按钮） / 运行中任务显示「■ 停止当前任务」 / 底部「✕ 关闭悬浮窗」。
+     * 布局：卡片式，自上而下 = 头部（选择任务 + 关闭） / 多选提示 / 任务列表（双列紧凑格子，可滚动） /
+     * 主按钮「▶ 执行所选」 / 工具图标区（两行，每行 3 个按钮） / 运行中任务显示「■ 停止当前任务」 / 底部「✕ 关闭悬浮窗」。
+     * 任务格子支持多选：点选顺序即队列执行顺序（再次点选取消），主按钮按该顺序依次执行；
+     * 长按某个任务可立即单独运行它。
      * 宽度不超过 284dp，按内容高度在屏幕正中显示。
      * 面板展开期间悬浮球暂时隐藏（避免遮挡），收起面板时自动恢复。
      * 按住面板标题栏（「≡ 选择任务」区域）可整体拖动面板，✕ 按钮与列表滚动不受影响。
@@ -787,7 +794,9 @@ object FloatyManager {
             },
             LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         )
-        header.addView(textView(context, "${tasks.size} 个", 11f, COLOR_TEXT_DIM))
+        // 任务数 / 已选数：选中任务后变为「已选 N/M」
+        val countLabel = textView(context, "${tasks.size} 个", 11f, COLOR_TEXT_DIM)
+        header.addView(countLabel)
         header.addView(
             textView(context, "✕", 14f, COLOR_TEXT_DIM).apply {
                 gravity = Gravity.CENTER
@@ -797,6 +806,12 @@ object FloatyManager {
             LinearLayout.LayoutParams((34 * d).toInt(), (34 * d).toInt())
         )
         panel.addView(header)
+        // 多选操作提示：降低「点选 = 加入执行队列」的认知成本
+        panel.addView(
+            textView(context, "点选多个任务按顺序执行 · 长按立即运行", 10f, COLOR_TEXT_DIM).apply {
+                setPadding((14 * d).toInt(), 0, (14 * d).toInt(), (8 * d).toInt())
+            }
+        )
         panel.addView(divider(context))
 
         val content = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
@@ -806,6 +821,46 @@ object FloatyManager {
             orientation = LinearLayout.VERTICAL
             setPadding((8 * d).toInt(), (8 * d).toInt(), (4 * d).toInt(), (4 * d).toInt())
         }
+
+        // 多选状态：列表顺序 = 队列执行顺序（点选先后决定先后）
+        val selected = mutableListOf<String>()
+        val cellHolders = LinkedHashMap<String, TaskCellViews>()
+
+        // 主按钮：未选任务时置灰；选中后按点选顺序执行整个队列
+        val runSelectedButton = textView(context, "▶ 选择任务后按顺序执行", 13f, COLOR_TEXT).apply {
+            gravity = Gravity.CENTER
+            background = roundedBackground(COLOR_BG_SOLID, 10 * d, 0f, 0)
+            setPadding(0, (10 * d).toInt(), 0, (10 * d).toInt())
+            alpha = 0.35f
+            isClickable = true
+            setOnClickListener {
+                if (selected.isEmpty() || runningTask != null) return@setOnClickListener
+                val queue = selected.toList()
+                Log.i(TAG, "悬浮球面板执行所选任务: ${queue.joinToString(" → ")}")
+                hideTaskPanel()
+                onTasksSelected?.invoke(queue)
+            }
+        }
+
+        // 选中变化后刷新格子高亮 / 序号 / 任务数文案 / 主按钮状态
+        val refreshSelection = {
+            cellHolders.forEach { (name, views) ->
+                val order = selected.indexOf(name).takeIf { it >= 0 }?.plus(1)
+                applyTaskCellState(
+                    context = context,
+                    views = views,
+                    order = order,
+                    running = runningTask == name,
+                    idle = runningTask == null
+                )
+            }
+            countLabel.text = if (selected.isEmpty()) "${tasks.size} 个" else "已选 ${selected.size}/${tasks.size}"
+            runSelectedButton.isEnabled = selected.isNotEmpty() && runningTask == null
+            runSelectedButton.alpha = if (runSelectedButton.isEnabled) 1f else 0.35f
+            runSelectedButton.text = if (selected.isEmpty()) "▶ 选择任务后按顺序执行"
+            else "▶ 执行所选 ${selected.size} 个任务"
+        }
+
         if (tasks.isEmpty()) {
             list.addView(menuText(context, "（暂无任务，先在 App 里新建）") { })
         } else {
@@ -813,15 +868,28 @@ object FloatyManager {
             tasks.chunked(2).forEach { pair ->
                 val gridRow = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
                 pair.forEach { name ->
-                    val isRunning = runningTask == name
-                    gridRow.addView(
-                        taskCell(context, name, isRunning) {
+                    val views = buildTaskCell(
+                        context = context,
+                        name = name,
+                        onToggle = {
+                            // 运行中不允许改选；再次点选 = 移出队列
                             if (runningTask == null) {
-                                Log.i(TAG, "悬浮球选择任务: $name")
-                                hideTaskPanel()
-                                onTaskSelected?.invoke(name)
+                                if (!selected.remove(name)) selected.add(name)
+                                refreshSelection()
                             }
                         },
+                        onRunNow = {
+                            // 长按 = 立即单独运行（保留原来「一步启动」的习惯）
+                            if (runningTask == null) {
+                                Log.i(TAG, "悬浮球面板长按立即运行: $name")
+                                hideTaskPanel()
+                                onTasksSelected?.invoke(listOf(name))
+                            }
+                        }
+                    )
+                    cellHolders[name] = views
+                    gridRow.addView(
+                        views.root,
                         LinearLayout.LayoutParams(0, (44 * d).toInt(), 1f).apply {
                             marginEnd = (4 * d).toInt()
                             bottomMargin = (4 * d).toInt()
@@ -834,6 +902,7 @@ object FloatyManager {
                 }
                 list.addView(gridRow)
             }
+            refreshSelection()
         }
         val maxListHeight = (realScreenSize(context).y * 0.42f).toInt().coerceAtLeast((48 * d).toInt())
         val scroll = object : ScrollView(context) {
@@ -856,6 +925,20 @@ object FloatyManager {
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
             )
+        )
+
+        // —— 主按钮：执行所选任务（按点选顺序） ——
+        content.addView(
+            runSelectedButton,
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                leftMargin = (8 * d).toInt()
+                rightMargin = (8 * d).toInt()
+                topMargin = (2 * d).toInt()
+                bottomMargin = (4 * d).toInt()
+            }
         )
 
         // —— 底部：工具图标区（两行三列，保留足够的触摸区域） ——
@@ -1042,44 +1125,86 @@ object FloatyManager {
         }
     }
 
+    /** 任务格子的子视图集合（多选：勾选序号徽标 + 名称 + 运行中标记） */
+    private class TaskCellViews(
+        val root: LinearLayout,
+        val badge: TextView,
+        val label: TextView,
+        val runningTag: TextView
+    )
+
     /**
-     * 任务格子（双列紧凑布局）：左 ▶ 强调色 + 任务名（单行截断）+（运行中）标记。
+     * 任务格子（双列紧凑布局）：左侧勾选序号徽标 + 任务名（单行截断）+ 运行中标记。
+     * 点选 = 加入/移出执行队列（序号 = 执行顺序），长按 = 立即单独运行。
      * 单元高度与间距由添加到行时的 LayoutParams 统一设置。
      */
-    private fun taskCell(
+    private fun buildTaskCell(
         context: Context,
         name: String,
-        running: Boolean,
-        onClick: () -> Unit
-    ): View {
+        onToggle: () -> Unit,
+        onRunNow: () -> Unit
+    ): TaskCellViews {
         val d = context.resources.displayMetrics.density
         val cell = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             background = roundedBackground(0x1FFFFFFF, 10 * d, 1 * d, 0x22FFFFFF)
-            setPadding((10 * d).toInt(), 0, (6 * d).toInt(), 0)
+            setPadding((7 * d).toInt(), 0, (6 * d).toInt(), 0)
             isClickable = true
-            setOnClickListener { onClick() }
-            if (!running && runningTask != null) alpha = 0.45f
+            setOnClickListener { onToggle() }
+            // 长按：快捷运行单个任务（不必先勾选再点主按钮）
+            isLongClickable = true
+            setOnLongClickListener {
+                onRunNow()
+                true
+            }
         }
-        cell.addView(textView(context, "▶", 10f, COLOR_ACCENT))
-        cell.addView(
-            textView(context, name, 13f, if (running) COLOR_RUNNING else COLOR_TEXT).apply {
-                maxLines = 1
-                ellipsize = android.text.TextUtils.TruncateAt.END
-                setPadding((7 * d).toInt(), 0, (4 * d).toInt(), 0)
-            },
-            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-        )
-        if (running) {
-            cell.addView(
-                textView(context, "运行中", 9f, COLOR_RUNNING).apply {
-                    background = roundedBackground(0x22FFFFFF, 7 * d, 1 * d, 0x55FFFFFF)
-                    setPadding((6 * d).toInt(), (2 * d).toInt(), (6 * d).toInt(), (2 * d).toInt())
-                }
-            )
+        // 勾选徽标：未选为空圈，选中后显示队列序号
+        val badge = textView(context, "", 9f, COLOR_TEXT).apply {
+            gravity = Gravity.CENTER
         }
-        return cell
+        cell.addView(badge, LinearLayout.LayoutParams((16 * d).toInt(), (16 * d).toInt()))
+        val label = textView(context, name, 13f, COLOR_TEXT).apply {
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            setPadding((7 * d).toInt(), 0, (4 * d).toInt(), 0)
+        }
+        cell.addView(label, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        val runningTag = textView(context, "运行中", 9f, COLOR_RUNNING).apply {
+            background = roundedBackground(0x22FFFFFF, 7 * d, 1 * d, 0x55FFFFFF)
+            setPadding((6 * d).toInt(), (2 * d).toInt(), (6 * d).toInt(), (2 * d).toInt())
+            visibility = View.GONE
+        }
+        cell.addView(runningTag)
+        return TaskCellViews(cell, badge, label, runningTag)
+    }
+
+    /**
+     * 刷新任务格子的多选/运行态：
+     * - [order] 非 null = 已选中，显示队列序号；（选中描边高亮）
+     * - [running] 当前任务运行中（绿色高亮 + 「运行中」标记）；
+     * - [idle] 空闲才可点选，运行中其他任务置灰。
+     */
+    private fun applyTaskCellState(
+        context: Context,
+        views: TaskCellViews,
+        order: Int?,
+        running: Boolean,
+        idle: Boolean
+    ) {
+        val d = context.resources.displayMetrics.density
+        views.root.background = when {
+            running -> roundedBackground(0x2978D8C7, 10 * d, 1 * d, 0x8878D8C7.toInt())
+            order != null -> roundedBackground(0x333563D9, 10 * d, 1 * d, 0xFF6F9BFF.toInt())
+            else -> roundedBackground(0x1FFFFFFF, 10 * d, 1 * d, 0x22FFFFFF)
+        }
+        views.badge.text = order?.toString() ?: ""
+        views.badge.background = if (order != null)
+            roundedBackground(COLOR_BG_SOLID, 8 * d, 0f, 0)
+        else roundedBackground(0x00000000, 8 * d, 1 * d, 0x88FFFFFF.toInt())
+        views.label.setTextColor(if (running) COLOR_RUNNING else COLOR_TEXT)
+        views.runningTag.visibility = if (running) View.VISIBLE else View.GONE
+        views.root.alpha = if (idle || running) 1f else 0.45f
     }
 
     /** 紧凑工具按钮：仅显示图标，保留无障碍描述。 */

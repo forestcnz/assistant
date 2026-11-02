@@ -133,10 +133,6 @@ object ScreenCapture {
         Mode.AUTO -> if (rootAvailable()) Channel.ROOT else Channel.MEDIAPROJECTION
     }
 
-    /** 当前通道是否需要用户授权弹窗（Root 为静默截屏） */
-    fun needsAuthorization(context: Context): Boolean =
-        activeChannel(context) == Channel.MEDIAPROJECTION
-
     /**
      * 是否**具备截屏能力**（任意通道）：静默通道可用，或 MediaProjection 已就绪。
      * 注意不要用 [isReady] 判断「能否截屏」——它只表示 MediaProjection 是否就绪，

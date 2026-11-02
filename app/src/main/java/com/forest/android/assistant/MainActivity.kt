@@ -12,6 +12,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -69,6 +70,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.graphics.Color
@@ -90,6 +92,7 @@ import com.forest.android.assistant.core.gesture.GestureClient
 import com.forest.android.assistant.core.task.ScheduleManager
 import com.forest.android.assistant.core.task.RunHistory
 import com.forest.android.assistant.core.task.TaskManager
+import com.forest.android.assistant.core.task.TaskLoop
 import com.forest.android.assistant.core.task.ImageHistory
 import com.forest.android.assistant.core.task.TaskZip
 import com.forest.android.assistant.ui.AppIcon
@@ -145,6 +148,18 @@ class MainActivity : ComponentActivity() {
     private var currentSchedule by mutableStateOf<ScheduleManager.Schedule?>(null)
     private var scheduleType by mutableStateOf(ScheduleManager.Type.ONCE_AFTER_MINUTES)
     private var scheduleValue by mutableStateOf("1")
+
+    /** 整个任务的循环设置，保存到任务的 config.json。 */
+    private var loopEditing by mutableStateOf<String?>(null)
+    private var loopMode by mutableStateOf(TaskLoop.Mode.COUNT)
+    private var loopCountValue by mutableStateOf("1")
+    private var loopDurationValue by mutableStateOf("1")
+    private var loopDurationUnit by mutableStateOf(DurationUnit.MINUTE)
+    private var loopIntervalValue by mutableStateOf("0")
+
+    private enum class DurationUnit(val label: String, val seconds: Long) {
+        SECOND("秒", 1), MINUTE("分钟", 60), HOUR("小时", 3600)
+    }
 
     /** 保活指引对话框 */
     private var keepAliveDialog by mutableStateOf(false)
@@ -470,7 +485,10 @@ class MainActivity : ComponentActivity() {
             taskSubtitles = withContext(Dispatchers.IO) {
                 tasks.associate { t ->
                     val cfg = TaskManager.readConfig(this@MainActivity, t.name)
-                    t.name to cfg.desc.ifBlank { cfg.target?.let { "目标：$it" } ?: "" }
+                    val base = cfg.desc.ifBlank { cfg.target?.let { "目标：$it" } ?: "" }
+                    val repeated = if (cfg.loop.mode != TaskLoop.Mode.COUNT || cfg.loop.count > 1)
+                        cfg.loop.describe() else ""
+                    t.name to listOf(base, repeated).filter { it.isNotBlank() }.joinToString(" · ")
                 }
             }
         }
@@ -581,6 +599,10 @@ class MainActivity : ComponentActivity() {
                 onExportZip = {
                     menuTask = null
                     exportZip(name)
+                },
+                onLoop = {
+                    menuTask = null
+                    openLoopSettings(name)
                 },
                 onSchedule = {
                     menuTask = null
@@ -718,6 +740,24 @@ class MainActivity : ComponentActivity() {
             )
         }
 
+        loopEditing?.let { name ->
+            LoopDialog(
+                taskName = name,
+                mode = loopMode,
+                count = loopCountValue,
+                duration = loopDurationValue,
+                durationUnit = loopDurationUnit,
+                interval = loopIntervalValue,
+                onModeChange = { loopMode = it },
+                onCountChange = { loopCountValue = it },
+                onDurationChange = { loopDurationValue = it },
+                onDurationUnitChange = { loopDurationUnit = it },
+                onIntervalChange = { loopIntervalValue = it },
+                onDismiss = { loopEditing = null },
+                onSave = { saveLoopSettings(name) }
+            )
+        }
+
         scheduleEditing?.let { name ->
             ScheduleDialog(
                 taskName = name,
@@ -843,7 +883,7 @@ class MainActivity : ComponentActivity() {
             .putExtra(ScriptEditorActivity.EXTRA_ERROR_MSG, err?.message))
     }
 
-    /** 任务操作菜单：编辑脚本 / 定时任务 / 模板截取 / 素材管理 */
+    /** 任务操作菜单：编辑脚本 / 循环执行 / 定时任务 / 模板截取 / 素材管理 */
     @Composable
     private fun TaskMenuDialog(
         taskName: String,
@@ -852,6 +892,7 @@ class MainActivity : ComponentActivity() {
         onRename: () -> Unit,
         onDelete: () -> Unit,
         onManageAssets: () -> Unit,
+        onLoop: () -> Unit,
         onSchedule: () -> Unit,
         onExportZip: () -> Unit,
         onHistory: () -> Unit
@@ -864,6 +905,9 @@ class MainActivity : ComponentActivity() {
                     ToolRow("编辑脚本", "修改任务脚本", R.drawable.ic_code, onEditScript)
                     ToolRow("重命名", "修改任务名称，保留脚本与素材", R.drawable.ic_code, onRename)
                     ToolRow("删除任务", "删除脚本、素材及相关记录", R.drawable.ic_stop, onDelete)
+                    ToolRow("循环执行", remember(taskName, taskMetadataVersion) {
+                        TaskManager.readConfig(this@MainActivity, taskName).loop.describe()
+                    }, R.drawable.ic_clock, onLoop)
                     ToolRow("定时运行", schedules[taskName]?.describe() ?: "尚未设置运行时间",
                         R.drawable.ic_clock, onSchedule)
                     ToolRow("运行历史", "查看执行结果与耗时", R.drawable.ic_tool_log, onHistory)
@@ -874,6 +918,110 @@ class MainActivity : ComponentActivity() {
                 }
             },
             confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } }
+        )
+    }
+
+    /** 从任务配置加载循环设置；旧任务没有 mode 时沿用原有执行次数。 */
+    private fun openLoopSettings(taskName: String) {
+        val loop = TaskManager.readConfig(this, taskName).loop
+        loopMode = loop.mode
+        loopCountValue = loop.count.toString()
+        loopDurationUnit = when {
+            loop.durationSec % 3600L == 0L -> DurationUnit.HOUR
+            loop.durationSec % 60L == 0L -> DurationUnit.MINUTE
+            else -> DurationUnit.SECOND
+        }
+        loopDurationValue = (loop.durationSec / loopDurationUnit.seconds).toString()
+        loopIntervalValue = loop.intervalSec.toString()
+        loopEditing = taskName
+    }
+
+    /** 校验界面输入后更新 loop，保留任务的脚本、素材及其他配置字段。 */
+    private fun saveLoopSettings(taskName: String) {
+        val old = TaskManager.readConfig(this, taskName).loop
+        val count = if (loopMode == TaskLoop.Mode.COUNT) loopCountValue.trim().toIntOrNull() else old.count
+        val amount = loopDurationValue.trim().toLongOrNull()
+        val duration = if (loopMode == TaskLoop.Mode.DURATION)
+            amount?.takeIf { it in 1L..(Int.MAX_VALUE.toLong() / loopDurationUnit.seconds) }
+                ?.times(loopDurationUnit.seconds)
+        else old.durationSec
+        val interval = loopIntervalValue.trim().toIntOrNull()
+        if (count == null || count < 1 || duration == null || interval == null || interval < 0) {
+            Toast.makeText(this, "请输入有效的次数、时长和间隔", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val loop = TaskLoop(loopMode, count, duration, interval)
+        TaskManager.updateLoop(this, taskName, loop)
+            .onSuccess {
+                loopEditing = null
+                taskMetadataVersion++
+                Toast.makeText(this, "已设置循环：${loop.describe()}", Toast.LENGTH_SHORT).show()
+            }
+            .onFailure { Toast.makeText(this, it.message ?: "循环设置保存失败", Toast.LENGTH_LONG).show() }
+    }
+
+    /** 整个任务循环设置：每轮重新运行 task.js，间隔只发生在轮次之间。 */
+    @Composable
+    private fun LoopDialog(
+        taskName: String,
+        mode: TaskLoop.Mode,
+        count: String,
+        duration: String,
+        durationUnit: DurationUnit,
+        interval: String,
+        onModeChange: (TaskLoop.Mode) -> Unit,
+        onCountChange: (String) -> Unit,
+        onDurationChange: (String) -> Unit,
+        onDurationUnitChange: (DurationUnit) -> Unit,
+        onIntervalChange: (String) -> Unit,
+        onDismiss: () -> Unit,
+        onSave: () -> Unit
+    ) {
+        AlertDialog(
+            onDismissRequest = onDismiss,
+            title = { Text("循环执行 · $taskName") },
+            text = {
+                Column(Modifier.heightIn(max = 440.dp).verticalScroll(rememberScrollState())) {
+                    Text("每轮从头执行整个任务；出错或按停止键时结束。",
+                        style = MaterialTheme.typography.bodySmall)
+                    listOf(
+                        TaskLoop.Mode.COUNT to "指定次数",
+                        TaskLoop.Mode.DURATION to "指定执行时间",
+                        TaskLoop.Mode.UNTIL_STOPPED to "直到手动停止"
+                    ).forEach { (option, label) ->
+                        Row(Modifier.fillMaxWidth().clickable { onModeChange(option) },
+                            verticalAlignment = Alignment.CenterVertically) {
+                            RadioButton(selected = mode == option, onClick = null)
+                            Text(label)
+                        }
+                    }
+                    if (mode == TaskLoop.Mode.COUNT) {
+                        OutlinedTextField(count, onCountChange, modifier = Modifier.fillMaxWidth(),
+                            singleLine = true, label = { Text("执行次数") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+                    }
+                    if (mode == TaskLoop.Mode.DURATION) {
+                        OutlinedTextField(duration, onDurationChange, modifier = Modifier.fillMaxWidth(),
+                            singleLine = true, label = { Text("执行时间") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+                        Row {
+                            DurationUnit.entries.forEach { unit ->
+                                TextButton(onClick = { onDurationUnitChange(unit) }) {
+                                    Text(if (durationUnit == unit) "● ${unit.label}" else unit.label)
+                                }
+                            }
+                        }
+                        Text("计时从启动任务开始；到时会中断当前轮。",
+                            style = MaterialTheme.typography.bodySmall)
+                    }
+                    OutlinedTextField(interval, onIntervalChange, modifier = Modifier.fillMaxWidth(),
+                        singleLine = true, label = { Text("两轮间隔（秒）") },
+                        supportingText = { Text("0 表示完成后立即开始下一轮") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+                }
+            },
+            confirmButton = { TextButton(onClick = onSave) { Text("保存") } },
+            dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
         )
     }
 

@@ -26,6 +26,10 @@ hs_err_pid*.log
 sdxn-*.png
 
 .opencode
-.agents
+# 本地保留其他 agent 配置；共享推送检查 skill
+.agents/*
+!.agents/skills/
+.agents/skills/*
+!.agents/skills/git-push-preflight/
 tests
 .tasks

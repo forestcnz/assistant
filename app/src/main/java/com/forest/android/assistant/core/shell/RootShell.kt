@@ -31,11 +31,6 @@ object RootShell {
         return probed == 1
     }
 
-    /** 清空探测缓存（切换 Root 状态后使用） */
-    fun resetProbe() {
-        probed = -1
-    }
-
     private fun probe(): Boolean = try {
         val process = ProcessBuilder("su", "-c", "id").redirectErrorStream(true).start()
         val finished = process.waitFor(PROBE_TIMEOUT_SECONDS, TimeUnit.SECONDS)

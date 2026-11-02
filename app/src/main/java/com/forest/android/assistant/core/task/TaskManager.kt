@@ -31,8 +31,7 @@ object TaskManager {
         val name: String = "",
         val desc: String = "",
         val target: String? = null,
-        val loopCount: Int = 1,
-        val loopIntervalSec: Int = 0,
+        val loop: TaskLoop = TaskLoop(),
         /** 基准分辨率（config.json 的 designSize，如 [1080,1920]）；0 表示未配置 */
         val designWidth: Int = 0,
         val designHeight: Int = 0
@@ -256,8 +255,12 @@ object TaskManager {
                 name = json.optString("name", name),
                 desc = json.optString("desc", ""),
                 target = json.optString("target", "").takeIf { it.isNotBlank() },
-                loopCount = loop?.optInt("count", 1)?.coerceAtLeast(1) ?: 1,
-                loopIntervalSec = loop?.optInt("interval", 0)?.coerceAtLeast(0) ?: 0,
+                loop = TaskLoop(
+                    mode = TaskLoop.Mode.fromKey(loop?.optString("mode", "count") ?: "count"),
+                    count = loop?.optInt("count", 1)?.coerceAtLeast(1) ?: 1,
+                    durationSec = loop?.optLong("durationSec", 60L)?.coerceIn(1L, MAX_DURATION_SEC) ?: 60L,
+                    intervalSec = loop?.optInt("interval", 0)?.coerceAtLeast(0) ?: 0
+                ),
                 designWidth = designW,
                 designHeight = designH
             )
@@ -265,6 +268,25 @@ object TaskManager {
             TaskConfig(name = name)
         }
     }
+
+    /** 保存整个任务的循环设置；保留配置文件中其他字段及 loop 中的扩展字段。 */
+    @Synchronized
+    fun updateLoop(context: Context, name: String, loop: TaskLoop): Result<Unit> = runCatching {
+        requireTasksIdle()
+        require(loop.count > 0 && loop.durationSec in 1L..MAX_DURATION_SEC && loop.intervalSec >= 0) { "循环参数不合法" }
+        val directory = checkedTaskDir(context, name)
+        check(File(directory, "task.js").isFile) { "任务不存在" }
+        val file = File(directory, "config.json")
+        val config = if (file.isFile) JSONObject(file.readText()) else JSONObject().put("name", name)
+        val savedLoop = config.optJSONObject("loop") ?: JSONObject()
+        savedLoop.put("mode", loop.mode.key)
+            .put("count", loop.count)
+            .put("durationSec", loop.durationSec)
+            .put("interval", loop.intervalSec)
+        writeAtomic(file, config.put("loop", savedLoop).toString(2) + "\n")
+    }
+
+    private const val MAX_DURATION_SEC = 2_147_483_647L
 
     // ==================== 素材（images/） ====================
 
@@ -469,7 +491,7 @@ object TaskManager {
     "desc": "${scaffold.desc}",
     "target": "",
     "designSize": $designSize,
-    "loop": { "count": 1, "interval": 0 }
+    "loop": { "mode": "count", "count": 1, "durationSec": 60, "interval": 0 }
 }
 """.trim() + "\n"
     }

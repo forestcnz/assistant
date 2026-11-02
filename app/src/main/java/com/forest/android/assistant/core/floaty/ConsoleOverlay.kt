@@ -65,6 +65,10 @@ object ConsoleOverlay {
     @Volatile
     var runningInfo: (() -> Pair<String, Long>?)? = null
 
+    /** 队列进度（如「2/3」），null = 单任务运行 */
+    @Volatile
+    var runningProgress: (() -> String?)? = null
+
     private val mainHandler = Handler(Looper.getMainLooper())
 
     private var windowManager: WindowManager? = null
@@ -459,7 +463,10 @@ object ConsoleOverlay {
         }
         val (task, startedAt) = info
         val s = ((System.currentTimeMillis() - startedAt) / 1000).coerceAtLeast(0)
-        text.text = "▶ $task · %02d:%02d".format(s / 60, s % 60)
+        // 队列执行时在任务名前标注进度，便于知道整体还剩几个任务
+        val progress = runningProgress?.invoke()
+        val label = if (progress != null) "[$progress] $task" else task
+        text.text = "▶ $label · %02d:%02d".format(s / 60, s % 60)
         footer.visibility = View.VISIBLE
     }
 
