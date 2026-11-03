@@ -76,6 +76,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
@@ -96,6 +97,7 @@ import com.forest.android.assistant.core.task.ImageHistory
 import com.forest.android.assistant.core.task.TaskZip
 import com.forest.android.assistant.ui.AppIcon
 import com.forest.android.assistant.ui.CaptureModeCard
+import com.forest.android.assistant.ui.PermissionStatusCard
 import com.forest.android.assistant.ui.ScriptTheme
 import com.forest.android.assistant.ui.StartupComic
 import com.forest.android.assistant.ui.WorkCard
@@ -1390,98 +1392,59 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /** 权限状态卡片：每项一行（名称 + 用途 + 状态/动作），触控区 ≥48dp */
+    /** 三项权限横向显示为等大方卡，边框与状态文字同步反映授权情况。 */
     @Composable
-    private fun PermissionCard(compact: Boolean) {
+    private fun PermissionCard(maxTileSize: Dp) {
         WorkCard(modifier = Modifier.fillMaxWidth()) {
-            Column(modifier = Modifier.padding(bottom = 6.dp)) {
-                SectionTitle("权限状态", if (compact) null else "点击未开启项去授权")
-                PermissionRow(
-                    title = "手势（无障碍）",
-                    desc = "坐标点击 / 滑动 / 多指手势",
-                    ok = a11yEnabled,
-                    okText = "已开启",
-                    actionText = "去开启",
-                    compact = compact
-                ) {
-                    if (a11yEnabled) keepAliveDialog = true
-                    else startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-                }
-                PermissionRow(
-                    title = "悬浮窗",
-                    desc = "悬浮球 / 悬浮日志 / 拾取器",
-                    ok = overlayGranted,
-                    okText = "已授权",
-                    actionText = "去授权",
-                    compact = compact
-                ) {
-                    if (overlayGranted) {
-                        Toast.makeText(this@MainActivity, "悬浮窗权限已授权", Toast.LENGTH_SHORT).show()
-                    } else {
-                        FloatyManager.requestOverlayPermission(this@MainActivity)
+            Column {
+                SectionTitle("权限状态", "点击卡片管理权限")
+                BoxWithConstraints(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 16.dp)) {
+                    val tileSize = minOf((maxWidth - 24.dp) / 3, maxTileSize)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally)
+                    ) {
+                        PermissionStatusCard(
+                            title = "无障碍",
+                            description = "点击、滑动与手势",
+                            iconRes = R.drawable.ic_permission_gesture,
+                            ready = a11yEnabled,
+                            status = if (a11yEnabled) "已开启" else "未开启",
+                            actionLabel = if (a11yEnabled) "查看保活设置" else "开启无障碍服务",
+                            modifier = Modifier.size(tileSize),
+                            onClick = {
+                                if (a11yEnabled) keepAliveDialog = true
+                                else startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                            }
+                        )
+                        PermissionStatusCard(
+                            title = "悬浮窗",
+                            description = "在其他应用上显示",
+                            iconRes = R.drawable.ic_floaty,
+                            ready = overlayGranted,
+                            status = if (overlayGranted) "已授权" else "未授权",
+                            actionLabel = if (overlayGranted) "查看悬浮窗授权状态" else "授予悬浮窗权限",
+                            modifier = Modifier.size(tileSize),
+                            onClick = {
+                                if (overlayGranted) {
+                                    Toast.makeText(this@MainActivity, "悬浮窗权限已授权", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    FloatyManager.requestOverlayPermission(this@MainActivity)
+                                }
+                            }
+                        )
+                        PermissionStatusCard(
+                            title = "截屏",
+                            description = "找图、取色与识别",
+                            iconRes = R.drawable.ic_capture_system,
+                            ready = captureReady,
+                            status = if (captureReady) "可用" else "未就绪",
+                            actionLabel = "选择截屏方式",
+                            modifier = Modifier.size(tileSize),
+                            onClick = { openCaptureDialog() }
+                        )
                     }
                 }
-                PermissionRow(
-                    title = "截屏",
-                    desc = if (captureReady) "找图、取色与文字识别可用" else "可选择录屏授权或 Root",
-                    ok = captureReady,
-                    okText = "可用",
-                    actionText = "设置通道",
-                    compact = compact
-                ) { openCaptureDialog() }
-            }
-        }
-    }
-
-    /**
-     * 权限行：状态点 + 名称/用途 + 右侧动作，整行可点。
-     * [compact] 下已授权项压成单行（用途说明只在未开启时展示），把竖向空间让给任务列表。
-     */
-    @Composable
-    private fun PermissionRow(
-        title: String,
-        desc: String,
-        ok: Boolean,
-        okText: String,
-        actionText: String,
-        compact: Boolean = false,
-        onClick: () -> Unit
-    ) {
-        val singleLine = compact && ok
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable { onClick() }
-                .heightIn(min = 64.dp)
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            val dotColor = if (ok) MaterialTheme.colorScheme.primary
-            else MaterialTheme.colorScheme.tertiary
-            Box(
-                modifier = Modifier
-                    .size(8.dp)
-                    .clip(RoundedCornerShape(50))
-                    .background(dotColor)
-            )
-            Spacer(modifier = Modifier.width(10.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(title, style = MaterialTheme.typography.bodyLarge)
-                if (!singleLine) {
-                    Text(
-                        desc,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 2
-                    )
-                }
-            }
-            Spacer(Modifier.width(8.dp))
-            Surface(shape = RoundedCornerShape(8.dp),
-                color = if (ok) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.tertiaryContainer) {
-                Text(if (ok) okText else actionText, style = MaterialTheme.typography.labelMedium,
-                    color = if (ok) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onTertiaryContainer,
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp))
             }
         }
     }
@@ -1604,10 +1567,15 @@ class MainActivity : ComponentActivity() {
     /** 权限页：三项能力与截屏通道设置。 */
     @Composable
     private fun PermissionsTab() {
-        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            PageHeading("运行准备", "按需开启权限，准备好脚本运行环境。")
-            PermissionCard(compact = false)
+        BoxWithConstraints(Modifier.fillMaxSize()) {
+            // 为页面标题、分区标题和间距留出空间，限制横屏卡片高度。
+            val reservedHeight = (88 * LocalDensity.current.fontScale).dp + 76.dp
+            val maxTileSize = (maxHeight - reservedHeight).coerceIn(80.dp, 180.dp)
+            Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                PageHeading("运行准备", "按需开启权限，准备好脚本运行环境。")
+                PermissionCard(maxTileSize)
+            }
         }
     }
 
