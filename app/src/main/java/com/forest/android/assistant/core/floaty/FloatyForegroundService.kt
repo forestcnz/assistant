@@ -29,7 +29,7 @@ class FloatyForegroundService : Service() {
         if (intent?.action == ACTION_HIDE) {
             FloatyManager.setEnabledByUser(this, false)
             FloatyManager.hideLauncher(stopKeepAlive = false)
-            ScriptRunner.onLauncherHiddenByUser()   // 同步「工具」页悬浮球开关状态
+            ScriptRunner.onLauncherHiddenByUser()   // 同步「设置」页悬浮球开关状态
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf(startId)
             return START_NOT_STICKY

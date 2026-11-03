@@ -222,7 +222,7 @@ object ScreenCapture {
         val context = appContext ?: return null
         return when (activeChannel(context)) {
             null -> {
-                Log.w(TAG, "请先在工具页选择截屏方式")
+                Log.w(TAG, "请先在设置页选择截屏方式")
                 null
             }
             Channel.ROOT -> captureSilently(context, Channel.ROOT).also {
@@ -259,7 +259,7 @@ object ScreenCapture {
         val context = appContext ?: return false
         when (mode(context)) {
             Mode.UNSELECTED -> {
-                val message = "请先在工具页的截屏通道设置中选择截屏方式"
+                val message = "请先在设置页的截屏通道设置中选择截屏方式"
                 Log.w(TAG, message)
                 mainHandler.post { Toast.makeText(context, message, Toast.LENGTH_LONG).show() }
                 return false
@@ -273,7 +273,7 @@ object ScreenCapture {
                     }
                 }
                 rootProbed = 0
-                val message = "超级权限截屏不可用，请检查权限或在工具页手动更换截屏方式"
+                val message = "超级权限截屏不可用，请检查权限或在设置页手动更换截屏方式"
                 Log.w(TAG, message)
                 mainHandler.post { Toast.makeText(context, message, Toast.LENGTH_LONG).show() }
                 return false
