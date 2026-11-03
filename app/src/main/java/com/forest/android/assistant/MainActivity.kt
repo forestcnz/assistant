@@ -50,6 +50,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxValue
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -1594,6 +1595,8 @@ class MainActivity : ComponentActivity() {
                     if (!overlayGranted) FloatyManager.requestOverlayPermission(this@MainActivity)
                     else ScriptRunner.toggleLauncher(this@MainActivity)
                 }
+                // 自动贴边开关：控制拖动松手后是否吸到左右边缘
+                AutoSnapRow()
             }
             ToolsCard()
             WorkCard(modifier = Modifier.fillMaxWidth()) {
@@ -1606,6 +1609,42 @@ class MainActivity : ComponentActivity() {
                     ) { openCaptureDialog() }
                 }
             }
+        }
+    }
+
+    /**
+     * 自动贴边开关：拖动松手后是否自动吸到左右边缘（半隐藏）。
+     * 状态持久化在 floaty 偏好中，切换后立即作用于当前悬浮球。
+     */
+    @Composable
+    private fun AutoSnapRow() {
+        val context = this@MainActivity
+        var autoSnap by remember { mutableStateOf(FloatyManager.isAutoSnapEnabled(context)) }
+        // 整行点击与 Switch 回调都走这里，避免 Switch 自带回调再取反两次
+        val apply: (Boolean) -> Unit = { next ->
+            autoSnap = next
+            FloatyManager.setAutoSnapEnabled(context, next)
+        }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { apply(!autoSnap) }
+                .heightIn(min = 64.dp)
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = RoundedCornerShape(12.dp)) {
+                Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) { AppIcon(R.drawable.ic_floaty) }
+            }
+            Column(modifier = Modifier.weight(1f).padding(horizontal = 12.dp)) {
+                Text("自动贴边", style = MaterialTheme.typography.titleSmall)
+                Text(
+                    if (autoSnap) "拖动松手后吸到左右边缘并半隐藏" else "拖动松手后停在原位，仅收回屏内",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Switch(checked = autoSnap, onCheckedChange = { apply(it) })
         }
     }
 
