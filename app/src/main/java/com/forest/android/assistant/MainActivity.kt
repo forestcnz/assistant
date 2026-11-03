@@ -8,7 +8,6 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
@@ -71,7 +70,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -94,6 +92,7 @@ import com.forest.android.assistant.core.task.ImageHistory
 import com.forest.android.assistant.core.task.TaskZip
 import com.forest.android.assistant.ui.AppIcon
 import com.forest.android.assistant.ui.ScriptTheme
+import com.forest.android.assistant.ui.StartupComic
 import com.forest.android.assistant.ui.WorkCard
 import android.widget.Toast
 import kotlinx.coroutines.Dispatchers
@@ -365,15 +364,24 @@ class MainActivity : ComponentActivity() {
         showCreateDialog = savedInstanceState?.getBoolean("create_dialog", false) ?: false
         setContent {
             ScriptTheme {
-                MainScreen()
+                var showStartup by rememberSaveable {
+                    mutableStateOf(savedInstanceState == null && !intent.getBooleanExtra(EXTRA_SHOW_TASKS, false))
+                }
+                if (showStartup) {
+                    StartupComic(R.drawable.startup_comic, onFinished = { showStartup = false })
+                } else {
+                    MainScreen()
+                }
+                // 启动画面结束后再申请通知权限，避免系统弹窗遮住漫画。
+                LaunchedEffect(showStartup) {
+                    if (!showStartup && android.os.Build.VERSION.SDK_INT >= 33 &&
+                        checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) !=
+                        android.content.pm.PackageManager.PERMISSION_GRANTED
+                    ) {
+                        notificationPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                    }
+                }
             }
-        }
-        // API 33+ 需要运行时通知权限，否则前台保活通知不可见
-        if (android.os.Build.VERSION.SDK_INT >= 33 &&
-            checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) !=
-            android.content.pm.PackageManager.PERMISSION_GRANTED
-        ) {
-            notificationPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
         }
         lifecycleScope.launch {
             // APK 内置任务先复制到可写目录，之后任务列表与运行逻辑都从该目录读取。
@@ -495,11 +503,7 @@ class MainActivity : ComponentActivity() {
             topBar = {
                 TopAppBar(
                     title = {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Image(painterResource(R.drawable.ic_brand), null, Modifier.size(28.dp))
-                            Spacer(Modifier.width(8.dp))
-                            Text(getString(R.string.app_name), style = MaterialTheme.typography.titleMedium)
-                        }
+                        Text(getString(R.string.app_name), style = MaterialTheme.typography.titleMedium)
                     }
                 )
             },

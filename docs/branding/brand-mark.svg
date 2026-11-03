@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="-14 14 340 340" role="img" aria-labelledby="brand-title brand-desc">
+<title id="brand-title">雕雕助手 SVG 标志</title>
+<desc id="brand-desc">戴方框眼镜、交叠双翅的圆滚滚肥宅雕；透明背景。</desc>
+<defs>
+  <linearGradient id="feathers" x1="0" y1="0" x2=".7" y2="1"><stop stop-color="#BD8955"/><stop offset="1" stop-color="#8B5C3D"/></linearGradient>
+  <linearGradient id="belly" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#FFF3D9"/><stop offset="1" stop-color="#EBD4AE"/></linearGradient>
+  <linearGradient id="beak" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#FFD46B"/><stop offset="1" stop-color="#D8A33B"/></linearGradient>
+  <clipPath id="panelClip"><rect x="3" y="3" width="466" height="466" rx="25"/></clipPath>
+</defs>
+<g transform="translate(0 0) scale(1)">
+
+    <path d="M88 273 Q69 274 57 292 Q47 309 66 307 L80 300 Q76 316 91 309 L105 299 Q120 310 128 299 L123 278Z" fill="#E9B74E" stroke="#49352E" stroke-width="5" stroke-linejoin="round" stroke-linecap="round" />
+    <path d="M213 276 Q227 273 243 288 Q261 301 248 307 L233 299 Q240 315 226 309 L214 300 Q199 309 190 298 L193 281Z" fill="#E9B74E" stroke="#49352E" stroke-width="5" stroke-linejoin="round" stroke-linecap="round" />
+    <path d="M60 303 L68 298 M83 309 L91 300 M242 304 L235 297 M226 309 L221 300" fill="none" stroke="#6B4A35" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M33 137 C19 112 33 88 53 77 L43 61 L76 68 L83 45 L108 57 L126 35 L148 54 L170 39 L190 60 L218 48 L219 74 L249 69 L243 91 C268 100 285 125 280 151 C304 177 313 206 298 236 L306 247 L283 248 C271 279 234 290 202 290 L114 290 C76 293 43 279 28 254 L14 253 L22 237 C5 199 9 165 33 137Z" fill="url(#feathers)" stroke="#49352E" stroke-width="5" stroke-linejoin="round" stroke-linecap="round" />
+    <ellipse cx="157" cy="218" rx="105" ry="69" fill="url(#belly)"/>
+    <path d="M48 111 Q73 86 102 100 Q129 101 153 120 Q180 100 208 100 Q241 90 263 115 L251 128 L266 145 L250 149 L260 164 L236 168 L238 181 L215 177 Q187 191 157 175 Q127 191 100 177 L76 182 L79 169 L54 169 L62 153 L44 145 L58 132Z" fill="#F7E8C9" stroke="#49352E"  stroke-linejoin="round" stroke-linecap="round" stroke-width="2.5"/>
+    <path d="M93 209 Q104 218 112 209 M129 235 Q141 244 151 233 M174 213 Q186 223 195 212 M204 247 Q216 256 225 244 M86 251 Q96 259 105 251 M144 270 Q156 279 167 269" fill="none" stroke="#DDC399" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M39 163 Q18 172 35 211 Q61 242 151 218 Q164 204 145 196 L80 188 Q64 157 39 163Z" fill="#96613E" stroke="#49352E" stroke-width="5" stroke-linejoin="round" stroke-linecap="round" /><path d="M272 163 Q296 174 280 209 Q251 237 171 219 Q158 205 177 195 L239 188 Q247 158 272 163Z" fill="#A77349" stroke="#49352E" stroke-width="5" stroke-linejoin="round" stroke-linecap="round" />
+    <ellipse cx="69" cy="166" rx="15" ry="8" fill="#D68C72" opacity=".48"/>
+    <ellipse cx="242" cy="166" rx="15" ry="8" fill="#D68C72" opacity=".48"/>
+    <ellipse cx="103" cy="137" rx="24" ry="18" fill="#FFFDF7"/><ellipse cx="207" cy="137" rx="24" ry="18" fill="#FFFDF7"/><circle cx="107" cy="139" r="12" fill="#C58A38" /><circle cx="108" cy="140" r="7" fill="#49352E" /><circle cx="104" cy="135" r="3" fill="#FFFDF7" /><circle cx="211" cy="139" r="12" fill="#C58A38" /><circle cx="212" cy="140" r="7" fill="#49352E" /><circle cx="208" cy="135" r="3" fill="#FFFDF7" /><path d="M78 119 L128 126 M182 126 L232 119" fill="none" stroke="#754B32" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+    <rect x="57" y="110" width="90" height="55" rx="16" fill="none" stroke="#332E2A" stroke-width="7"/>
+    <rect x="163" y="110" width="90" height="55" rx="16" fill="none" stroke="#332E2A" stroke-width="7"/>
+    <path d="M147 132 Q155 127 163 132 M57 122 L43 116 M253 122 L267 116" fill="none" stroke="#332E2A" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M143 145 Q154 133 168 144 L182 159 Q185 178 162 193 Q168 176 154 170 L138 163 Q131 156 143 145Z" fill="url(#beak)" stroke="#49352E"  stroke-linejoin="round" stroke-linecap="round" stroke-width="4"/>
+    <path d="M146 159 Q158 165 175 160" fill="none" stroke="#93632E" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+
+    <path d="M76 83 L91 80 M107 72 L118 75 M185 76 L201 73 M230 94 L241 96" fill="none" stroke="#CB9864" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>

@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
+import android.graphics.BitmapFactory
 import android.graphics.PixelFormat
 import android.net.Uri
 import android.os.Build
@@ -16,12 +17,13 @@ import android.view.WindowManager
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import androidx.core.graphics.drawable.RoundedBitmapDrawableFactory
 
 /**
  * 悬浮窗管理：统一为一个悬浮控件（依赖 SYSTEM_ALERT_WINDOW 权限）。
  *
  * 控件有状态，就地变形而不是叠加多个窗口：
- * - 空闲态：圆球「JS」，点击展开面板，拖动可移动并自动贴边（位置会记住）；
+ * - 空闲态：肥宅雕 Logo 悬浮球，点击展开面板，拖动可移动并自动贴边（位置会记住）；
  * - 运行态：屏幕左下角矩形条显示任务名与「停止」按钮，单击即可停止。
  *
  * 贴边后空闲球半隐藏：约一半探出屏外，点击先弹出完整显示，再次点击才展开面板；
@@ -506,24 +508,23 @@ object FloatyManager {
         return view.width.takeIf { it > 0 } ?: (60 * density).toInt()
     }
 
-    /** 空闲态：圆形球 + 状态点 */
+    /** 空闲态：圆形角色图片 + 状态点 */
     private fun ballView(context: Context): View {
         val d = context.resources.displayMetrics.density
         val size = (BALL_SIZE_DP * d).toInt()
         val frame = android.widget.FrameLayout(context)
         frame.addView(
-            View(context).apply {
-                background = roundedBackground(COLOR_BG_SOLID, BALL_SIZE_DP * d / 2, 1.5f * d, 0x33FFFFFF)
-            },
-            android.widget.FrameLayout.LayoutParams(size, size)
-        )
-        frame.addView(
             android.widget.ImageView(context).apply {
-                setImageResource(com.forest.android.assistant.R.drawable.ic_brand_mark)
-                scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
-                // 悬浮球只有 35dp，把角色放大到可辨认的尺寸。
-                scaleX = 1.55f
-                scaleY = 1.55f
+                val bitmap = BitmapFactory.decodeResource(
+                    context.resources, com.forest.android.assistant.R.drawable.ic_brand_mark
+                )
+                setImageDrawable(RoundedBitmapDrawableFactory.create(context.resources, bitmap).apply {
+                    isCircular = true
+                    setAntiAlias(true)
+                    setFilterBitmap(true)
+                })
+                scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
+                // 直接圆形裁切图片，无需底板，也不依赖悬浮窗口的硬件加速。
             },
             android.widget.FrameLayout.LayoutParams(size, size)
         )
