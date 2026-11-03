@@ -21,10 +21,12 @@ node tools/create-startup-comic.mjs
 
 ## 应用图标与悬浮窗 Logo
 
-两处共用漫画中的肥宅雕形象：方框眼镜、交叠双翅和圆滚滚的大肚皮。标志为透明背景，主体放大，悬浮窗按圆形显示。
+两处共用漫画中的肥宅雕形象：方框眼镜、交叠双翅和圆滚滚的大肚皮。标志为透明背景，主体放大，空闲悬浮球按圆形显示。任务运行时，悬浮球显示同一只雕雕的红色版本，头顶显示任务名称，双击雕雕停止任务。
 
 - SVG：`docs/branding/brand-mark.svg`
 - Android 共用资源：`app/src/main/res/drawable-nodpi/ic_brand_mark.png`（512 × 512）
+- 运行态红色雕雕 SVG：`docs/branding/running-bird.svg`
+- 运行态 Android 资源：`app/src/main/res/drawable-nodpi/ic_running_bird.png`（512 × 512）
 
 只更新标志、不重新导出漫画：
 

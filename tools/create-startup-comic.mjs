@@ -10,6 +10,8 @@ const svgPath = path.join(root, 'docs/branding/startup-comic.svg');
 const pngPath = path.join(root, 'app/src/main/res/drawable-nodpi/startup_comic.png');
 const brandSvgPath = path.join(root, 'docs/branding/brand-mark.svg');
 const brandPngPath = path.join(root, 'app/src/main/res/drawable-nodpi/ic_brand_mark.png');
+const runningSvgPath = path.join(root, 'docs/branding/running-bird.svg');
+const runningPngPath = path.join(root, 'app/src/main/res/drawable-nodpi/ic_running_bird.png');
 const brandOnly = process.argv.includes('--brand-only');
 const ink = '#49352E';
 const stroke = `stroke="${ink}" stroke-width="5" stroke-linejoin="round" stroke-linecap="round"`;
@@ -172,9 +174,22 @@ ${brandDefs}
 ${bird(0, 0, 1, 'tired', 'fold', false)}
 </svg>`;
 await fs.writeFile(brandSvgPath, formatSvg(brandSvg), 'utf8');
+// 运行态沿用同一只肥宅雕的轮廓，把羽毛与翅膀改为红色，单独导出透明背景素材。
+const runningSvg = brandSvg
+  .replace('雕雕助手 SVG 标志', '任务进行中的红色雕雕')
+  .replace('戴方框眼镜、交叠双翅的圆滚滚肥宅雕；透明背景。', '戴方框眼镜、交叠双翅的红色雕雕；透明背景。')
+  .replaceAll('#BD8955', '#FF7973')
+  .replaceAll('#8B5C3D', '#CE3046')
+  .replaceAll('#96613E', '#E44754')
+  .replaceAll('#A77349', '#F05A63')
+  .replaceAll('#49352E', '#632D3A')
+  .replaceAll('#754B32', '#8C3746')
+  .replaceAll('#CB9864', '#FFA6A0');
+await fs.writeFile(runningSvgPath, formatSvg(runningSvg), 'utf8');
 const assets = [
   ...(!brandOnly ? [{ svgPath, pngPath, size: 1024 }] : []),
-  { svgPath: brandSvgPath, pngPath: brandPngPath, size: 512 }
+  { svgPath: brandSvgPath, pngPath: brandPngPath, size: 512 },
+  { svgPath: runningSvgPath, pngPath: runningPngPath, size: 512 }
 ];
 
 function cdp(url) {

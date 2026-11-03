@@ -591,7 +591,7 @@ var capturePermission = requestScreenCaptureAsync(); // Promise<boolean>
 
 返回：当前屏幕图片；未授权、暂无可用帧或截屏失败返回 `null`。授权失效时每轮脚本最多自动尝试重新申请一次，不保证重试成功。
 
-截图时控制台与空闲悬浮球会暂时隐藏；运行条和停止按钮仍可能出现在图中，其覆盖位置会影响找图、找色及 OCR。
+截图时控制台与空闲悬浮球会暂时隐藏；运行中的红色雕雕、顶部任务名称仍可能出现在图中，其覆盖位置会影响找图、找色及 OCR。
 
 ```javascript
 var shot = captureScreen();
