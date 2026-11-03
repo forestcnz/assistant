@@ -9,7 +9,6 @@ import com.dokar.quickjs.binding.function
 import com.dokar.quickjs.quickJs
 import com.forest.android.assistant.core.gesture.GestureClient
 import com.forest.android.assistant.core.image.ImageApi
-import com.forest.android.assistant.core.image.ScreenCapture
 import com.forest.android.assistant.core.ocr.OcrApi
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -479,9 +478,9 @@ object ScriptEngine {
         guard("__img_capture") { _ ->
             var bmp = env.captureScreen()
             // 未授权或授权失效（切屏/息屏）：按设计「找图失败自动重新请求」自动再申请一次
-            if (bmp == null && !ScreenCapture.isReady() && !session.captureReRequested) {
+            if (bmp == null && !env.screenCaptureReady() && !session.captureReRequested) {
                 session.captureReRequested = true
-                env.onLog('W', "截屏不可用（未授权或授权已失效），自动重新申请屏幕录制…")
+                env.onLog('W', "截屏不可用，正在请求已选择的截屏方式…")
                 if (env.requestScreenCapture()) {
                     bmp = env.captureScreen()
                 }
@@ -489,8 +488,8 @@ object ScriptEngine {
             if (bmp == null) {
                 env.onLog(
                     'W',
-                    if (ScreenCapture.isReady()) "截屏暂无可用帧，请稍后重试"
-                    else "截屏未授权：请先调用 requestScreenCapture()"
+                    if (env.screenCaptureReady()) "截屏暂无可用帧，请稍后重试"
+                    else "截屏不可用：请先在工具页选择截屏方式，并调用 requestScreenCapture()"
                 )
                 -1L
             } else {

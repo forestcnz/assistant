@@ -85,8 +85,8 @@ object PickerOverlay {
             Log.w(TAG, "拾取器需要悬浮窗权限")
             return false
         }
-        // 取色/截图依赖截屏：**任意通道**都不可用时才先申请授权（静默通道下无需授权，直接打开）
-        if ((mode == Mode.COLOR || mode == Mode.SCREENSHOT) && !ScreenCapture.captureAvailable(context)) {
+        // 只检查用户所选方式，不使用其他通道的就绪状态，也不在主线程探测权限。
+        if ((mode == Mode.COLOR || mode == Mode.SCREENSHOT) && !ScreenCapture.captureAvailableCached(context)) {
             permissionStarting = true
             return try {
                 PickerCapturePermissionActivity.launch(context, mode)
@@ -663,7 +663,7 @@ object PickerOverlay {
                             confirm()
                         }
                     } else {
-                        captureMissing = !ScreenCapture.captureAvailable(context)
+                        captureMissing = !ScreenCapture.captureAvailableCached(context)
                     }
                     invalidate()
                 }

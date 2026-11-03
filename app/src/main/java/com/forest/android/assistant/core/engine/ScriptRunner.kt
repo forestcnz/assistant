@@ -513,10 +513,11 @@ object ScriptRunner {
             addLog('I', "前置检查：无障碍服务已就绪")
         }
 
-        val mediaProjectionOnly =
-            ScreenCapture.activeChannel(context) == ScreenCapture.Channel.MEDIAPROJECTION
-        if (mediaProjectionOnly && !ScreenCapture.isReady()) {
-            addLog('W', "前置检查：无截屏能力（未授权录屏且无 Root 静默通道）")
+        if (ScreenCapture.activeChannel(context) == null) {
+            addLog('W', "前置检查：尚未选择截屏方式，请先在工具页手动选择")
+            addLog('W', "未选择前无法截屏，请跳过找图/找色步骤")
+        } else if (!ScreenCapture.captureAvailable(context)) {
+            addLog('W', "前置检查：所选截屏方式未就绪，请检查权限或手动更换")
             addLog('W', "脚本内 requestScreenCapture() 将直接返回 false，请跳过找图/找色步骤")
         } else {
             addLog('I', "前置检查：截屏能力就绪")
@@ -599,7 +600,7 @@ object ScriptRunner {
                 // 避免脚本阻塞等待一个不会出现的弹窗（脚本据此跳过找图/找色步骤）
                 if (isScheduled && (app == null || !ScreenCapture.captureAvailable(app))) {
                     addLog('W', "截屏不可用：定时任务在后台无法弹出录屏授权窗，已跳过申请")
-                    addLog('W', "请在应用内手动授权录屏，或改用 Root 静默截屏；脚本请跳过找图/找色步骤")
+                    addLog('W', "请先在应用内选择截屏方式并完成所需授权；脚本请跳过找图/找色步骤")
                     false
                 } else {
                     val ok = ScreenCapture.requestBlocking()
