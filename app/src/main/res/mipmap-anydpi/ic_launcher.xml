@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- 最低支持 API 29，默认图标直接使用自适应图标。 -->
-    <background android:drawable="@color/launcher_background" />
-    <foreground android:drawable="@drawable/ic_launcher_bird" />
-</adaptive-icon>
+<!-- 直接使用 SVG 标志导出的透明角色图，主体铺满图标区域。 -->
+<bitmap xmlns:android="http://schemas.android.com/apk/res/android"
+    android:src="@drawable/ic_brand_mark"
+    android:gravity="fill"
+    android:filter="true" />

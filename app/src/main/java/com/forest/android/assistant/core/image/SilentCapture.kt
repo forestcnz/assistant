@@ -8,14 +8,14 @@ import com.forest.android.assistant.core.shell.RootShell
 import java.io.File
 import java.util.concurrent.TimeUnit
 
-/** Root 静默截屏；不可用时由 [ScreenCapture] 降级到 MediaProjection。 */
+/** Root 静默截屏；仅在用户选择该方式后使用，失败不自动切换其他方式。 */
 object SilentCapture {
 
     private const val TAG = "ScriptJs"
     private const val TIMEOUT_SECONDS = 6L
 
     /** Root 是否可用（复用 [RootShell] 的探测缓存） */
-    fun rootAvailable(): Boolean = RootShell.available()
+    fun rootAvailable(forceRefresh: Boolean = false): Boolean = RootShell.available(forceRefresh)
 
     /** Root 通道截屏 */
     fun captureViaRoot(context: Context): Bitmap? {

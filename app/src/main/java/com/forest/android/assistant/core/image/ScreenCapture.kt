@@ -7,7 +7,13 @@ import android.graphics.Bitmap
 import android.media.projection.MediaProjectionManager
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
+import android.widget.Toast
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.withContext
 import java.lang.ref.WeakReference
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -16,11 +22,8 @@ import java.util.concurrent.atomic.AtomicBoolean
 /**
  * 截屏入口：按「通道」选择截屏方式，并处理 MediaProjection 的授权桥接。
  *
- * 通道优先级（AUTO 模式）：**Root → MediaProjection**
- * - Root：`su -c screencap`，静默无授权弹窗；
- * - MediaProjection：需用户授权一次，切屏/息屏后需重新授权。
- *
- * 显式指定 Root 但不可用时自动降级到 MediaProjection 并记录日志。
+ * 用户必须先选择系统授权截屏或超级权限截屏，只使用所选方式，不自动切换。
+ * 未选择、旧版自动设置和无法识别的设置均视为未选择。
  * 对应脚本 API：requestScreenCapture / captureScreen（docs/README.md 第 5.4 节）。
  */
 object ScreenCapture {
@@ -32,8 +35,22 @@ object ScreenCapture {
     /** 截屏通道 */
     enum class Channel { MEDIAPROJECTION, ROOT }
 
-    /** 通道模式：AUTO 自动探测，其余为手动指定 */
-    enum class Mode { AUTO, MEDIAPROJECTION, ROOT }
+    /** 未选择不是可用通道；旧版 AUTO 必须由用户重新选择。 */
+    enum class Mode(val label: String, val channel: Channel?) {
+        UNSELECTED("未选择", null),
+        MEDIAPROJECTION("系统授权截屏", Channel.MEDIAPROJECTION),
+        ROOT("超级权限截屏", Channel.ROOT);
+
+        fun available(rootAvailable: Boolean, projectionReady: Boolean): Boolean = when (this) {
+            UNSELECTED -> false
+            MEDIAPROJECTION -> projectionReady
+            ROOT -> rootAvailable
+        }
+
+        companion object {
+            fun fromStored(value: String?): Mode = entries.firstOrNull { it.name == value } ?: UNSELECTED
+        }
+    }
 
     /** 探测结果缓存：-1 未探测 / 0 不可用 / 1 可用 */
     @Volatile
@@ -54,8 +71,13 @@ object ScreenCapture {
     @Volatile
     private var appContext: Context? = null
 
+    private data class ProjectionRequest(
+        val forModeTest: Boolean,
+        val complete: (Boolean) -> Unit
+    )
+
     @Volatile
-    private var pending: ((Boolean) -> Unit)? = null
+    private var pending: ProjectionRequest? = null
 
     private val requesting = AtomicBoolean(false)
 
@@ -79,29 +101,78 @@ object ScreenCapture {
 
     // ==================== 截屏通道 ====================
 
-    /** 当前通道模式（默认 AUTO） */
+    /** 保留用户已明确选择的通道，旧版自动设置不迁移为任何具体通道。 */
     fun mode(context: Context): Mode {
         val raw = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .getString(KEY_MODE, Mode.AUTO.name) ?: Mode.AUTO.name
-        return try {
-            Mode.valueOf(raw)
-        } catch (e: Exception) {
-            Mode.AUTO
-        }
+            .getString(KEY_MODE, null)
+        return Mode.fromStored(raw)
     }
 
-    /** 设置通道模式并清空探测缓存 */
-    fun setMode(context: Context, newMode: Mode) {
+    /** 仅在确认测试通过后保存通道。 */
+    private fun setMode(context: Context, newMode: Mode) {
+        require(newMode != Mode.UNSELECTED) { "请选择截屏方式" }
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit().putString(KEY_MODE, newMode.name).apply()
         rootProbed = -1
-        Log.i(TAG, "截屏通道模式已设为: " + newMode.name)
+        if (newMode != Mode.MEDIAPROJECTION) release(context)
+        Log.i(TAG, "截屏方式已设为：" + newMode.label)
+    }
+
+    data class ModeTestResult(val success: Boolean, val message: String)
+
+    /** 测试候选通道的真实截图，成功后才保存选择；失败保留原设置。 */
+    suspend fun testAndSelectMode(context: Context, candidate: Mode): ModeTestResult = withContext(Dispatchers.IO) {
+        if (candidate == Mode.UNSELECTED) {
+            return@withContext ModeTestResult(false, "请先选择截屏方式")
+        }
+        val startedAt = SystemClock.uptimeMillis()
+        var confirmed = false
+        try {
+            when (candidate) {
+                Mode.ROOT -> Unit
+                Mode.MEDIAPROJECTION -> if (!requestProjectionBlocking(context, 60, forModeTest = true)) {
+                    return@withContext ModeTestResult(false, "系统截屏授权未完成，请授权后重试")
+                }
+                Mode.UNSELECTED -> Unit
+            }
+            val frame = when (candidate) {
+                Mode.ROOT -> captureSilently(context, Channel.ROOT)
+                Mode.MEDIAPROJECTION -> captureFromProjection(timeoutMs = 3000, newerThanUptimeMs = startedAt)
+                Mode.UNSELECTED -> null
+            }
+            if (frame == null) {
+                if (candidate == Mode.ROOT) rootProbed = 0
+                return@withContext ModeTestResult(false, "未能取得截图，请检查所选方式的权限，或重新选择")
+            }
+            try {
+                if (frame.isRecycled || frame.width <= 0 || frame.height <= 0) {
+                    return@withContext ModeTestResult(false, "截图无效，请重试或重新选择截屏方式")
+                }
+                ensureActive()
+                setMode(context, candidate)
+                if (candidate == Mode.ROOT) rootProbed = 1
+                confirmed = true
+                ModeTestResult(true, "截图测试通过，已选择：" + candidate.label)
+            } finally {
+                // 超级权限截图由本次测试独占；系统投影帧由服务管理，不能回收。
+                if (candidate == Mode.ROOT && !frame.isRecycled) frame.recycle()
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w(TAG, "截屏方式测试失败", e)
+            ModeTestResult(false, "截图测试失败，请检查权限后重试")
+        } finally {
+            if (!confirmed && candidate == Mode.MEDIAPROJECTION && mode(context) != Mode.MEDIAPROJECTION) {
+                release(context)
+            }
+        }
     }
 
     /** Root 是否可用（结果缓存） */
     fun rootAvailable(forceRefresh: Boolean = false): Boolean {
         if (forceRefresh || rootProbed < 0) {
-            rootProbed = if (SilentCapture.rootAvailable()) 1 else 0
+            rootProbed = if (SilentCapture.rootAvailable(forceRefresh)) 1 else 0
         }
         return rootProbed == 1
     }
@@ -113,53 +184,52 @@ object ScreenCapture {
     fun silentAvailableCached(): Boolean = rootProbed == 1
 
     /** 后台预热静默通道探测结果（供界面 chip 正确显示「截屏可用」） */
-    fun probeSilentAsync() {
+    fun probeSilentAsync(context: Context) {
+        if (mode(context) != Mode.ROOT) return
         Thread {
-            rootAvailable(forceRefresh = true)
+            rootAvailable()
         }.start()
     }
 
-    /** 解析实际使用的通道；显式指定但不可用时降级到 MediaProjection */
-    fun activeChannel(context: Context): Channel = when (mode(context)) {
-        Mode.ROOT -> if (rootAvailable()) {
-            Channel.ROOT
-        } else {
-            Log.w(TAG, "已指定 Root 截屏但不可用，降级到 MediaProjection")
-            Channel.MEDIAPROJECTION
-        }
-
-        Mode.MEDIAPROJECTION -> Channel.MEDIAPROJECTION
-
-        Mode.AUTO -> if (rootAvailable()) Channel.ROOT else Channel.MEDIAPROJECTION
-    }
+    /** 只返回用户选择的通道；未选择返回 null，不探测或回退到其他通道。 */
+    fun activeChannel(context: Context): Channel? = mode(context).channel
 
     /**
-     * 是否**具备截屏能力**（任意通道）：静默通道可用，或 MediaProjection 已就绪。
+     * 所选通道是否具备截屏能力，不允许用另一个通道的就绪状态代替。
      * 注意不要用 [isReady] 判断「能否截屏」——它只表示 MediaProjection 是否就绪，
      * 走静默通道时恒为 false，会导致取色器等入口误判为「未授权」而反复请求
      * （历史缺陷：取色器在静默通道下陷入「申请→打开」无限递归，实际打不开）。
      */
-    fun captureAvailable(context: Context): Boolean =
-        isReady() || activeChannel(context) != Channel.MEDIAPROJECTION
+    fun captureAvailable(context: Context): Boolean = when (mode(context)) {
+        Mode.UNSELECTED -> false
+        Mode.MEDIAPROJECTION -> isReady()
+        Mode.ROOT -> rootAvailable()
+    }
+
+    /** 界面和通知使用缓存检查，避免在主线程探测超级用户权限。 */
+    fun captureAvailableCached(context: Context): Boolean =
+        mode(context).available(rootAvailable = silentAvailableCached(), projectionReady = isReady())
 
     private fun captureSilently(context: Context, channel: Channel): Bitmap? =
         if (channel == Channel.ROOT) SilentCapture.captureViaRoot(context) else null
 
     /**
      * 截取当前屏幕：
-     * - Root 通道：直接静默截屏（失败则尝试 MediaProjection 兜底）；
+     * - Root 通道：直接静默截屏，失败返回 null，不触发系统授权；
      * - MediaProjection 通道：取投影帧（等待刷新帧，避免拿到授权弹窗残留画面）。
      */
     fun capture(timeoutMs: Long = 2000, newerThanUptimeMs: Long = 0): Bitmap? {
-        val context = appContext
-        if (context != null) {
-            val channel = activeChannel(context)
-            if (channel != Channel.MEDIAPROJECTION) {
-                captureSilently(context, channel)?.let { return it }
-                Log.w(TAG, "静默截屏失败，尝试 MediaProjection 兜底")
+        val context = appContext ?: return null
+        return when (activeChannel(context)) {
+            null -> {
+                Log.w(TAG, "请先在工具页选择截屏方式")
+                null
             }
+            Channel.ROOT -> captureSilently(context, Channel.ROOT).also {
+                if (it == null) Log.w(TAG, "超级权限截屏失败，请检查权限或手动更换截屏方式")
+            }
+            Channel.MEDIAPROJECTION -> captureFromProjection(timeoutMs, newerThanUptimeMs)
         }
-        return captureFromProjection(timeoutMs, newerThanUptimeMs)
     }
 
     /** MediaProjection 通道取帧 */
@@ -186,23 +256,40 @@ object ScreenCapture {
      * - MediaProjection 通道：弹系统授权窗 → 启动前台服务 → 等待投影就绪。
      */
     fun requestBlocking(timeoutSeconds: Long = 60): Boolean {
-        val context = appContext
-        if (context != null) {
-            val channel = activeChannel(context)
-            if (channel != Channel.MEDIAPROJECTION) {
-                // 静默通道需实地截一帧确认真的可用：否则会出现「声称无需授权但截不到图」的假成功
-                if (captureSilently(context, channel) != null) {
-                    Log.i(TAG, "静默截屏通道（" + channel.name + "）：无需授权")
-                    return true
-                }
-                Log.w(TAG, "静默通道 " + channel.name + " 实测失败，降级 MediaProjection")
-                // 注意：这里**不**把通道探测缓存置为不可用——实测失败可能是瞬时问题
-                // （例如系统繁忙），置为不可用会让静默通道
-                // 直到下次重启应用都不再被采用，代价过大。本次调用按降级处理即可，
-                // 下次仍会重新尝试静默通道。
+        val context = appContext ?: return false
+        when (mode(context)) {
+            Mode.UNSELECTED -> {
+                val message = "请先在工具页的截屏通道设置中选择截屏方式"
+                Log.w(TAG, message)
+                mainHandler.post { Toast.makeText(context, message, Toast.LENGTH_LONG).show() }
+                return false
             }
+            Mode.ROOT -> {
+                if (rootAvailable(forceRefresh = true)) {
+                    captureSilently(context, Channel.ROOT)?.let {
+                        it.recycle()
+                        Log.i(TAG, "超级权限截屏可用，无需系统授权")
+                        return true
+                    }
+                }
+                rootProbed = 0
+                val message = "超级权限截屏不可用，请检查权限或在工具页手动更换截屏方式"
+                Log.w(TAG, message)
+                mainHandler.post { Toast.makeText(context, message, Toast.LENGTH_LONG).show() }
+                return false
+            }
+            Mode.MEDIAPROJECTION -> Unit
         }
-        if (isReady()) return true
+        return requestProjectionBlocking(context, timeoutSeconds)
+    }
+
+    /** 候选方式测试可先申请投影，验证成功前不修改已保存的通道。 */
+    private fun requestProjectionBlocking(
+        context: Context,
+        timeoutSeconds: Long,
+        forModeTest: Boolean = false
+    ): Boolean {
+        if (isReady()) return forModeTest || mode(context) == Mode.MEDIAPROJECTION
         val host = currentPermissionHost
         val act = host?.activity?.get()
         val launch = host?.launch
@@ -216,48 +303,60 @@ object ScreenCapture {
             while (requesting.get() && System.currentTimeMillis() < deadline) {
                 Thread.sleep(100)
             }
-            return isReady()
+            return (forModeTest || mode(context) == Mode.MEDIAPROJECTION) && isReady()
         }
 
         val latch = CountDownLatch(1)
         val granted = AtomicBoolean(false)
-        pending = { ok ->
+        val request = ProjectionRequest(forModeTest) { ok ->
             granted.set(ok)
             latch.countDown()
         }
+        pending = request
         mainHandler.post {
             try {
+                if (!forModeTest && mode(context) != Mode.MEDIAPROJECTION) {
+                    request.complete(false)
+                    return@post
+                }
                 val mpm = act.getSystemService(MediaProjectionManager::class.java)
                 launch(mpm.createScreenCaptureIntent())
             } catch (e: Exception) {
                 Log.w(TAG, "拉起截屏授权失败: ${e.message}")
-                pending?.invoke(false)
+                request.complete(false)
             }
         }
         return try {
-            val ok = latch.await(timeoutSeconds, TimeUnit.SECONDS) && granted.get()
+            val ok = latch.await(timeoutSeconds, TimeUnit.SECONDS) && granted.get() &&
+                (forModeTest || mode(context) == Mode.MEDIAPROJECTION)
             if (!ok) Log.w(TAG, "截屏授权未完成（用户取消或超时）")
             ok
         } catch (e: InterruptedException) {
             false
         } finally {
-            pending = null
+            if (pending === request) pending = null
             requesting.set(false)
         }
     }
 
     /** 宿主 Activity 收到授权结果后回调（onActivityResult / launcher 回调） */
     fun onProjectionResult(resultCode: Int, data: Intent?) {
-        val callback = pending
+        val request = pending ?: return
         val app = appContext
-        if (resultCode == Activity.RESULT_OK && data != null && app != null) {
+        if (resultCode == Activity.RESULT_OK && data != null && app != null &&
+            (request.forModeTest || mode(app) == Mode.MEDIAPROJECTION)
+        ) {
             // 启动前台服务并等待投影就绪（勿在主线程阻塞）
             Thread {
+                if (pending !== request) return@Thread
                 val ok = ScreenCaptureService.startAndAwait(app, resultCode, data, 10000)
-                callback?.invoke(ok)
+                val stillRequested = pending === request &&
+                    (request.forModeTest || mode(app) == Mode.MEDIAPROJECTION)
+                if (!stillRequested && mode(app) != Mode.MEDIAPROJECTION) release(app)
+                request.complete(ok && stillRequested)
             }.start()
         } else {
-            callback?.invoke(false)
+            request.complete(false)
         }
     }
 }

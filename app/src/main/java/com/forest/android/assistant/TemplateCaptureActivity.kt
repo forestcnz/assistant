@@ -115,14 +115,14 @@ class TemplateCaptureActivity : ComponentActivity() {
         selection = null
         lifecycleScope.launch {
             val frame = withContext(Dispatchers.IO) {
-                if (!ScreenCapture.isReady() && !ScreenCapture.requestBlocking()) {
+                if (!ScreenCapture.captureAvailable(this@TemplateCaptureActivity) && !ScreenCapture.requestBlocking()) {
                     null
                 } else {
                     ScreenCapture.capture()
                 }
             }
             if (frame == null) {
-                error = "截屏不可用：请先在主界面完成「截屏授权」"
+                error = "截屏不可用：请先在工具页选择截屏方式，并完成所需授权"
             } else {
                 bitmap = frame
             }

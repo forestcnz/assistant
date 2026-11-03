@@ -8,13 +8,14 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -34,6 +35,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.IconButton
@@ -68,12 +70,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
@@ -93,7 +96,10 @@ import com.forest.android.assistant.core.task.TaskLoop
 import com.forest.android.assistant.core.task.ImageHistory
 import com.forest.android.assistant.core.task.TaskZip
 import com.forest.android.assistant.ui.AppIcon
+import com.forest.android.assistant.ui.CaptureModeCard
+import com.forest.android.assistant.ui.PermissionStatusCard
 import com.forest.android.assistant.ui.ScriptTheme
+import com.forest.android.assistant.ui.StartupComic
 import com.forest.android.assistant.ui.WorkCard
 import android.widget.Toast
 import kotlinx.coroutines.Dispatchers
@@ -167,9 +173,9 @@ class MainActivity : ComponentActivity() {
 
     /** 截屏通道对话框状态 */
     private var captureDialog by mutableStateOf(false)
-    private var captureModeName by mutableStateOf("AUTO")
-    private var captureChannelName by mutableStateOf("-")
-    private var rootOk by mutableStateOf(false)
+    private var selectedCaptureMode by mutableStateOf(ScreenCapture.Mode.UNSELECTED)
+    private var captureModeTesting by mutableStateOf(false)
+    private var captureModeError by mutableStateOf<String?>(null)
 
     /** 各任务的定时设置（列表展示用） */
     private var schedules by mutableStateOf(emptyMap<String, ScheduleManager.Schedule>())
@@ -365,15 +371,24 @@ class MainActivity : ComponentActivity() {
         showCreateDialog = savedInstanceState?.getBoolean("create_dialog", false) ?: false
         setContent {
             ScriptTheme {
-                MainScreen()
+                var showStartup by rememberSaveable {
+                    mutableStateOf(savedInstanceState == null && !intent.getBooleanExtra(EXTRA_SHOW_TASKS, false))
+                }
+                if (showStartup) {
+                    StartupComic(R.drawable.startup_comic, onFinished = { showStartup = false })
+                } else {
+                    MainScreen()
+                }
+                // 启动画面结束后再申请通知权限，避免系统弹窗遮住漫画。
+                LaunchedEffect(showStartup) {
+                    if (!showStartup && android.os.Build.VERSION.SDK_INT >= 33 &&
+                        checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) !=
+                        android.content.pm.PackageManager.PERMISSION_GRANTED
+                    ) {
+                        notificationPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                    }
+                }
             }
-        }
-        // API 33+ 需要运行时通知权限，否则前台保活通知不可见
-        if (android.os.Build.VERSION.SDK_INT >= 33 &&
-            checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) !=
-            android.content.pm.PackageManager.PERMISSION_GRANTED
-        ) {
-            notificationPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
         }
         lifecycleScope.launch {
             // APK 内置任务先复制到可写目录，之后任务列表与运行逻辑都从该目录读取。
@@ -384,8 +399,7 @@ class MainActivity : ComponentActivity() {
                 while (true) {
                     a11yEnabled = isAccessibilityEnabled()
                     overlayGranted = FloatyManager.hasOverlayPermission(this@MainActivity)
-                    // Root 静默截屏可用时无需录屏授权即视为「截屏可用」
-                    captureReady = ScreenCapture.isReady() || ScreenCapture.silentAvailableCached()
+                    captureReady = ScreenCapture.captureAvailableCached(this@MainActivity)
                     // 文件扫描与定时配置读取不占用主线程，避免列表滚动时卡顿。
                     val snapshot = withContext(Dispatchers.IO) {
                         TaskManager.listTasks(this@MainActivity) to
@@ -406,7 +420,7 @@ class MainActivity : ComponentActivity() {
         // 悬浮窗默认开启：已授权则自动显示悬浮球；未授权则首次自动引导去授权
         autoEnableFloaty()
         // 静默通道探测放到后台线程：完成后 chip 立即显示「截屏 ✓」
-        ScreenCapture.probeSilentAsync()
+        if (!captureModeTesting) ScreenCapture.probeSilentAsync(this)
         // 每次回到本界面重新绑定截屏授权：脚本请求时若界面不在前台，先把自己拉到前台再弹窗
         ScreenCapture.bind(this) { intent ->
             if (!lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
@@ -495,11 +509,7 @@ class MainActivity : ComponentActivity() {
             topBar = {
                 TopAppBar(
                     title = {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Image(painterResource(R.drawable.ic_brand), null, Modifier.size(28.dp))
-                            Spacer(Modifier.width(8.dp))
-                            Text(getString(R.string.app_name), style = MaterialTheme.typography.titleMedium)
-                        }
+                        Text(getString(R.string.app_name), style = MaterialTheme.typography.titleMedium)
                     }
                 )
             },
@@ -1382,105 +1392,66 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /** 权限状态卡片：每项一行（名称 + 用途 + 状态/动作），触控区 ≥48dp */
+    /** 三项权限横向显示为等大方卡，边框与状态文字同步反映授权情况。 */
     @Composable
-    private fun PermissionCard(compact: Boolean) {
+    private fun PermissionCard(maxTileSize: Dp) {
         WorkCard(modifier = Modifier.fillMaxWidth()) {
-            Column(modifier = Modifier.padding(bottom = 6.dp)) {
-                SectionTitle("权限状态", if (compact) null else "点击未开启项去授权")
-                PermissionRow(
-                    title = "手势（无障碍）",
-                    desc = "坐标点击 / 滑动 / 多指手势",
-                    ok = a11yEnabled,
-                    okText = "已开启",
-                    actionText = "去开启",
-                    compact = compact
-                ) {
-                    if (a11yEnabled) keepAliveDialog = true
-                    else startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-                }
-                PermissionRow(
-                    title = "悬浮窗",
-                    desc = "悬浮球 / 悬浮日志 / 拾取器",
-                    ok = overlayGranted,
-                    okText = "已授权",
-                    actionText = "去授权",
-                    compact = compact
-                ) {
-                    if (overlayGranted) {
-                        Toast.makeText(this@MainActivity, "悬浮窗权限已授权", Toast.LENGTH_SHORT).show()
-                    } else {
-                        FloatyManager.requestOverlayPermission(this@MainActivity)
+            Column {
+                SectionTitle("权限状态", "点击卡片管理权限")
+                BoxWithConstraints(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 16.dp)) {
+                    val tileSize = minOf((maxWidth - 24.dp) / 3, maxTileSize)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally)
+                    ) {
+                        PermissionStatusCard(
+                            title = "无障碍",
+                            description = "点击、滑动与手势",
+                            iconRes = R.drawable.ic_permission_gesture,
+                            ready = a11yEnabled,
+                            status = if (a11yEnabled) "已开启" else "未开启",
+                            actionLabel = if (a11yEnabled) "查看保活设置" else "开启无障碍服务",
+                            modifier = Modifier.size(tileSize),
+                            onClick = {
+                                if (a11yEnabled) keepAliveDialog = true
+                                else startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                            }
+                        )
+                        PermissionStatusCard(
+                            title = "悬浮窗",
+                            description = "在其他应用上显示",
+                            iconRes = R.drawable.ic_floaty,
+                            ready = overlayGranted,
+                            status = if (overlayGranted) "已授权" else "未授权",
+                            actionLabel = if (overlayGranted) "查看悬浮窗授权状态" else "授予悬浮窗权限",
+                            modifier = Modifier.size(tileSize),
+                            onClick = {
+                                if (overlayGranted) {
+                                    Toast.makeText(this@MainActivity, "悬浮窗权限已授权", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    FloatyManager.requestOverlayPermission(this@MainActivity)
+                                }
+                            }
+                        )
+                        PermissionStatusCard(
+                            title = "截屏",
+                            description = "找图、取色与识别",
+                            iconRes = R.drawable.ic_capture_system,
+                            ready = captureReady,
+                            status = if (captureReady) "可用" else "未就绪",
+                            actionLabel = "选择截屏方式",
+                            modifier = Modifier.size(tileSize),
+                            onClick = { openCaptureDialog() }
+                        )
                     }
                 }
-                PermissionRow(
-                    title = "截屏",
-                    desc = if (captureReady) "找图、取色与文字识别可用" else "可选择录屏授权或 Root",
-                    ok = captureReady,
-                    okText = "可用",
-                    actionText = "设置通道",
-                    compact = compact
-                ) { openCaptureDialog() }
             }
         }
     }
 
-    /**
-     * 权限行：状态点 + 名称/用途 + 右侧动作，整行可点。
-     * [compact] 下已授权项压成单行（用途说明只在未开启时展示），把竖向空间让给任务列表。
-     */
+    /** 屏幕工具和悬浮日志；悬浮球开关单独放在工具页顶部。 */
     @Composable
-    private fun PermissionRow(
-        title: String,
-        desc: String,
-        ok: Boolean,
-        okText: String,
-        actionText: String,
-        compact: Boolean = false,
-        onClick: () -> Unit
-    ) {
-        val singleLine = compact && ok
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable { onClick() }
-                .heightIn(min = 64.dp)
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            val dotColor = if (ok) MaterialTheme.colorScheme.primary
-            else MaterialTheme.colorScheme.tertiary
-            Box(
-                modifier = Modifier
-                    .size(8.dp)
-                    .clip(RoundedCornerShape(50))
-                    .background(dotColor)
-            )
-            Spacer(modifier = Modifier.width(10.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(title, style = MaterialTheme.typography.bodyLarge)
-                if (!singleLine) {
-                    Text(
-                        desc,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 2
-                    )
-                }
-            }
-            Spacer(Modifier.width(8.dp))
-            Surface(shape = RoundedCornerShape(8.dp),
-                color = if (ok) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.tertiaryContainer) {
-                Text(if (ok) okText else actionText, style = MaterialTheme.typography.labelMedium,
-                    color = if (ok) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onTertiaryContainer,
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp))
-            }
-        }
-    }
-
-    /** 工具卡片：按屏幕拾取、悬浮控制分组。 */
-    @Composable
-    private fun ToolsCard(launcherEnabled: Boolean) {
+    private fun ToolsCard() {
         WorkCard(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(bottom = 8.dp)) {
                 SectionTitle("屏幕工具", "拾取结果可直接用于脚本")
@@ -1501,11 +1472,6 @@ class MainActivity : ComponentActivity() {
                 }
                 HorizontalDivider(Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
                 ToolRow("悬浮日志", "在其他应用上方查看实时输出", R.drawable.ic_tool_log) { toggleConsole() }
-                ToolRow(if (launcherEnabled) "隐藏悬浮球" else "显示悬浮球",
-                    if (launcherEnabled) "已开启 · 点击后隐藏" else "随时选择任务、控制运行", R.drawable.ic_floaty) {
-                    if (!overlayGranted) FloatyManager.requestOverlayPermission(this@MainActivity)
-                    else ScriptRunner.toggleLauncher(this@MainActivity)
-                }
             }
         }
     }
@@ -1601,10 +1567,15 @@ class MainActivity : ComponentActivity() {
     /** 权限页：三项能力与截屏通道设置。 */
     @Composable
     private fun PermissionsTab() {
-        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            PageHeading("运行准备", "按需开启权限，准备好脚本运行环境。")
-            PermissionCard(compact = false)
+        BoxWithConstraints(Modifier.fillMaxSize()) {
+            // 为页面标题、分区标题和间距留出空间，限制横屏卡片高度。
+            val reservedHeight = (88 * LocalDensity.current.fontScale).dp + 76.dp
+            val maxTileSize = (maxHeight - reservedHeight).coerceIn(80.dp, 180.dp)
+            Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                PageHeading("运行准备", "按需开启权限，准备好脚本运行环境。")
+                PermissionCard(maxTileSize)
+            }
         }
     }
 
@@ -1614,13 +1585,23 @@ class MainActivity : ComponentActivity() {
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(16.dp)) {
             PageHeading("随手工具", "取点、取色、选范围、截图，让脚本编写更轻松。")
-            ToolsCard(launcherEnabled)
+            WorkCard(modifier = Modifier.fillMaxWidth()) {
+                ToolRow(
+                    if (launcherEnabled) "隐藏悬浮球" else "显示悬浮球",
+                    if (launcherEnabled) "已开启 · 点击后隐藏" else "随时选择任务、控制运行",
+                    R.drawable.ic_floaty
+                ) {
+                    if (!overlayGranted) FloatyManager.requestOverlayPermission(this@MainActivity)
+                    else ScriptRunner.toggleLauncher(this@MainActivity)
+                }
+            }
+            ToolsCard()
             WorkCard(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(bottom = 6.dp)) {
-                    SectionTitle("截屏通道", "Root 静默截屏优先")
+                    SectionTitle("截屏通道", "使用前请手动选择截屏方式")
                     ToolRow(
                         "截屏通道设置",
-                        "选择自动、Root 或录屏授权",
+                        "系统授权截屏或超级权限截屏",
                         R.drawable.ic_tool_shot
                     ) { openCaptureDialog() }
                 }
@@ -1798,80 +1779,126 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /** 打开截屏通道对话框：后台探测可用性，避免主线程阻塞 */
+    /** 只展示选择，不探测权限或替用户选择通道。 */
     private fun openCaptureDialog() {
+        if (captureModeTesting) return
+        selectedCaptureMode = ScreenCapture.mode(this)
+        captureModeError = null
         captureDialog = true
-        captureModeName = ScreenCapture.mode(this).name
-        captureChannelName = "探测中…"
+    }
+
+    /** 确认时先测试真实截图；成功才保存并关闭，失败允许重新选择。 */
+    private fun applyCaptureMode(mode: ScreenCapture.Mode) {
+        if (mode == ScreenCapture.Mode.UNSELECTED || captureModeTesting) return
+        captureModeTesting = true
+        captureModeError = null
         lifecycleScope.launch {
-            val probe = withContext(Dispatchers.IO) {
-                CaptureProbe(
-                    root = ScreenCapture.rootAvailable(forceRefresh = true),
-                    channel = ScreenCapture.activeChannel(this@MainActivity).name
-                )
+            try {
+                val result = ScreenCapture.testAndSelectMode(applicationContext, mode)
+                captureReady = ScreenCapture.captureAvailableCached(this@MainActivity)
+                if (result.success) {
+                    captureDialog = false
+                    Toast.makeText(this@MainActivity, result.message, Toast.LENGTH_SHORT).show()
+                } else {
+                    captureModeError = result.message
+                }
+            } finally {
+                captureModeTesting = false
             }
-            rootOk = probe.root
-            captureChannelName = probe.channel
         }
     }
 
-    /** 通道探测结果（后台线程 → UI 状态） */
-    private data class CaptureProbe(
-        val root: Boolean,
-        val channel: String
-    )
-
-    /** 应用通道模式并刷新显示 */
-    private fun applyCaptureMode(mode: ScreenCapture.Mode) {
-        ScreenCapture.setMode(this, mode)
-        captureModeName = mode.name
-        Toast.makeText(this, "截屏通道模式：" + mode.name, Toast.LENGTH_SHORT).show()
-        openCaptureDialog()
-    }
-
-    /** 截屏通道设置对话框：Root 为静默截屏，不可用时降级 MediaProjection */
+    /** 必须手动选择并确认，不提供自动模式或自动切换。 */
     @Composable
     private fun CaptureChannelDialog(
         onDismiss: () -> Unit,
         onSelect: (ScreenCapture.Mode) -> Unit
     ) {
         AlertDialog(
-            onDismissRequest = onDismiss,
-            title = { Text("截屏通道") },
+            onDismissRequest = { if (!captureModeTesting) onDismiss() },
+            title = { Text("选择截屏方式") },
             text = {
-                Column {
-                    Text("模式：$captureModeName    实际通道：$captureChannelName", style = MaterialTheme.typography.bodyMedium)
-                    Text(
-                        "Root：" + (if (rootOk) "可用" else "不可用"),
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                    Text(
-                        "Root 为静默截屏（无需授权弹窗）；不可用时使用 MediaProjection（需授权一次）",
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.padding(top = 6.dp)
-                    )
-                    Row(modifier = Modifier.padding(top = 4.dp)) {
-                        listOf(
-                            ScreenCapture.Mode.AUTO to "自动",
-                            ScreenCapture.Mode.MEDIAPROJECTION to "投影",
-                            ScreenCapture.Mode.ROOT to "Root"
-                        ).forEach { (m, label) ->
-                            TextButton(onClick = { onSelect(m) }) {
-                                Text(
-                                    (if (captureModeName == m.name) "● " else "") + label,
-                                    style = MaterialTheme.typography.bodySmall
+                BoxWithConstraints(Modifier.fillMaxWidth()) {
+                    val widthLimit = (maxWidth - 12.dp) / 2
+                    // 高度由弹窗扣除标题和底部操作后提供，不用屏幕总高度估算。
+                    val textSpace = (36 * LocalDensity.current.fontScale).dp + 24.dp
+                    val heightLimit = if (constraints.hasBoundedHeight) {
+                        (maxHeight - textSpace).coerceAtLeast(112.dp)
+                    } else widthLimit
+                    val cardSize = minOf(widthLimit, heightLimit)
+                    Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
+                        Text(
+                            "当前设置：" + ScreenCapture.mode(this@MainActivity).label,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp).selectableGroup(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally)
+                        ) {
+                            listOf(
+                                ScreenCapture.Mode.MEDIAPROJECTION,
+                                ScreenCapture.Mode.ROOT
+                            ).forEach { mode ->
+                                CaptureModeCard(
+                                    mode = mode,
+                                    selected = selectedCaptureMode == mode,
+                                    onClick = {
+                                        if (!captureModeTesting) {
+                                            selectedCaptureMode = mode
+                                            captureModeError = null
+                                        }
+                                    },
+                                    enabled = !captureModeTesting,
+                                    modifier = Modifier.size(cardSize)
                                 )
                             }
                         }
-                    }
-                    Row(modifier = Modifier.padding(top = 4.dp)) {
-                        TextButton(onClick = {
-                            Thread { ScreenCapture.requestBlocking() }.start()
-                        }) { Text("立即授权/测试截屏") }
+                        Text(
+                            "仅使用所选方式，不会自动切换。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                 }
             },
-            confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } }
+            // 操作区不参与内容滚动，横屏或大字体下也保留完整按钮。
+            confirmButton = {
+                Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    captureModeError?.let { message ->
+                        Text(
+                            text = message,
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        TextButton(
+                            enabled = !captureModeTesting,
+                            onClick = { if (!captureModeTesting) onDismiss() }
+                        ) { Text("取消") }
+                        Spacer(Modifier.width(8.dp))
+                        Button(
+                            enabled = selectedCaptureMode != ScreenCapture.Mode.UNSELECTED && !captureModeTesting,
+                            onClick = { onSelect(selectedCaptureMode) }
+                        ) {
+                            if (captureModeTesting) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    strokeWidth = 2.dp,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                Spacer(Modifier.width(8.dp))
+                            }
+                            Text(if (captureModeTesting) "正在测试…" else "确认选择")
+                        }
+                    }
+                }
+            }
         )
     }
 
@@ -1890,7 +1917,13 @@ class MainActivity : ComponentActivity() {
             FloatyManager.requestOverlayPermission(this)
             return
         }
-        if (mode == PickerOverlay.Mode.COLOR && !ScreenCapture.captureAvailable(this)) {
+        if ((mode == PickerOverlay.Mode.COLOR || mode == PickerOverlay.Mode.SCREENSHOT) &&
+            ScreenCapture.mode(this) == ScreenCapture.Mode.UNSELECTED
+        ) {
+            openCaptureDialog()
+            return
+        }
+        if (mode == PickerOverlay.Mode.COLOR && !ScreenCapture.captureAvailableCached(this)) {
             // 取色依赖截屏：先弹授权，成功后再打开拾取层
             lifecycleScope.launch {
                 val ok = withContext(Dispatchers.IO) { ScreenCapture.requestBlocking() }
