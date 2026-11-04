@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
+import android.graphics.Rect
 import android.media.projection.MediaProjectionManager
 import android.os.Handler
 import android.os.Looper
@@ -232,17 +233,81 @@ object ScreenCapture {
         }
     }
 
-    /** MediaProjection 通道取帧 */
+    /** 投影通道取帧 */
     private fun captureFromProjection(timeoutMs: Long, newerThanUptimeMs: Long): Bitmap? {
         fun frame() = if (newerThanUptimeMs > 0) ScreenCaptureService.frameAfter(newerThanUptimeMs)
             else ScreenCaptureService.freshFrame()
         frame()?.let { return it }
+        if (newerThanUptimeMs > 0) {
+            // 事件驱动：帧到达立即唤醒，不再每 50ms 轮询，减少录制每步的等待
+            ScreenCaptureService.awaitFrameAfter(newerThanUptimeMs, timeoutMs)
+            return ScreenCaptureService.frameAfter(newerThanUptimeMs)
+        }
         val deadline = System.currentTimeMillis() + timeoutMs
         while (System.currentTimeMillis() < deadline) {
             Thread.sleep(50)
             frame()?.let { return it }
         }
-        return if (newerThanUptimeMs > 0) null else ScreenCaptureService.latestFrame()
+        return ScreenCaptureService.latestFrame()
+    }
+
+    /**
+     * 只截取指定区域（屏幕像素）：
+     * MediaProjection 通道直接从原始帧按行裁切，不再生成整屏 Bitmap；
+     * 无法直接裁切（格式不符/帧已转换）时回退到整屏截图后裁切。
+     * 返回的 Bitmap 由调用方持有，需要自行回收。
+     */
+    fun captureRegion(rect: Rect, timeoutMs: Long = 2000, newerThanUptimeMs: Long = 0): Bitmap? {
+        val context = appContext ?: return null
+        if (rect.width() <= 0 || rect.height() <= 0) return null
+        return when (activeChannel(context)) {
+            null -> {
+                Log.w(TAG, "请先在设置页选择截屏方式")
+                null
+            }
+            Channel.MEDIAPROJECTION -> {
+                val cropped = ScreenCaptureService.captureRegion(rect, newerThanUptimeMs, timeoutMs)
+                when {
+                    cropped != null -> cropped
+                    // 没有新帧就不必再跑一次整屏截屏，直接按失败返回
+                    newerThanUptimeMs > 0 && !ScreenCaptureService.awaitFrameAfter(newerThanUptimeMs, 0) -> null
+                    else -> cropOf(captureFromProjection(0, newerThanUptimeMs), rect)
+                }
+            }
+            Channel.ROOT -> {
+                // 超级权限通道只能拿到整屏截图，裁切后立即回收源图
+                val full = captureSilently(context, Channel.ROOT) ?: return null
+                try {
+                    cropOf(full, rect)
+                } finally {
+                    if (!full.isRecycled) full.recycle()
+                }
+            }
+        }
+    }
+
+    /**
+     * 投影帧尺寸；Root 通道或投影未就绪返回 null。
+     * 录制前用它校验系统截屏是否为全屏共享，避免坐标系不一致。
+     */
+    fun projectionFrameSize(): Pair<Int, Int>? {
+        val context = appContext ?: return null
+        return if (activeChannel(context) == Channel.MEDIAPROJECTION) ScreenCaptureService.frameSize() else null
+    }
+
+    /** 从整屏截图裁出区域，不回收传入的源图 */
+    private fun cropOf(full: Bitmap?, rect: Rect): Bitmap? {
+        full ?: return null
+        val left = rect.left.coerceIn(0, full.width - 1)
+        val top = rect.top.coerceIn(0, full.height - 1)
+        val right = rect.right.coerceIn(left + 1, full.width)
+        val bottom = rect.bottom.coerceIn(top + 1, full.height)
+        return try {
+            Bitmap.createBitmap(full, left, top, right - left, bottom - top)
+        } catch (e: Exception) {
+            Log.w(TAG, "裁切截图失败: ${e.message}")
+            null
+        }
     }
 
     /** 释放投影（停止前台服务） */

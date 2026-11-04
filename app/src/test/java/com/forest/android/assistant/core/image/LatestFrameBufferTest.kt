@@ -59,4 +59,45 @@ class LatestFrameBufferTest {
         assertEquals(4, buffer.read())
         assertTrue(frame.closed)
     }
+
+    @Test fun awaitReturnsImmediatelyOrTimesOutWithoutPolling() {
+        val buffer = LatestFrameBuffer<Frame, Int> { it.value }
+        buffer.replace(Frame(1), 100)
+        // 已有更新的帧时立即返回
+        assertTrue(buffer.await(99, 0))
+        // 过期帧只等到超时，返回 false
+        val startedAt = System.nanoTime()
+        assertFalse(buffer.await(100, 30))
+        assertTrue("应等待到接近超时", (System.nanoTime() - startedAt) / 1_000_000 >= 20)
+    }
+
+    @Test fun awaitWakesUpWhenNewFrameArrives() {
+        val buffer = LatestFrameBuffer<Frame, Int> { it.value }
+        buffer.replace(Frame(1), 100)
+        val entered = java.util.concurrent.CountDownLatch(1)
+        val woke = java.util.concurrent.atomic.AtomicBoolean(false)
+        val waiter = Thread {
+            entered.countDown()
+            woke.set(buffer.await(100, 2000))
+        }
+        waiter.start()
+        entered.await()
+        Thread.sleep(20)
+        buffer.replace(Frame(2), 200)
+        waiter.join(2000)
+        assertTrue("新帧到达后应立即唤醒等待方", woke.get())
+    }
+
+    @Test fun useSourceReadsRawFrameOnlyWhenNewerAndUnconverted() {
+        val buffer = LatestFrameBuffer<Frame, Int> { it.value }
+        val frame = Frame(7)
+        buffer.replace(frame, 10)
+        // 没有比 10 更新的帧
+        assertNull(buffer.useSource(10) { it.value })
+        assertEquals(7, buffer.useSource(9) { it.value })
+        // 已转换后不再保留原始帧，调用方需回退整屏路径
+        assertEquals(7, buffer.read(9))
+        assertNull(buffer.useSource(9) { it.value })
+        assertTrue(frame.closed)
+    }
 }

@@ -9,6 +9,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.graphics.Bitmap
 import android.graphics.PixelFormat
+import android.graphics.Rect
 import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
 import android.media.Image
@@ -46,7 +47,9 @@ class ScreenCaptureService : Service() {
 
     private val frames = LatestFrameBuffer<Image, Bitmap> { image -> imageToBitmap(image) }
 
+    @Volatile
     private var width = 0
+    @Volatile
     private var height = 0
 
     companion object {
@@ -68,6 +71,13 @@ class ScreenCaptureService : Service() {
         @Volatile
         private var readyAtMillis = 0L
 
+        /** 当前投影帧尺寸；未就绪返回 null，供调用方校验是否全屏共享 */
+        fun frameSize(): Pair<Int, Int>? = instance?.let { service ->
+            val w = service.width
+            val h = service.height
+            if (w > 0 && h > 0) w to h else null
+        }
+
         @Volatile
         private var readyLatch: CountDownLatch? = null
 
@@ -83,6 +93,17 @@ class ScreenCaptureService : Service() {
         /** 录制隐藏悬浮层后仅接受新帧，禁止返回含录制控件的缓存截图。 */
         fun frameAfter(uptimeMs: Long): Bitmap? =
             instance?.readFrame(maxOf(uptimeMs, readyAtMillis + FRESH_DELAY_MS))
+
+        /** 等待时间戳晚于 [uptimeMs] 的新帧到达；超时或投影未就绪返回 false。 */
+        fun awaitFrameAfter(uptimeMs: Long, timeoutMs: Long): Boolean =
+            instance?.awaitFrame(maxOf(uptimeMs, readyAtMillis + FRESH_DELAY_MS), timeoutMs) ?: false
+
+        /**
+         * 只裁出指定区域的新帧：直接从 ImageReader 原始帧按行取像素，
+         * 不再生成整屏 Bitmap。返回 null 表示没有可用新帧或需要调用方回退整屏路径。
+         */
+        fun captureRegion(rect: Rect, afterUptimeMs: Long, timeoutMs: Long): Bitmap? =
+            instance?.cropRegion(rect, maxOf(afterUptimeMs, readyAtMillis + FRESH_DELAY_MS), timeoutMs)
 
         /** 启动前台服务并用授权结果建立投影，阻塞等待就绪 */
         fun startAndAwait(context: Context, resultCode: Int, data: Intent, timeoutMs: Long): Boolean {
@@ -310,6 +331,56 @@ class ScreenCaptureService : Service() {
         null
     }
 
+    /** 等到时间戳晚于 [afterExclusive] 的新帧（事件驱动，帧到达立即唤醒） */
+    private fun awaitFrame(afterExclusive: Long, timeoutMs: Long): Boolean =
+        frames.await(afterExclusive, timeoutMs)
+
+    /** 等待新帧后从原始帧裁出 [rect]；只取需要的区域，避免整屏 Bitmap 分配 */
+    private fun cropRegion(rect: Rect, afterExclusive: Long, timeoutMs: Long): Bitmap? {
+        if (!awaitFrame(afterExclusive, timeoutMs)) return null
+        // 只在持锁期间读像素，Bitmap 分配放到锁外，减少对取帧线程的阻塞
+        val cropped = frames.useSource(afterExclusive) { image -> readRegion(image, rect) } ?: return null
+        return Bitmap.createBitmap(cropped.pixels, cropped.width, cropped.height, Bitmap.Config.ARGB_8888)
+    }
+
+    /** 区域像素缓冲：读取在锁内完成，Bitmap 创建放到锁外 */
+    private class Cropped(val width: Int, val height: Int, val pixels: IntArray)
+
+    /**
+     * 把原始帧的目标区域读成 ARGB 像素。
+     * 行跳距可能大于有效宽度，按 rowStride 定位；像素格式不符时返回 null 交给整屏回退。
+     */
+    private fun readRegion(image: Image, rect: Rect): Cropped? {
+        val plane = image.planes.firstOrNull() ?: return null
+        // 本实现只支持 RGBA_8888；其他格式回退到整屏转换
+        if (plane.pixelStride != 4) return null
+        val left = rect.left.coerceIn(0, image.width - 1)
+        val top = rect.top.coerceIn(0, image.height - 1)
+        val right = rect.right.coerceIn(left + 1, image.width)
+        val bottom = rect.bottom.coerceIn(top + 1, image.height)
+        val w = right - left
+        val h = bottom - top
+        val buffer = plane.buffer
+        // 容量不足说明跳距与尺寸不匹配，交给整屏回退
+        if (buffer.capacity() < plane.rowStride.toLong() * image.height) return null
+        val pixels = IntArray(w * h)
+        var index = 0
+        for (row in 0 until h) {
+            var offset = (top + row) * plane.rowStride + left * plane.pixelStride
+            for (col in 0 until w) {
+                // 按字节取通道：RGBA_8888 在内存中固定是 R,G,B,A，与 ByteBuffer 字节序无关
+                pixels[index++] = rgbaToArgb(
+                    buffer.get(offset).toInt() and 0xFF,
+                    buffer.get(offset + 1).toInt() and 0xFF,
+                    buffer.get(offset + 2).toInt() and 0xFF,
+                    buffer.get(offset + 3).toInt() and 0xFF
+                )
+                offset += plane.pixelStride
+            }
+        }
+        return Cropped(w, h, pixels)
+    }
+
     /** 只在消费者请求时转换，同一原始帧重复读取复用结果；结果由消费者持有。 */
     private fun imageToBitmap(image: Image): Bitmap {
         val plane = image.planes[0]
@@ -368,3 +439,10 @@ class ScreenCaptureService : Service() {
         super.onDestroy()
     }
 }
+
+/**
+ * RGBA 四个通道合成 ARGB int（[Bitmap.createBitmap] 的像素格式要求 ARGB）。
+ * 只参与录制模板的裁切，不修改截图原始数据。
+ */
+internal fun rgbaToArgb(r: Int, g: Int, b: Int, a: Int): Int =
+    (a shl 24) or (r shl 16) or (g shl 8) or b

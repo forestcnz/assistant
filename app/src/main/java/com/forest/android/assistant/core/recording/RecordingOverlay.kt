@@ -6,6 +6,7 @@ import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
+import android.text.TextUtils
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
@@ -17,7 +18,10 @@ import android.widget.TextView
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
-/** 截获单指输入；派发前真正移除窗口，避免回录自身或 Android 12 遮挡触摸限制。 */
+/**
+ * 截获单指输入；执行手势期间悬浮条保持显示（不再隐去后重建），
+ * 全屏触摸层缩到 1×1 让出触点并把悬浮条置为不可触摸，避免回录自身。
+ */
 @SuppressLint("ClickableViewAccessibility")
 class RecordingOverlay(
     private val context: Context,
@@ -35,6 +39,10 @@ class RecordingOverlay(
         setTextColor(Color.WHITE)
         textSize = 12f
         setPadding(dp(10), dp(6), dp(10), dp(6))
+        // 固定两行：执行中/暂停/步数等文字变化不再改变悬浮条高度，避免一跳一跳
+        minLines = 2
+        maxLines = 2
+        ellipsize = TextUtils.TruncateAt.END
     }
     private val toggle = Button(context).apply { setOnClickListener { onToggle() } }
     private val finish = Button(context).apply {
@@ -59,6 +67,7 @@ class RecordingOverlay(
         x = dp(8)
         y = dp(12)
     }
+    private val touchParams = params(-1, -1)
     private val touchView = object : View(context) {
         private var points = mutableListOf<RecordedPoint>()
         private var downAt = 0L
@@ -132,17 +141,51 @@ class RecordingOverlay(
     }
 
     fun show(recording: Boolean, count: Int, message: String = "") {
-        hide()
         title.text = (if (recording) "● 录制中" else "Ⅱ 已暂停") + " · $count 步\n" +
-            message.ifBlank { if (recording) "松手后执行，等待录制条恢复再操作" else "切换到目标应用，再点开始/继续" }
+            message.ifBlank { if (recording) "松手即执行，悬浮条保持显示" else "切换到目标应用，再点开始/继续" }
         toggle.text = if (recording) "暂停" else if (count == 0) "开始" else "继续"
-        if (recording) wm.addView(touchView, params(-1, -1))
-        try {
-            wm.addView(panel, panelParams)
-        } catch (e: Exception) {
-            hide()
-            throw e
+        setPanelTouchable(true)
+        // 触摸层先挂、悬浮条后挂：按钮始终在触摸层之上，否则点按钮会被录成操作
+        if (!touchView.isAttachedToWindow) wm.addView(touchView, touchParams)
+        if (!panel.isAttachedToWindow) {
+            try {
+                wm.addView(panel, panelParams)
+            } catch (e: Exception) {
+                hide()
+                throw e
+            }
         }
+        setTouchLayerEnabled(recording)
+    }
+
+    /**
+     * 执行本步手势期间：悬浮条保持显示，只把全屏触摸层缩到 1×1 让出触点，
+     * 并把悬浮条置为不可触摸，避免注入的手势被录制条接走。
+     */
+    fun beginExecuting() {
+        setTouchLayerEnabled(false)
+        setPanelTouchable(false)
+        title.text = "▶ 执行中 · 请稍候"
+    }
+
+    /** 触摸层启用=全屏接收触点；禁用=缩到 1×1 让出触点（不移除窗口，保持悬浮条层级） */
+    private fun setTouchLayerEnabled(enabled: Boolean) {
+        val size = if (enabled) WindowManager.LayoutParams.MATCH_PARENT else 1
+        if (touchParams.width == size && touchParams.height == size) return
+        touchParams.width = size
+        touchParams.height = size
+        if (touchView.isAttachedToWindow) runCatching { wm.updateViewLayout(touchView, touchParams) }
+    }
+
+    /** 切换悬浮条的可触摸状态：执行手势期间不可触摸，避免挡住注入的点击 */
+    private fun setPanelTouchable(touchable: Boolean) {
+        if (!panel.isAttachedToWindow) return
+        val flags = panelParams.flags
+        val updated = if (touchable) flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
+            else flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+        if (updated == flags) return
+        panelParams.flags = updated
+        runCatching { wm.updateViewLayout(panel, panelParams) }
     }
 
     fun hide() {

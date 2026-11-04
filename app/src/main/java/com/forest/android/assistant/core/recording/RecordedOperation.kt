@@ -4,7 +4,12 @@ import kotlin.math.hypot
 
 data class RecordedPoint(val x: Int, val y: Int)
 
-enum class RecordingMode(val label: String) { COORDINATE("坐标"), IMAGE("图片") }
+enum class RecordingMode(val label: String) {
+    /** 纯坐标：只记录坐标，不截屏、不保存素材（最快） */
+    COORDINATE_ONLY("纯坐标"),
+    COORDINATE("坐标"),
+    IMAGE("图片")
+}
 
 const val DEFAULT_SEARCH_REGION_SIZE = 600
 
@@ -35,8 +40,7 @@ data class RecordedOperation(
     val intervalMs: Long = 0,
     val image: String? = null,
     val crop: RecordedCrop? = null,
-    val searchRegion: RecordedCrop? = null,
-    val contextImage: String? = null
+    val searchRegion: RecordedCrop? = null
 ) {
     enum class Kind { CLICK, LONG_PRESS, SWIPE }
 
@@ -63,7 +67,12 @@ object RecordingScript {
         searchRegionHeight: Int = DEFAULT_SEARCH_REGION_SIZE
     ): String = buildString {
         appendLine("// 操作录制 · 屏幕 ${width}×${height}，坐标单位为实际像素")
-        appendLine("// 回放方式：${mode.label}；点击找图仅搜索各步骤记录的页面范围。")
+        // 纯坐标模式不带找图素材，回放只依赖坐标
+        if (mode == RecordingMode.COORDINATE_ONLY) {
+            appendLine("// 回放方式：纯坐标；只按坐标执行，不包含找图素材。")
+        } else {
+            appendLine("// 回放方式：${mode.label}；点击找图仅搜索各步骤记录的页面范围。")
+        }
         appendLine("// 请在相同分辨率、方向及起始界面运行。首步等待悬浮面板退出，其余 sleep 为上一步完成后的等待。")
         appendLine("auto.waitFor();")
         appendLine("adapter.reset();")
@@ -79,10 +88,12 @@ object RecordingScript {
                 RecordedOperation.Kind.SWIPE -> "滑动"
             }} · 与上一步起点间隔 ${step.intervalMs} ms · 持续 ${step.durationMs} ms")
             if (step.delayMs > 0) appendLine("sleep(${step.delayMs});")
-            val region = step.searchRegion ?: RecordedCrop.around(point, searchRegionWidth, searchRegionHeight, width, height)
-            appendLine("// ${region.width}×${region.height} 页面范围：[左, 上, 宽, 高]，超出屏幕时已向内调整。")
-            appendLine("var region$n = [${region.left}, ${region.top}, ${region.width}, ${region.height}];")
-            step.contextImage?.let { appendLine("// 页面范围截图：$it") }
+            // 纯坐标模式没有找图段落，不再输出无用的页面范围变量
+            if (mode != RecordingMode.COORDINATE_ONLY) {
+                val region = step.searchRegion ?: RecordedCrop.around(point, searchRegionWidth, searchRegionHeight, width, height)
+                appendLine("// ${region.width}×${region.height} 页面范围：[左, 上, 宽, 高]，超出屏幕时已向内调整。")
+                appendLine("var region$n = [${region.left}, ${region.top}, ${region.width}, ${region.height}];")
+            }
             val action = when (step.kind) {
                 RecordedOperation.Kind.CLICK -> "click(${point.x}, ${point.y}, ${step.durationMs})"
                 RecordedOperation.Kind.LONG_PRESS -> "press(${point.x}, ${point.y}, ${step.durationMs})"

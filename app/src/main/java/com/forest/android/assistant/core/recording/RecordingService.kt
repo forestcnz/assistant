@@ -8,8 +8,8 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.content.res.Configuration
-import android.graphics.Bitmap
 import android.graphics.Point
+import android.graphics.Rect
 import android.os.Build
 import android.os.IBinder
 import android.os.SystemClock
@@ -29,7 +29,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -109,38 +108,42 @@ class RecordingService : Service() {
             return pauseWithError("操作超出屏幕范围，本次未执行")
         }
         busy = true
-        overlay?.hide()
-        val hiddenAt = SystemClock.uptimeMillis()
+        // 悬浮条保持显示：只摧掉全屏触摸层并置为不可触摸，执行完自动恢复
+        overlay?.beginExecuting()
         scope.launch {
             var imagePath: String? = null
-            var contextPath: String? = null
             var committed = false
             try {
-                // 留出窗口移除的合成时间，并要求投影帧晚于窗口移除时刻。
-                delay(100)
                 var crop: RecordedCrop? = null
                 var searchRegion: RecordedCrop? = null
-                withContext(Dispatchers.IO) {
-                    val screen = ScreenCapture.capture(newerThanUptimeMs = hiddenAt)
-                        ?: error("截屏失败，本次未执行；请检查截屏授权")
-                    check(screen.width == current.width && screen.height == current.height) {
-                        "截图尺寸与屏幕不一致，请使用全屏共享并恢复屏幕方向"
-                    }
-                    fun saveRegion(region: RecordedCrop, isContext: Boolean): String {
-                        val bitmap = Bitmap.createBitmap(screen, region.left, region.top, region.width, region.height)
-                        return try { current.saveImage(bitmap, isContext) } finally {
-                            // MediaProjection 返回共享帧，不能回收源图。
-                            if (bitmap !== screen) bitmap.recycle()
+                // 页面范围只需要屏幕尺寸，不需要截图；纯坐标模式则连模板也不保存
+                if (current.mode != RecordingMode.COORDINATE_ONLY) {
+                    searchRegion = RecordedCrop.around(input.points.first(), current.searchRegionWidth,
+                        current.searchRegionHeight, current.width, current.height)
+                }
+                // 纯坐标模式与滑动步骤不截图，直接派发手势
+                if (current.mode != RecordingMode.COORDINATE_ONLY &&
+                    input.kind != RecordedOperation.Kind.SWIPE) {
+                    val region = RecordedCrop.around(input.points.first(), current.cropWidth,
+                        current.cropHeight, current.width, current.height)
+                    crop = region
+                    val target = Rect(region.left, region.top, region.left + region.width, region.top + region.height)
+                    withContext(Dispatchers.IO) {
+                        // 校验投影帧与屏幕尺寸一致：非全屏共享时坐标与裁切区域都会错位
+                        ScreenCapture.projectionFrameSize()?.let { (frameWidth, frameHeight) ->
+                            check(frameWidth == current.width && frameHeight == current.height) {
+                                "截图尺寸与屏幕不一致，请使用全屏共享并恢复屏幕方向"
+                            }
                         }
-                    }
-                    val pageRegion = RecordedCrop.around(input.points.first(), current.searchRegionWidth,
-                        current.searchRegionHeight, screen.width, screen.height)
-                    searchRegion = pageRegion
-                    contextPath = saveRegion(pageRegion, true)
-                    if (input.kind != RecordedOperation.Kind.SWIPE) {
-                        val region = RecordedCrop.around(input.points.first(), current.cropWidth, current.cropHeight, screen.width, screen.height)
-                        crop = region
-                        imagePath = saveRegion(region, false)
+                        // 悬浮条保持显示，直接取最近一帧（页面静止时不会产生新帧）；只裁模板小图
+                        val bitmap = ScreenCapture.captureRegion(
+                            target, timeoutMs = RECORD_CAPTURE_TIMEOUT_MS, newerThanUptimeMs = 0
+                        ) ?: error("截屏失败，本次未执行；请检查截屏授权")
+                        imagePath = try {
+                            current.saveImage(bitmap)
+                        } finally {
+                            bitmap.recycle()
+                        }
                     }
                 }
                 check(sameDisplay(current)) { "截屏期间屏幕方向发生变化，本次未执行" }
@@ -153,20 +156,21 @@ class RecordingService : Service() {
                 val step = input.copy(
                     delayMs = if (previousEnd == 0L) 0 else (started - previousEnd).coerceAtLeast(0),
                     intervalMs = if (previousStart == 0L) 0 else (started - previousStart).coerceAtLeast(0),
-                    image = imagePath, crop = crop, searchRegion = searchRegion, contextImage = contextPath
+                    image = imagePath, crop = crop, searchRegion = searchRegion
                 )
-                current.steps.add(step)
+                val stepCount = current.addStep(step)
                 committed = true
                 previousStart = started
                 previousEnd = completed
+                // 每步只写轻量快照；task.js 与配置在暂停/完成时生成，避免每步重写三个文件
                 persistenceFailed = true
-                withContext(Dispatchers.IO) { current.persist() }
+                withContext(Dispatchers.IO) { current.snapshot() }
                 persistenceFailed = false
                 val point = step.points.first()
                 lastMessage = "${if (step.kind == RecordedOperation.Kind.SWIPE) "滑动" else "点击"} (${point.x}, ${point.y}) · 间隔 ${step.intervalMs}ms"
-                ScriptRunner.appendLog("录制 ${current.steps.size}：${step.kind} ${step.points.first()}，间隔 ${step.intervalMs}ms，已执行")
+                ScriptRunner.appendLog("录制 $stepCount：${step.kind} ${step.points.first()}，间隔 ${step.intervalMs}ms，已执行")
             } catch (e: Exception) {
-                if (!committed) withContext(Dispatchers.IO) { current.removeImage(imagePath); current.removeImage(contextPath) }
+                if (!committed) withContext(Dispatchers.IO) { current.removeImage(imagePath) }
                 pause()
                 notifyError((if (committed) "操作已执行，但保存失败；点击完成重试：" else "") + e.message)
             } finally {
@@ -176,10 +180,28 @@ class RecordingService : Service() {
         }
     }
 
+    /** 暂停录制：同时把内存中的步骤补成完整任务文件，失败时标记以便完成时重试 */
     private fun pause() {
         if (recording) {
             recording = false
             pausedAt = SystemClock.uptimeMillis()
+        }
+        // 完成流程会自己写完整文件，避免重复落盘
+        if (!finishRequested) persistPending()
+    }
+
+    /** 后台生成 task.js / config.json，不在主线程做文件读写 */
+    private fun persistPending() {
+        val current = task ?: return
+        if (current.steps.isEmpty()) return
+        scope.launch {
+            try {
+                withContext(Dispatchers.IO) { current.persist() }
+                persistenceFailed = false
+            } catch (e: Exception) {
+                persistenceFailed = true
+                notifyError("保存失败，请点击完成重试：${e.message}")
+            }
         }
     }
 
@@ -279,6 +301,10 @@ class RecordingService : Service() {
 
     companion object {
         private const val ACTION_FINISH = "com.forest.android.assistant.action.FINISH_RECORDING"
+
+        /** 录制每步等待“隐藏悬浮条后的新帧”的上限：超时按截屏失败处理，避免卡满 2 秒 */
+        private const val RECORD_CAPTURE_TIMEOUT_MS = 500L
+
         @Volatile var active = false
             private set
 

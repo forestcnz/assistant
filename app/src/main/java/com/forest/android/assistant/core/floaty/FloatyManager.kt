@@ -38,7 +38,7 @@ import androidx.core.graphics.drawable.RoundedBitmapDrawableFactory
  * 贴边坐标全部由 [FloatyGeometry] 计算，并统一使用真实显示尺寸（displayMetrics 在部分 ROM 会虚报）。
  *
  * 展开的面板按「任务 / 工具」分区：任务列表可滚动并支持多选（点选顺序即队列执行顺序），
- * 工具区提供取点、取色、选范围、截图、日志和录制，
+ * 工具区提供取点、取色、选范围、截图、纯坐标录制和完整录制，
  * 底部提供「关闭悬浮窗」入口（关闭后可在 App「设置」页重新开启）。
  * 对应设计 docs/README.md 第 4.5 节「悬浮与调试工具」。
  */
@@ -1232,9 +1232,10 @@ object FloatyManager {
                 hideTaskPanel()
                 PickerOverlay.show(context, PickerOverlay.Mode.SCREENSHOT)
             },
-            toolIconButton(context, com.forest.android.assistant.R.drawable.ic_tool_log, "日志") {
+            // 纯坐标录制：一键开始，不截图也不需要截屏授权
+            toolIconButton(context, com.forest.android.assistant.R.drawable.ic_record_point, "纯坐标录制") {
                 hideTaskPanel()
-                ConsoleOverlay.toggle(context)
+                com.forest.android.assistant.core.recording.RecordingSetupOverlay.startPure(context)
             },
             toolIconButton(context, com.forest.android.assistant.R.drawable.ic_record, "录制操作") {
                 hideTaskPanel()
