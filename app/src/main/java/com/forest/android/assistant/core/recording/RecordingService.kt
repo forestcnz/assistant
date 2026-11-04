@@ -18,7 +18,6 @@ import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
-import com.forest.android.assistant.MainActivity
 import com.forest.android.assistant.core.engine.ScriptRunner
 import com.forest.android.assistant.core.floaty.ConsoleOverlay
 import com.forest.android.assistant.core.floaty.FloatyManager
@@ -241,9 +240,7 @@ class RecordingService : Service() {
                     else "已生成任务「${current?.name}」，共 ${current?.steps?.size} 步"
                 Toast.makeText(this@RecordingService, message, Toast.LENGTH_LONG).show()
                 ScriptRunner.appendLog(message)
-                startActivity(Intent(this@RecordingService, MainActivity::class.java)
-                    .putExtra(MainActivity.EXTRA_SHOW_TASKS, true)
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP))
+                // 完成后停留在当前应用，不再跳回 App 内；任务可在 App 任务列表查看
                 stopSelf()
             } catch (e: Exception) {
                 finishRequested = false
