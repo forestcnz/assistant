@@ -18,6 +18,7 @@ import android.widget.RadioGroup
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
+import com.forest.android.assistant.R
 import com.forest.android.assistant.core.engine.ScriptRunner
 import com.forest.android.assistant.core.floaty.FloatyManager
 import com.forest.android.assistant.core.gesture.GestureClient
@@ -67,6 +68,10 @@ object RecordingSetupOverlay {
             text = "录制操作"
             textSize = 18f
             setTextColor(TEXT)
+            // 与录制悬浮条一致的 logo
+            setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_record_logo, 0, 0, 0)
+            compoundDrawablePadding = dp(8)
+            gravity = Gravity.CENTER_VERTICAL
         }
         card.addView(title)
         val name = EditText(app).apply {

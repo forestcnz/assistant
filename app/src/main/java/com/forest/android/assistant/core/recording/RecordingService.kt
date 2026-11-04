@@ -108,12 +108,12 @@ class RecordingService : Service() {
             return pauseWithError("操作超出屏幕范围，本次未执行")
         }
         busy = true
-        // 悬浮条保持显示：只摧掉全屏触摸层并置为不可触摸，执行完自动恢复
-        overlay?.beginExecuting()
         scope.launch {
             var imagePath: String? = null
             var committed = false
             try {
+                // 悬浮窗保持显示，只让出触点：触摸层缩到 1×1 并等重新布局生效
+                overlay?.beginExecuting()
                 var crop: RecordedCrop? = null
                 var searchRegion: RecordedCrop? = null
                 // 页面范围只需要屏幕尺寸，不需要截图；纯坐标模式则连模板也不保存
@@ -167,7 +167,10 @@ class RecordingService : Service() {
                 withContext(Dispatchers.IO) { current.snapshot() }
                 persistenceFailed = false
                 val point = step.points.first()
-                lastMessage = "${if (step.kind == RecordedOperation.Kind.SWIPE) "滑动" else "点击"} (${point.x}, ${point.y}) · 间隔 ${step.intervalMs}ms"
+                // 悬浮窗空间有限：坐标后紧跟与上一步起点的间隔（秒），省略“间隔”两字
+                val gapSeconds = "%.1fs".format(step.intervalMs / 1000.0)
+                lastMessage = "${if (step.kind == RecordedOperation.Kind.SWIPE) "滑动" else "点击"} " +
+                    "(${point.x},${point.y}) $gapSeconds"
                 ScriptRunner.appendLog("录制 $stepCount：${step.kind} ${step.points.first()}，间隔 ${step.intervalMs}ms，已执行")
             } catch (e: Exception) {
                 if (!committed) withContext(Dispatchers.IO) { current.removeImage(imagePath) }
