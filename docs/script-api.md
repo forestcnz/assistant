@@ -796,6 +796,8 @@ try {
 
 `tpl` 接受有效图片句柄或文件路径。反复查找时建议先 `images.read()` 一次并复用句柄；传路径会在每次调用时重新读取并登记图片句柄。
 
+每次找图都会写一条运行日志：命中为 D 级 `模板名 找图成功 阈值=… 匹配分=… 坐标=(x,y)`，未命中为 W 级 `模板名 找图失败 阈值=… 最高分=… 坐标=(x,y)`；多倍率时追加命中倍率，参数无效等提前失败输出 `找图失败 阈值=… 原因=…`。
+
 ### `images.findImage`
 
 签名：`images.findImage(img: ImageRef, tpl: ImageRef | string, options?: FindImageOptions): Point | null`。

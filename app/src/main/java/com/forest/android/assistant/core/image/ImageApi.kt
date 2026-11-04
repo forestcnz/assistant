@@ -509,7 +509,8 @@ object ImageApi {
         val tplName = imageName(tplId) ?: "image#$tplId"
         // 无法进入匹配流程时同样按失败记 W，避免只看到“找不到”却不知道原因
         fun fail(reason: String): List<Match> {
-            debugLogger?.invoke('W', "${tplName}找图失败 $reason")
+            // 提前失败同样输出模板名与设定阈值，便于对照脚本传参
+            debugLogger?.invoke('W', "$tplName 找图失败 阈值=$threshold $reason")
             return emptyList()
         }
         if (max <= 0) return emptyList()
@@ -560,6 +561,9 @@ object ImageApi {
         }
         val templateGray by lazy { tpl.toGray() }
         val candidates = ArrayList<Match>()
+        // 各倍率中分数最高的候选（可能未达阈值），用于失败时说明差距
+        var bestHit: Match? = null
+        var bestScale = usable.first()
         for (scale in usable) {
             currentCheck()
             val prepared = if (scale == 1.0) {
@@ -575,9 +579,23 @@ object ImageApi {
             } ?: return fail("原因=模板已释放")
             // 空白模板没有可供比较的轮廓，避免把纯色区域当作任意图片命中。
             if (prepared.gray.px.all { it == 0 }) continue
+            // 匹配内核回传本次倍率的最高分候选，用于统一日志
+            var scaleBest: Match? = null
             TemplateMatcher.find(grayScreen, prepared, threshold, max, r.left, r.top,
-                screenLevelProvider = ::screenLevel).forEach { hit ->
+                screenLevelProvider = ::screenLevel,
+                onSummary = { summary ->
+                    scaleBest = summary.best?.let {
+                        Match(it.x, it.y, it.score, prepared.gray.w, prepared.gray.h)
+                    }
+                }).forEach { hit ->
                 candidates.add(Match(hit.x, hit.y, hit.score, prepared.gray.w, prepared.gray.h))
+            }
+            // 多倍率时只保留全局最高分（含未达阈值的候选）
+            val localBest = scaleBest
+            val currentBest = bestHit
+            if (localBest != null && (currentBest == null || localBest.score > currentBest.score)) {
+                bestHit = localBest
+                bestScale = scale
             }
         }
         val result = ArrayList<Match>()
@@ -588,9 +606,43 @@ object ImageApi {
                 }) result.add(hit)
         }
         val ordered = if (max == 1) result.take(1) else result.sortedWith(compareBy({ it.y }, { it.x })).take(max)
-        debugLogger?.invoke(if (ordered.isEmpty()) 'W' else 'D',
-            "$tplName ${if (ordered.isEmpty()) "找图失败" else "shape match"} thr=$threshold")
+        // 统一日志：成功给出实际匹配分，失败给出本次最高分；两者都带模板名、设定阈值与坐标
+        debugLogger?.invoke(
+            if (ordered.isEmpty()) 'W' else 'D',
+            matchLogText(
+                tplName = tplName,
+                threshold = threshold,
+                hit = ordered.maxByOrNull { it.score },
+                best = bestHit,
+                scale = bestScale,
+                success = ordered.isNotEmpty()
+            )
+        )
         return ordered
+    }
+
+    /**
+     * 匹配日志文本：模板名 + 设定阈值 + 匹配分 + 坐标。
+     * - 命中：匹配分取实际命中位置（[hit]）的分数；
+     * - 未命中：匹配分取本次最高分（[best]），无任何候选时显示 `-`；
+     * - 多倍率时追加命中所在倍率，便于判断尺寸偏差。
+     */
+    internal fun matchLogText(
+        tplName: String,
+        threshold: Double,
+        hit: Match?,
+        best: Match?,
+        scale: Double,
+        success: Boolean
+    ): String {
+        val target = if (success) hit else best
+        val label = if (success) "匹配分" else "最高分"
+        val scoreText = target?.let { "$label=${"%.3f".format(it.score)}" } ?: "$label=-"
+        val coordText = target?.let { "坐标=(${it.x},${it.y})" } ?: "坐标=-"
+        // 单倍率是默认调用，不输出倍率，避免日志冗长
+        val scaleText = if (target != null && scale != 1.0) " 倍率=$scale" else ""
+        val resultText = if (success) "找图成功" else "找图失败"
+        return "$tplName $resultText 阈值=$threshold $scoreText $coordText$scaleText"
     }
 
     // ==================== 内部工具 ====================

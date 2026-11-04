@@ -130,6 +130,34 @@ class RecordingScriptTest {
         assertTrue(script.contains("sleep(1200);"))
         assertFalse(script.contains("sleep(1300)"))
         assertTrue(script.contains("swipe(1, 2, 3, 4, 650)"))
-        assertTrue(script.contains("throw new Error"))
+        // 回放失败只记录错误日志，生成脚本中不应出现 throw
+        assertFalse(script.contains("throw new"))
+        assertTrue(script.contains("console.error(\"步骤 1 执行失败\")"))
+    }
+
+    @Test fun imageModeLogsErrorsInsteadOfThrowing() {
+        // 图片模式的各类失败都改为错误日志，且不再出现 throw new
+        val point = RecordedPoint(890, 1590)
+        val script = RecordingScript.generate(900, 1600, listOf(RecordedOperation(
+            RecordedOperation.Kind.CLICK, listOf(point), 40,
+            image = "images/step_001.png", crop = RecordedCrop.around(point, 100, 900, 1600)
+        )), RecordingMode.IMAGE)
+        assertFalse(script.contains("throw"))
+        assertTrue(script.contains("console.error(\"截屏授权失败\")"))
+        assertTrue(script.contains("console.error(\"步骤 1 读取图片失败\")"))
+        assertTrue(script.contains("console.error(\"步骤 1 未找到图片\")"))
+        assertTrue(script.contains("console.error(\"步骤 1 点击失败\")"))
+        // 找图与点击仍需限制在步骤记录的页面范围内
+        assertTrue(script.contains("threshold: 0.9, region: region1"))
+    }
+
+    @Test fun coordinateFallbackBlockAlsoAvoidsThrow() {
+        // 坐标模式下被注释的找图备用段同样不能残留 throw new
+        val script = RecordingScript.generate(360, 640, listOf(RecordedOperation(
+            RecordedOperation.Kind.CLICK, listOf(RecordedPoint(20, 30)), 50,
+            image = "images/step_001.png", crop = RecordedCrop(0, 0, 100, 100)
+        )))
+        assertFalse(script.contains("throw"))
+        assertTrue(script.contains("console.error(\"步骤 1 未找到图片\")"))
     }
 }
