@@ -18,7 +18,7 @@ gradle assembleDebug
 gradle assembleRelease
 ```
 
-APK：`app/build/outputs/apk/debug/app-debug.apk`、`app/build/outputs/apk/release/app-release.apk`。
+APK：`app/build/outputs/apk/debug/app-debug.apk`、`app/build/outputs/apk/release/app-release.apk`。Windows / Git Bash 的环境设置、签名说明和产物核验流程见仓库 Skill：[本地编译 APK](../.agents/skills/android-local-build/SKILL.md)。
 
 ## 使用
 
