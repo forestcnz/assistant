@@ -111,16 +111,7 @@ object ScriptRunner {
         FloatyManager.onStopClicked = { stop() }
         // 悬浮球面板选任务 → 按点选顺序依次运行（只选一个即普通运行）
         FloatyManager.onTasksSelected = { names -> appContext?.let { runQueue(it, names) } }
-        // 悬浮球面板[关闭悬浮窗]：运行中先停止任务，再隐藏并记下用户意愿（下次启动不再自动显示）
-        FloatyManager.onLauncherClose = {
-            appContext?.let { ctx ->
-                if (_state.value.running) stop()
-                _launcherEnabled.value = false
-                FloatyManager.setEnabledByUser(ctx, false)
-                FloatyManager.hideLauncher()
-                addLog('I', "悬浮球已关闭（下次启动不再自动显示，可在「设置」页重新开启）")
-            }
-        }
+        // 悬浮球面板的[关闭悬浮窗]入口已移除；停止、隐藏及开关意愿统一由应用设置处理。
         // 任务列表来源（悬浮球每次展开时实时读取）
         FloatyManager.taskProvider = {
             appContext?.let { TaskManager.listTasks(it).map { t -> t.name } } ?: emptyList()
