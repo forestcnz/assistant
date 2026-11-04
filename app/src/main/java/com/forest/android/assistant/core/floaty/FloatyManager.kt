@@ -467,8 +467,7 @@ object FloatyManager {
     }
 
     /** 截图时临时隐藏已显示的胶囊，保留窗口和视图对象。必须在主线程调用。 */
-    fun hideLauncherForScreenshot(): Boolean {
-        val view = capsuleView ?: return false
+    fun hideLauncherForScreenshot(): Boolean {        val view = capsuleView ?: return false
         val lp = capsuleParams ?: return false
         val wm = windowManager ?: return false
         if (!view.isAttachedToWindow) return false
@@ -502,6 +501,24 @@ object FloatyManager {
         } catch (_: Exception) {
             false
         }
+    }
+
+    /**
+     * 拾取工具（取点/取色/选区/截图）共用：收起面板并隐藏悬浮球（只切可见性），
+     * 返回是否需要在拾取结束后恢复悬浮球。必须在主线程调用。
+     */
+    fun prepareForPicker(): Boolean {
+        val panelShowing = panelView != null
+        val launcherHidden = hideLauncherForScreenshot()
+        // 同步移除任务面板：拾取画面里绝不能残留面板，也不留待处理的移除消息
+        hideTaskPanel(restoreBall = false, immediate = true)
+        return panelShowing || launcherHidden
+    }
+
+    /** 拾取结束后恢复悬浮球：优先只切回可见性，窗口已被移除时重建 */
+    fun restoreAfterPicker(context: Context) {
+        if (restoreLauncherAfterScreenshot()) return
+        if (isEnabledByUser(context)) showLauncher(context)
     }
 
     /** 切换到运行态：红色雕雕头顶显示任务名，双击雕雕停止任务；沿用空闲球的锚点。
@@ -1216,20 +1233,17 @@ object FloatyManager {
             setPadding((8 * d).toInt(), (8 * d).toInt(), (2 * d).toInt(), (6 * d).toInt())
         }
         val toolButtons = listOf(
+            // 四个拾取工具都由 PickerOverlay 统一收起面板/隐藏悬浮球，并在结束后恢复
             toolIconButton(context, com.forest.android.assistant.R.drawable.ic_tool_point, "取坐标") {
-                hideTaskPanel()
                 PickerOverlay.show(context, PickerOverlay.Mode.POINT)
             },
             toolIconButton(context, com.forest.android.assistant.R.drawable.ic_tool_color, "取色") {
-                hideTaskPanel()
                 PickerOverlay.show(context, PickerOverlay.Mode.COLOR)
             },
             toolIconButton(context, com.forest.android.assistant.R.drawable.ic_tool_region, "选择范围") {
-                hideTaskPanel()
                 PickerOverlay.show(context, PickerOverlay.Mode.REGION)
             },
             toolIconButton(context, com.forest.android.assistant.R.drawable.ic_tool_shot, "截图") {
-                hideTaskPanel()
                 PickerOverlay.show(context, PickerOverlay.Mode.SCREENSHOT)
             },
             // 纯坐标录制：一键开始，不截图也不需要截屏授权
