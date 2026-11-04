@@ -1545,12 +1545,13 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /** 设置页：悬浮球、悬浮日志与截屏通道；屏幕拾取工具统一收在悬浮窗面板中。 */
+    /** 设置页：悬浮球与截屏通道；屏幕拾取工具和悬浮日志入口统一收在悬浮窗面板中。 */
     @Composable
     private fun SettingsTab(launcherEnabled: Boolean) {
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            PageHeading("应用设置", "管理悬浮球、悬浮日志与截屏通道。")
+            PageHeading("应用设置", "管理悬浮球与截屏通道。")
+            // 悬浮日志开关：原属于工具页，屏幕工具展示移除后保留在这里；现在可从悬浮窗面板打开
             WorkCard(modifier = Modifier.fillMaxWidth()) {
                 ToolRow(
                     if (launcherEnabled) "隐藏悬浮球" else "显示悬浮球",
@@ -1562,19 +1563,12 @@ class MainActivity : ComponentActivity() {
                 }
                 // 自动贴边开关：控制拖动松手后是否吸到左右边缘
                 AutoSnapRow()
-                HorizontalDivider(Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
-                // 悬浮日志开关：原属于工具页，屏幕工具展示移除后保留在这里
-                ToolRow("悬浮日志", "在其他应用上方查看实时输出", R.drawable.ic_tool_log) { toggleConsole() }
-            }
-            WorkCard(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(bottom = 6.dp)) {
-                    SectionTitle("截屏通道", "使用前请手动选择截屏方式")
-                    ToolRow(
-                        "截屏通道设置",
-                        "系统授权截屏或超级权限截屏",
-                        R.drawable.ic_tool_shot
-                    ) { openCaptureDialog() }
-                }
+                // 截屏通道设置与悬浮球选项放在同一卡片中
+                ToolRow(
+                    "截屏通道设置",
+                    "系统授权截屏或超级权限截屏 · 使用前请手动选择",
+                    R.drawable.ic_tool_shot
+                ) { openCaptureDialog() }
             }
         }
     }

@@ -154,6 +154,9 @@ object FloatyManager {
     /** 展开的任务/工具面板 */
     private var panelView: View? = null
 
+    /** 从面板启动任务后，在运行态就绪前暂不恢复空闲球。 */
+    private var startingFromPanel = false
+
     /** 当前贴边形态（LEFT/RIGHT = 半隐藏在屏幕边缘，NONE = 完整显示）；[DockSide] 定义在 FloatyGeometry */
     private var dockedSide = DockSide.NONE
 
@@ -276,6 +279,8 @@ object FloatyManager {
             if (keepAlive) FloatyForegroundService.start(context)
             return true
         }
+        // 面板已移除、任务仍在准备时，保活服务不应提前把空闲球挂回屏幕。
+        if (startingFromPanel && capsuleView != null) return true
         // 模拟器/系统可能移除了窗口但没有销毁应用进程；清掉陈旧引用后重新 addView。
         if (capsuleView != null) {
             hideLauncher(stopKeepAlive = false)
@@ -441,6 +446,7 @@ object FloatyManager {
     /** 隐藏悬浮控件（含面板；面板收起时不恢复球，因为整体都要隐藏） */
     fun hideLauncher(context: Context? = null, stopKeepAlive: Boolean = true) {
         screenshotVisibility = null
+        startingFromPanel = false
         hideTaskPanel(restoreBall = false)
         capsuleView?.let {
             try {
@@ -502,8 +508,10 @@ object FloatyManager {
      * @param progress 队列进度（如「2/3」），单任务运行传 null
      */
     fun setRunning(context: Context, taskName: String, progress: String? = null) {
-        hideTaskPanel()
-        if (capsuleView?.isAttachedToWindow != true) {
+        // 面板触发的任务先保持胶囊脱离窗口，等红色雕雕与坐标就绪再显示。
+        startingFromPanel = false
+        hideTaskPanel(restoreBall = false)
+        if (capsuleView == null || capsuleView?.parent != null && capsuleView?.isAttachedToWindow != true) {
             if (!showLauncher(context)) {
                 Log.w(TAG, "运行态悬浮控件显示失败")
                 return
@@ -515,6 +523,8 @@ object FloatyManager {
             // 记下空闲球的锚点：运行态出现在同一位置，任务结束后再还原
             capsuleParams?.let { idlePosition = it.x to it.y }
             idleDockedSide = dockedSide
+            // 已显示的空闲球也先移除，避免换图后才移动到任务名上方。
+            detachCapsuleForTransition()
         }
         if (runningTask != taskName || runningProgress != progress) lastRunningTapAt = 0L
         runningTask = taskName
@@ -532,11 +542,18 @@ object FloatyManager {
             }
         }
         renderCapsule(context, reposition = !wasRunning)
+        if (!wasRunning) {
+            positionRunningBird(context)
+            restoreCapsuleIfNeeded()
+        }
         Log.i(TAG, "悬浮控件进入运行态: $taskName${progress?.let { "（$it）" } ?: ""}")
     }
 
     /** 回到空闲态（任务结束/停止后调用） */
     fun clearRunning(context: Context) {
+        startingFromPanel = false
+        // 先移除运行窗口，避免普通 Logo 在任务名称的旧窗口位置短暂显示。
+        detachCapsuleForTransition()
         runningTask = null
         runningProgress = null
         lastRunningTapAt = 0L
@@ -558,6 +575,7 @@ object FloatyManager {
             params.gravity = Gravity.TOP or Gravity.START
         }
         renderCapsule(context)
+        if (panelView == null) restoreCapsuleIfNeeded()
         idlePosition = null
         idleDockedSide = DockSide.NONE
         Log.i(TAG, "悬浮控件回到空闲态")
@@ -593,9 +611,11 @@ object FloatyManager {
             capsule.addView(runningBird(context))
         }
         capsuleView?.let { view ->
-            try {
-                capsuleParams?.let { windowManager?.updateViewLayout(view, it) }
-            } catch (_: Exception) {
+            if (view.isAttachedToWindow) {
+                try {
+                    capsuleParams?.let { windowManager?.updateViewLayout(view, it) }
+                } catch (_: Exception) {
+                }
             }
             if (!reposition) {
                 view.post { keepInsideScreen(context) }
@@ -644,7 +664,8 @@ object FloatyManager {
         val params = capsuleParams ?: return
         val screen = realScreenSize(context)
         val width = runningBirdWidth(context, screen.x)
-        val height = view.height.takeIf { it > 0 } ?: runningBirdHeight(context)
+        val height = view.height.takeIf { view.isAttachedToWindow && it > 0 }
+            ?: runningBirdHeight(context)
         val anchor = idlePosition ?: (params.x to params.y)
         val ball = ballSize(context)
         runningBirdSide = when {
@@ -672,8 +693,20 @@ object FloatyManager {
             height, screen.y
         )
         updateRunningBirdAlignment()
+        if (view.isAttachedToWindow) {
+            try {
+                windowManager?.updateViewLayout(view, params)
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    /** 切换图标前先移除旧窗口，避免内容变化和窗口移动分两帧呈现。 */
+    private fun detachCapsuleForTransition() {
+        val view = capsuleView ?: return
+        if (!view.isAttachedToWindow) return
         try {
-            windowManager?.updateViewLayout(view, params)
+            windowManager?.removeViewImmediate(view)
         } catch (_: Exception) {
         }
     }
@@ -1062,8 +1095,12 @@ object FloatyManager {
                 val queue = selected.toList()
                 Log.i(TAG, "悬浮球面板执行所选任务: ${queue.joinToString(" → ")}")
                 // 启动任务前同步移除面板，避免第一步手势落在尚未退出的悬浮窗上。
-                hideTaskPanel(immediate = true)
-                onTasksSelected?.invoke(queue)
+                startingFromPanel = true
+                hideTaskPanel(restoreBall = false, immediate = true)
+                onTasksSelected?.invoke(queue) ?: run {
+                    startingFromPanel = false
+                    restoreCapsuleIfNeeded()
+                }
             }
         }
 
@@ -1108,8 +1145,12 @@ object FloatyManager {
                             if (runningTask == null) {
                                 Log.i(TAG, "悬浮球面板长按立即运行: $name")
                                 // 长按立即运行也要先完成面板移除。
-                                hideTaskPanel(immediate = true)
-                                onTasksSelected?.invoke(listOf(name))
+                                startingFromPanel = true
+                                hideTaskPanel(restoreBall = false, immediate = true)
+                                onTasksSelected?.invoke(listOf(name)) ?: run {
+                                    startingFromPanel = false
+                                    restoreCapsuleIfNeeded()
+                                }
                             }
                         }
                     )
