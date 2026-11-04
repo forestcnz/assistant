@@ -16,14 +16,15 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import com.forest.android.assistant.R
+import com.forest.android.assistant.ui.AppPalette
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
 /**
  * 录制悬浮窗（紧凑版）：
- * - 深蓝渐变卡片 + 奶油描边 + 圆角；
+ * - 蓝白渐变卡片 + 浅蓝描边 + 圆角；
  * - 头部：logo、状态点 + 状态文字、提示行、右侧步数徽标，整条可拖动；
- * - 底部：胶囊按钮「暂停/继续」和金色主按钮「完成」；
+ * - 底部：胶囊按钮「暂停/继续」和蓝色主按钮「完成」；
  * - 所有文字单行 + 固定尺寸，状态切换不会让窗口一跳一跳。
  *
  * 交互约束：
@@ -47,15 +48,14 @@ class RecordingOverlay(
     // minSdk 29：悬浮窗类型固定为 TYPE_APPLICATION_OVERLAY
     private val windowType = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
 
-    // —— 品牌配色：与启动图标（肥宅雕）一致 ——
-    private val bgTop = 0xFF2B3D60.toInt()
-    private val bgBottom = 0xFF1B2942.toInt()
-    private val cream = 0xFFFFF9EF.toInt()
-    private val subtle = 0xFFA9BAD6.toInt()
-    private val gold = 0xFFFFC651.toInt()
-    private val goldLight = 0xFFFFE3AE.toInt()
-    private val navy = 0xFF13264B.toInt()
-    private val red = 0xFFFF4D4F.toInt()
+    // —— 悬浮条沿用 APP 内部的浅色主题配色 ——
+    private val bgTop = AppPalette.SURFACE_CONTAINER_LOW
+    private val bgBottom = AppPalette.SURFACE
+    private val textColor = AppPalette.ON_SURFACE
+    private val subtle = AppPalette.ON_SURFACE_VARIANT
+    private val primary = AppPalette.PRIMARY
+    private val onPrimary = AppPalette.ON_PRIMARY
+    private val red = AppPalette.ERROR
 
     /** 圆角/胶囊纯色背景 */
     private fun solid(fill: Int, radiusDp: Int, strokeDp: Int = 0, stroke: Int = 0) =
@@ -89,7 +89,7 @@ class RecordingOverlay(
     private val statusDot = View(context)
 
     private val stateText = TextView(context).apply {
-        setTextColor(cream)
+        setTextColor(textColor)
         textSize = 12f
         typeface = Typeface.DEFAULT_BOLD
         isSingleLine = true
@@ -110,14 +110,14 @@ class RecordingOverlay(
         ellipsize = TextUtils.TruncateAt.END
     }
 
-    /** 步数徽标：半透明金色胶囊 */
+    /** 步数徽标：浅蓝胶囊 */
     private val stepChip = TextView(context).apply {
-        setTextColor(gold)
+        setTextColor(AppPalette.ON_PRIMARY_CONTAINER)
         textSize = 9f
         typeface = Typeface.DEFAULT_BOLD
         gravity = Gravity.CENTER
         setPadding(dp(7), dp(3), dp(7), dp(3))
-        background = solid(0x1AFFC651, 20)
+        background = solid(AppPalette.PRIMARY_CONTAINER, 20)
     }
 
     private val header = LinearLayout(context).apply {
@@ -136,14 +136,14 @@ class RecordingOverlay(
         addView(stepChip)
     }
 
-    // —— 底部按钮：胶囊「暂停/继续」+ 金色主按钮「完成」 ——
+    // —— 底部按钮：胶囊「暂停/继续」+ 蓝色主按钮「完成」 ——
 
     private val toggleLabel = TextView(context).apply {
         gravity = Gravity.CENTER
         textSize = 11f
         typeface = Typeface.DEFAULT_BOLD
-        setTextColor(cream)
-        background = solid(0x1AFFF9EF, 20, 1, 0x33FFF9EF)
+        setTextColor(textColor)
+        background = solid(AppPalette.SECONDARY_CONTAINER, 20, 1, AppPalette.OUTLINE_VARIANT)
     }
 
     private val finishLabel = TextView(context).apply {
@@ -151,8 +151,8 @@ class RecordingOverlay(
         gravity = Gravity.CENTER
         textSize = 11f
         typeface = Typeface.DEFAULT_BOLD
-        setTextColor(navy)
-        background = verticalGradient(goldLight, gold, 20)
+        setTextColor(onPrimary)
+        background = solid(primary, 20)
     }
 
     private val actions = LinearLayout(context).apply {
@@ -164,7 +164,7 @@ class RecordingOverlay(
 
     private val panel = LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL
-        background = verticalGradient(bgTop, bgBottom, 14, 1, 0x22FFF9EF)
+        background = verticalGradient(bgTop, bgBottom, 14, 1, AppPalette.OUTLINE_VARIANT)
         elevation = dp(10).toFloat()
         addView(header)
         addView(actions, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
@@ -359,7 +359,7 @@ class RecordingOverlay(
     fun beginExecuting() {
         setTouchLayerEnabled(false)
         stateText.text = "执行中…"
-        statusDot.background = oval(gold)
+        statusDot.background = oval(primary)
         hintText.text = "正在回放本步操作，请稍候"
         // 按钮暂时置灰，避免执行中误触
         actions.alpha = 0.55f
@@ -387,7 +387,7 @@ class RecordingOverlay(
         }
         statusDot.background = oval(when {
             recording -> red
-            ready -> gold
+            ready -> primary
             else -> subtle
         })
         stepChip.text = "$count 步"

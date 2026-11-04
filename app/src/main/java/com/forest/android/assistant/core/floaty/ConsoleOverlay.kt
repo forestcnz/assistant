@@ -2,7 +2,6 @@ package com.forest.android.assistant.core.floaty
 
 import android.annotation.SuppressLint
 import android.content.Context
-import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -16,6 +15,7 @@ import android.view.WindowManager
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import com.forest.android.assistant.ui.AppPalette
 
 /**
  * 悬浮控制台：浮在其他应用之上的实时日志面板。
@@ -144,7 +144,7 @@ object ConsoleOverlay {
 
         val root = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            background = rounded(0xFF1D2B46.toInt(), 16 * d, 1 * d, 0x26FFFFFF)
+            background = rounded(AppPalette.SURFACE, 16 * d, 1 * d, AppPalette.OUTLINE_VARIANT)
             clipToOutline = true
         }
 
@@ -156,7 +156,7 @@ object ConsoleOverlay {
         }
         val title = TextView(context).apply {
             text = "日志"
-            setTextColor(0xFFFFFFFF.toInt())
+            setTextColor(AppPalette.ON_SURFACE)
             textSize = 13f
             typeface = Typeface.DEFAULT_BOLD
         }
@@ -208,7 +208,7 @@ object ConsoleOverlay {
             visibility = View.GONE
         }
         footerText = TextView(context).apply {
-            setTextColor(0xFFBAC9E4.toInt())
+            setTextColor(AppPalette.ON_SURFACE_VARIANT)
             textSize = 11f
             typeface = Typeface.MONOSPACE
         }
@@ -216,9 +216,9 @@ object ConsoleOverlay {
         footer.addView(
             TextView(context).apply {
                 text = "■ 停止"
-                setTextColor(Color.WHITE)
+                setTextColor(AppPalette.ON_ERROR)
                 textSize = 12f
-                background = rounded(0xFFBA3D4C.toInt(), 10 * d, 0f, 0)
+                background = rounded(AppPalette.ERROR, 10 * d, 0f, 0)
                 setPadding((14 * d).toInt(), (7 * d).toInt(), (14 * d).toInt(), (7 * d).toInt())
                 isClickable = true
                 setOnClickListener {
@@ -387,12 +387,12 @@ object ConsoleOverlay {
         return TextView(context).apply {
             text = label
             textSize = 11f
-            setTextColor(if (selected) 0xFF2346A0.toInt() else 0xFFBAC9E4.toInt())
+            setTextColor(if (selected) AppPalette.ON_PRIMARY_CONTAINER else AppPalette.ON_SURFACE_VARIANT)
             background = rounded(
-                if (selected) 0xFFE7EEFF.toInt() else 0x1FFFFFFF,
+                if (selected) AppPalette.PRIMARY_CONTAINER else AppPalette.SECONDARY_CONTAINER,
                 12 * d,
                 1 * d,
-                if (selected) 0xFFE7EEFF.toInt() else 0x22FFFFFF
+                if (selected) AppPalette.PRIMARY else AppPalette.OUTLINE_VARIANT
             )
             setPadding((10 * d).toInt(), (4 * d).toInt(), (10 * d).toInt(), (4 * d).toInt())
             isClickable = true
@@ -497,19 +497,19 @@ object ConsoleOverlay {
         setPadding(0, 1, 0, 1)
     }
 
-    /** 级别着色：E=红、W=琥珀、D=灰、其余=白 */
+    /** 级别着色：E=错误红、W=主题青、D=次要灰、其余=正文色 */
     private fun colorFor(level: Char): Int = when (level) {
-        'E' -> 0xFFFFA8B1.toInt()
-        'W' -> 0xFFFFD399.toInt()
-        'D' -> 0xFFBAC9E4.toInt()
-        else -> 0xFFFFFFFF.toInt()
+        'E' -> AppPalette.ERROR
+        'W' -> AppPalette.TERTIARY
+        'D' -> AppPalette.ON_SURFACE_VARIANT
+        else -> AppPalette.ON_SURFACE
     }
 
     private fun actionText(context: Context, label: String, onClick: () -> Unit): TextView {
         val d = context.resources.displayMetrics.density
         return TextView(context).apply {
             text = label
-            setTextColor(0xFFFFFFFF.toInt())
+            setTextColor(AppPalette.ON_SURFACE)
             textSize = 13f
             gravity = Gravity.CENTER
             setPadding((10 * d).toInt(), (2 * d).toInt(), (10 * d).toInt(), (2 * d).toInt())
@@ -520,7 +520,7 @@ object ConsoleOverlay {
 
     private fun divider(context: Context): View {
         val d = context.resources.displayMetrics.density
-        return View(context).apply { setBackgroundColor(0x33FFFFFF) }.also {
+        return View(context).apply { setBackgroundColor(AppPalette.OUTLINE_VARIANT) }.also {
             it.layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, (1 * d).toInt().coerceAtLeast(1)
             )

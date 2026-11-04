@@ -21,6 +21,7 @@ import android.view.WindowManager
 import java.io.File
 import android.widget.Toast
 import com.forest.android.assistant.core.image.ScreenCapture
+import com.forest.android.assistant.ui.AppPalette
 import com.forest.android.assistant.ScreenshotExportActivity
 import com.forest.android.assistant.PickerCapturePermissionActivity
 import kotlin.math.max
@@ -322,17 +323,22 @@ object PickerOverlay {
         /** 当前模式标签区域（右上角，取消左侧） */
         private val modeRect = RectF()
 
+        // 拾取按钮与信息卡片使用 APP 表面色；准星和暗化遮罩保持屏幕上的对比度。
         private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             textSize = 14f * density
-            color = Color.WHITE
+            color = AppPalette.ON_SURFACE
             isFakeBoldText = true
         }
         private val subPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             textSize = 11f * density
-            color = 0xFFBAC9E4.toInt()
+            color = AppPalette.ON_SURFACE_VARIANT
+        }
+        private val hintPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            textSize = 11f * density
+            color = Color.WHITE
         }
         private val panelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = 0xF21D2B46.toInt()
+            color = 0xF5FFFFFF.toInt()
         }
         private val crossPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = 0xFFFFFFFF.toInt()
@@ -515,7 +521,7 @@ object PickerOverlay {
             } else {
                 height - margin
             }
-            canvas.drawText(hint, textX, textY, subPaint)
+            canvas.drawText(hint, textX, textY, hintPaint)
         }
 
         private fun drawButton(canvas: Canvas, rect: RectF, label: String) {

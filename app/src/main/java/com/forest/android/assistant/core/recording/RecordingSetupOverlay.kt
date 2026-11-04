@@ -2,7 +2,7 @@ package com.forest.android.assistant.core.recording
 
 import android.content.Context
 import android.content.Intent
-import android.graphics.Color
+import android.content.res.ColorStateList
 import android.graphics.PixelFormat
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
@@ -24,6 +24,7 @@ import com.forest.android.assistant.core.floaty.FloatyManager
 import com.forest.android.assistant.core.gesture.GestureClient
 import com.forest.android.assistant.core.image.ScreenCapture
 import com.forest.android.assistant.core.task.TaskManager
+import com.forest.android.assistant.ui.AppPalette
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -36,9 +37,10 @@ import java.util.Locale
 
 /** A small system overlay that starts recording without bringing MainActivity to the foreground. */
 object RecordingSetupOverlay {
-    private const val BG = 0xFF1D2B46.toInt()
-    private const val TEXT = Color.WHITE
-    private const val SUBTLE = 0xFFBAC9E4.toInt()
+    // 录制配置弹窗与 APP 页面使用同一套表面色和文字色。
+    private const val BG = AppPalette.SURFACE
+    private const val TEXT = AppPalette.ON_SURFACE
+    private const val SUBTLE = AppPalette.ON_SURFACE_VARIANT
     private var window: View? = null
     private var windowManager: WindowManager? = null
 
@@ -61,6 +63,7 @@ object RecordingSetupOverlay {
             background = GradientDrawable().apply {
                 setColor(BG)
                 cornerRadius = dp(16).toFloat()
+                setStroke(dp(1), AppPalette.OUTLINE_VARIANT)
             }
             elevation = dp(12).toFloat()
         }
@@ -135,8 +138,17 @@ object RecordingSetupOverlay {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.END or Gravity.CENTER_VERTICAL
         }
-        val cancel = Button(app).apply { text = "取消"; setOnClickListener { scope.cancel(); hide() } }
-        val start = Button(app).apply { text = "显示录制悬浮条" }
+        val cancel = Button(app).apply {
+            text = "取消"
+            backgroundTintList = ColorStateList.valueOf(AppPalette.SECONDARY_CONTAINER)
+            setTextColor(TEXT)
+            setOnClickListener { scope.cancel(); hide() }
+        }
+        val start = Button(app).apply {
+            text = "显示录制悬浮条"
+            backgroundTintList = ColorStateList.valueOf(AppPalette.PRIMARY)
+            setTextColor(AppPalette.ON_PRIMARY)
+        }
         actions.addView(cancel)
         actions.addView(start)
         card.addView(actions, LinearLayout.LayoutParams(-1, dp(52)).apply { topMargin = dp(8) })
