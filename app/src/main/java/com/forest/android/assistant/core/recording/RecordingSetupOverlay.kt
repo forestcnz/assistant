@@ -2,7 +2,7 @@ package com.forest.android.assistant.core.recording
 
 import android.content.Context
 import android.content.Intent
-import android.graphics.Color
+import android.content.res.ColorStateList
 import android.graphics.PixelFormat
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
@@ -18,11 +18,13 @@ import android.widget.RadioGroup
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
+import com.forest.android.assistant.R
 import com.forest.android.assistant.core.engine.ScriptRunner
 import com.forest.android.assistant.core.floaty.FloatyManager
 import com.forest.android.assistant.core.gesture.GestureClient
 import com.forest.android.assistant.core.image.ScreenCapture
 import com.forest.android.assistant.core.task.TaskManager
+import com.forest.android.assistant.ui.AppPalette
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -35,9 +37,10 @@ import java.util.Locale
 
 /** A small system overlay that starts recording without bringing MainActivity to the foreground. */
 object RecordingSetupOverlay {
-    private const val BG = 0xFF1D2B46.toInt()
-    private const val TEXT = Color.WHITE
-    private const val SUBTLE = 0xFFBAC9E4.toInt()
+    // 录制配置弹窗与 APP 页面使用同一套表面色和文字色。
+    private const val BG = AppPalette.SURFACE
+    private const val TEXT = AppPalette.ON_SURFACE
+    private const val SUBTLE = AppPalette.ON_SURFACE_VARIANT
     private var window: View? = null
     private var windowManager: WindowManager? = null
 
@@ -60,6 +63,7 @@ object RecordingSetupOverlay {
             background = GradientDrawable().apply {
                 setColor(BG)
                 cornerRadius = dp(16).toFloat()
+                setStroke(dp(1), AppPalette.OUTLINE_VARIANT)
             }
             elevation = dp(12).toFloat()
         }
@@ -67,6 +71,10 @@ object RecordingSetupOverlay {
             text = "录制操作"
             textSize = 18f
             setTextColor(TEXT)
+            // 与录制悬浮条一致的 logo
+            setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_record_logo, 0, 0, 0)
+            compoundDrawablePadding = dp(8)
+            gravity = Gravity.CENTER_VERTICAL
         }
         card.addView(title)
         val name = EditText(app).apply {
@@ -83,6 +91,8 @@ object RecordingSetupOverlay {
             orientation = RadioGroup.HORIZONTAL
             setPadding(0, dp(4), 0, dp(4))
         }
+        // 两种模式：坐标模式额外汇出找图备用素材；图片模式用于找图回放
+        // （纯坐标录制改为悬浮面板上的一键入口，不在本弹窗里选）
         val coordinate = RadioButton(app).apply { text = "记录坐标"; setTextColor(TEXT); id = View.generateViewId(); isChecked = true }
         val image = RadioButton(app).apply { text = "记录图片"; setTextColor(TEXT); id = View.generateViewId() }
         modes.addView(coordinate, RadioGroup.LayoutParams(0, -2, 1f))
@@ -119,7 +129,8 @@ object RecordingSetupOverlay {
         val searchRegionHeight = addSizeField(regionFields, "页面范围高度（像素）", DEFAULT_SEARCH_REGION_SIZE)
         card.addView(regionFields, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(6) })
         card.addView(TextView(app).apply {
-            text = "点击开始后在当前应用真实执行操作。每步按设定的页面范围截图并用于找图；范围须覆盖截图尺寸，超出屏幕时自动调整。"
+            text = "点击开始后在当前应用真实执行操作。每步按设定的页面范围截取模板素材；" +
+                "范围须覆盖截图尺寸，超出屏幕时自动调整。纯坐标（不截图）录制请用悬浮面板的「纯坐标录制」入口。"
             textSize = 12f
             setTextColor(SUBTLE)
         }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(6) })
@@ -127,14 +138,24 @@ object RecordingSetupOverlay {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.END or Gravity.CENTER_VERTICAL
         }
-        val cancel = Button(app).apply { text = "取消"; setOnClickListener { scope.cancel(); hide() } }
-        val start = Button(app).apply { text = "显示录制悬浮条" }
+        val cancel = Button(app).apply {
+            text = "取消"
+            backgroundTintList = ColorStateList.valueOf(AppPalette.SECONDARY_CONTAINER)
+            setTextColor(TEXT)
+            setOnClickListener { scope.cancel(); hide() }
+        }
+        val start = Button(app).apply {
+            text = "显示录制悬浮条"
+            backgroundTintList = ColorStateList.valueOf(AppPalette.PRIMARY)
+            setTextColor(AppPalette.ON_PRIMARY)
+        }
         actions.addView(cancel)
         actions.addView(start)
         card.addView(actions, LinearLayout.LayoutParams(-1, dp(52)).apply { topMargin = dp(8) })
 
         start.setOnClickListener {
             val taskName = name.text.toString().trim()
+            val mode = if (modes.checkedRadioButtonId == image.id) RecordingMode.IMAGE else RecordingMode.COORDINATE
             val width = cropWidth.text.toString().toIntOrNull()
             val height = cropHeight.text.toString().toIntOrNull()
             val regionWidth = searchRegionWidth.text.toString().toIntOrNull()
@@ -160,9 +181,7 @@ object RecordingSetupOverlay {
                         val ready = withContext(Dispatchers.IO) { ScreenCapture.requestBlocking() }
                         if (ready) {
                             try {
-                                RecordingService.start(app, taskName, width, height,
-                                    if (modes.checkedRadioButtonId == image.id) RecordingMode.IMAGE else RecordingMode.COORDINATE,
-                                    regionWidth, regionHeight)
+                                RecordingService.start(app, taskName, width, height, mode, regionWidth, regionHeight)
                                 hide()
                                 scope.cancel()
                             } catch (e: Exception) {
@@ -211,5 +230,37 @@ object RecordingSetupOverlay {
         window = null
         try { if (old != null) windowManager?.removeView(old) } catch (_: Exception) { }
         windowManager = null
+    }
+
+    /**
+     * 悬浮面板的「纯坐标录制」快捷入口：不弹配置窗，直接用默认尺寸开始录制。
+     * 纯坐标不截图、不需要截屏授权，任务名按时间自动生成，录制中可随时在悬浮条暂停/完成。
+     */
+    fun startPure(context: Context) {
+        val app = context.applicationContext
+        if (RecordingService.active) {
+            Toast.makeText(app, "已有录制正在进行", Toast.LENGTH_LONG).show()
+            return
+        }
+        if (ScriptRunner.state.value.running) {
+            Toast.makeText(app, "请先停止正在运行的任务", Toast.LENGTH_LONG).show()
+            return
+        }
+        if (!GestureClient.available()) {
+            Toast.makeText(app, "请先开启无障碍服务，再从悬浮窗开始录制", Toast.LENGTH_LONG).show()
+            return
+        }
+        val name = "纯坐标_" + SimpleDateFormat("MMdd_HHmmss", Locale.ROOT).format(Date())
+        if (TaskManager.taskDir(app, name).exists()) {
+            Toast.makeText(app, "同一秒内已有同名录制，请稍后重试", Toast.LENGTH_LONG).show()
+            return
+        }
+        try {
+            // 纯坐标模式不截图，尺寸参数只作为占位值，不参与录制
+            RecordingService.start(app, name, 100, 100, RecordingMode.COORDINATE_ONLY,
+                DEFAULT_SEARCH_REGION_SIZE, DEFAULT_SEARCH_REGION_SIZE)
+        } catch (e: Exception) {
+            Toast.makeText(app, "录制准备失败：${e.message}", Toast.LENGTH_LONG).show()
+        }
     }
 }

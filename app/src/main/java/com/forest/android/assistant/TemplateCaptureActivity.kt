@@ -122,7 +122,7 @@ class TemplateCaptureActivity : ComponentActivity() {
                 }
             }
             if (frame == null) {
-                error = "截屏不可用：请先在工具页选择截屏方式，并完成所需授权"
+                error = "截屏不可用：请先在设置页选择截屏方式，并完成所需授权"
             } else {
                 bitmap = frame
             }

@@ -9,6 +9,9 @@ import kotlin.math.sqrt
 internal object TemplateMatcher {
     data class Match(val x: Int, val y: Int, val score: Double)
     data class Rect(val left: Int, val top: Int, val right: Int, val bottom: Int)
+
+    /** 一次匹配的汇总：命中列表、最高分候选（坐标已回到原图）、粗搜层与候选数 */
+    data class Summary(val hits: List<Match>, val best: Match?, val scale: Int, val coarse: Int)
     private const val MIN_VARIANCE = 1.0
     private const val PACKED_MAX = 0xFFFF_FFFFL
     private const val PACKED_LOW_MASK = 0xFFFF_FFFFL
@@ -41,10 +44,14 @@ internal object TemplateMatcher {
         logger: ((Char, String) -> Unit)? = null,
         screenLevelProvider: ((Int) -> Gray)? = null,
         /** 模板来源名称（文件名），仅用于日志 */
-        tplName: String? = null
+        tplName: String? = null,
+        /** 汇总回调：命中列表与最高分候选（含坐标），供调用方统一出日志 */
+        onSummary: ((Summary) -> Unit)? = null
     ): List<Match> {
         // 日志前缀：模板来源文件名，便于区分多个模板
         val logPrefix = tplName?.let { "$it " } ?: ""
+        // 粗搜倍数：让粗图模板边长约 12px，兼顾速度与特征保留
+        val scale = max(1, min(prepared.gray.w, prepared.gray.h) / 12)
         if (max <= 0 || prepared.gray.w > grayScreen.w || prepared.gray.h > grayScreen.h) {
             // 模板比搜索区还大属于不可匹配，同样按失败记入 W
             logger?.invoke(
@@ -52,6 +59,8 @@ internal object TemplateMatcher {
                 "${logPrefix}找图失败 tpl=${prepared.gray.w}x${prepared.gray.h} " +
                         "region=${grayScreen.w}x${grayScreen.h} 原因=模板大于搜索区"
             )
+            // 该分支没有任何候选，汇总里的最高分为 null
+            onSummary?.invoke(Summary(emptyList(), null, scale, 0))
             return emptyList()
         }
         val tw = prepared.gray.w
@@ -59,9 +68,6 @@ internal object TemplateMatcher {
         val grayTpl = prepared.gray
         val tplStats = prepared.stats
         val localRegion = Rect(0, 0, grayScreen.w, grayScreen.h)
-
-        // 粗搜倍数：让粗图模板边长约 12px，兼顾速度与特征保留
-        val scale = max(1, min(tw, th) / 12)
         val cs = screenLevelProvider?.invoke(scale) ?: grayScreen.downsample(scale)
         val ct = prepared.level(scale, grayScreen.checkCancelled)
         val coarseRegion = Rect(0, 0, cs.w, cs.h)
@@ -101,6 +107,10 @@ internal object TemplateMatcher {
             )
         }
 
+        // 汇总回传：best 是阈值过滤前的最高分候选，命中为空时也要用它说明差距；
+        // 与 hits 一致，最高分候选的坐标同样加回 offset，便于调用方直接用于日志。
+        onSummary?.invoke(Summary(hits, best?.let { Match(it.x + offsetX, it.y + offsetY, it.score) },
+            scale, coarse.size))
         return hits
     }
 

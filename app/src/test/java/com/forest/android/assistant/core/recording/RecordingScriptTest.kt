@@ -11,7 +11,7 @@ class RecordingScriptTest {
         val script = RecordingScript.generate(900, 1600, listOf(RecordedOperation(
             RecordedOperation.Kind.CLICK, listOf(point), 40,
             image = "images/step_001.png", crop = RecordedCrop.around(point, 100, 900, 1600),
-            searchRegion = region, contextImage = "contexts/step_001.png"
+            searchRegion = region
         )), RecordingMode.IMAGE)
         assertTrue(script.contains("// if (!click(890, 1590, 40))"))
         assertTrue(script.contains("var region1 = [300, 1000, 600, 600];"))
@@ -62,13 +62,27 @@ class RecordingScriptTest {
 
     @Test fun recordedPageRangeTakesPrecedenceOverConfiguredDimensions() {
         val step = RecordedOperation(RecordedOperation.Kind.CLICK, listOf(RecordedPoint(240, 550)), 40,
-            searchRegion = RecordedCrop(80, 200, 320, 700), contextImage = "contexts/step_001.png")
+            searchRegion = RecordedCrop(80, 200, 320, 700))
         val script = RecordingScript.generate(900, 1600, listOf(step),
             searchRegionWidth = 800, searchRegionHeight = 350)
 
         assertTrue(script.contains("var region1 = [80, 200, 320, 700];"))
         assertTrue(script.contains("320×700 页面范围"))
-        assertTrue(script.contains("页面范围截图：contexts/step_001.png"))
+        // 不再保存页面范围大图，脚本里也不应出现参考图注释
+        assertFalse(script.contains("页面范围截图"))
+    }
+
+    @Test fun pureCoordinateModeKeepsScriptCoordinateOnly() {
+        // 纯坐标模式：只输出坐标操作，不带页面范围变量与找图备用段落
+        val script = RecordingScript.generate(900, 1600, listOf(RecordedOperation(
+            RecordedOperation.Kind.CLICK, listOf(RecordedPoint(890, 1590)), 40
+        )), RecordingMode.COORDINATE_ONLY)
+
+        assertTrue(script.contains("// 回放方式：纯坐标"))
+        assertTrue(script.contains("if (!click(890, 1590, 40)) console.error"))
+        assertFalse(script.contains("var region1"))
+        assertFalse(script.contains("findImage"))
+        assertFalse(script.contains("throw"))
     }
 
     @Test fun edgeCropKeepsSizeAndOriginalTapOffset() {
@@ -130,6 +144,34 @@ class RecordingScriptTest {
         assertTrue(script.contains("sleep(1200);"))
         assertFalse(script.contains("sleep(1300)"))
         assertTrue(script.contains("swipe(1, 2, 3, 4, 650)"))
-        assertTrue(script.contains("throw new Error"))
+        // 回放失败只记录错误日志，生成脚本中不应出现 throw
+        assertFalse(script.contains("throw new"))
+        assertTrue(script.contains("console.error(\"步骤 1 执行失败\")"))
+    }
+
+    @Test fun imageModeLogsErrorsInsteadOfThrowing() {
+        // 图片模式的各类失败都改为错误日志，且不再出现 throw new
+        val point = RecordedPoint(890, 1590)
+        val script = RecordingScript.generate(900, 1600, listOf(RecordedOperation(
+            RecordedOperation.Kind.CLICK, listOf(point), 40,
+            image = "images/step_001.png", crop = RecordedCrop.around(point, 100, 900, 1600)
+        )), RecordingMode.IMAGE)
+        assertFalse(script.contains("throw"))
+        assertTrue(script.contains("console.error(\"截屏授权失败\")"))
+        assertTrue(script.contains("console.error(\"步骤 1 读取图片失败\")"))
+        assertTrue(script.contains("console.error(\"步骤 1 未找到图片\")"))
+        assertTrue(script.contains("console.error(\"步骤 1 点击失败\")"))
+        // 找图与点击仍需限制在步骤记录的页面范围内
+        assertTrue(script.contains("threshold: 0.9, region: region1"))
+    }
+
+    @Test fun coordinateFallbackBlockAlsoAvoidsThrow() {
+        // 坐标模式下被注释的找图备用段同样不能残留 throw new
+        val script = RecordingScript.generate(360, 640, listOf(RecordedOperation(
+            RecordedOperation.Kind.CLICK, listOf(RecordedPoint(20, 30)), 50,
+            image = "images/step_001.png", crop = RecordedCrop(0, 0, 100, 100)
+        )))
+        assertFalse(script.contains("throw"))
+        assertTrue(script.contains("console.error(\"步骤 1 未找到图片\")"))
     }
 }

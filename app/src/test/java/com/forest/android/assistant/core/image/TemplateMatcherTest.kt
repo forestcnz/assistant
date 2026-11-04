@@ -240,4 +240,32 @@ class TemplateMatcherTest {
         assertEquals('W', level)
         assertTrue("应提示模板大于搜索区: $msg", msg.contains("模板大于搜索区"))
     }
+
+    @Test fun summaryReportsBestCandidateWithAppliedOffset() {
+        // 汇总回传的最高分应带上与命中一致的偏移和坐标，供上层统一出日志
+        val (screen, template) = fixture(61, 47, 37, 29)
+        val prepared = TemplateMatcher.PreparedTemplate(template)
+        var summary: TemplateMatcher.Summary? = null
+        val hits = TemplateMatcher.find(screen, prepared, 0.9, 1, 37, 29,
+            onSummary = { summary = it })
+        assertEquals(1, hits.size)
+        val best = summary?.best
+        assertNotNull(best)
+        assertEquals(hits.single().score, best!!.score, 1e-9)
+        assertEquals(hits.single().x, best.x)
+        assertEquals(hits.single().y, best.y)
+    }
+
+    @Test fun summaryKeepsBestScoreWhenBelowThreshold() {
+        // 未命中时也要回传最高分，上层据此说明差距
+        val template = Gray(24, 20, IntArray(24 * 20) { Random(it).nextInt(256) })
+        val screen = Gray(120, 90, IntArray(120 * 90) { 200 })
+        val prepared = TemplateMatcher.PreparedTemplate(template)
+        var summary: TemplateMatcher.Summary? = null
+        assertTrue(TemplateMatcher.find(screen, prepared, 0.99, 1,
+            onSummary = { summary = it }).isEmpty())
+        val best = summary?.best
+        assertNotNull(best)
+        assertTrue("最高分应低于阈值: ${best!!.score}", best.score < 0.99)
+    }
 }

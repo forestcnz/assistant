@@ -111,16 +111,7 @@ object ScriptRunner {
         FloatyManager.onStopClicked = { stop() }
         // 悬浮球面板选任务 → 按点选顺序依次运行（只选一个即普通运行）
         FloatyManager.onTasksSelected = { names -> appContext?.let { runQueue(it, names) } }
-        // 悬浮球面板[关闭悬浮窗]：运行中先停止任务，再隐藏并记下用户意愿（下次启动不再自动显示）
-        FloatyManager.onLauncherClose = {
-            appContext?.let { ctx ->
-                if (_state.value.running) stop()
-                _launcherEnabled.value = false
-                FloatyManager.setEnabledByUser(ctx, false)
-                FloatyManager.hideLauncher()
-                addLog('I', "悬浮球已关闭（下次启动不再自动显示，可在「工具」页重新开启）")
-            }
-        }
+        // 悬浮球面板的[关闭悬浮窗]入口已移除；停止、隐藏及开关意愿统一由应用设置处理。
         // 任务列表来源（悬浮球每次展开时实时读取）
         FloatyManager.taskProvider = {
             appContext?.let { TaskManager.listTasks(it).map { t -> t.name } } ?: emptyList()
@@ -183,7 +174,7 @@ object ScriptRunner {
             _launcherEnabled.value = false
             FloatyManager.setEnabledByUser(app, false)
             FloatyManager.hideLauncher()
-            addLog('I', "悬浮球已隐藏（下次启动不再自动显示，可在「工具」页重新开启）")
+            addLog('I', "悬浮球已隐藏（下次启动不再自动显示，可在「设置」页重新开启）")
         } else {
             if (!FloatyManager.showLauncher(app)) {
                 addLog('W', "悬浮球显示失败：请先授权悬浮窗权限")
@@ -514,7 +505,7 @@ object ScriptRunner {
         }
 
         if (ScreenCapture.activeChannel(context) == null) {
-            addLog('W', "前置检查：尚未选择截屏方式，请先在工具页手动选择")
+            addLog('W', "前置检查：尚未选择截屏方式，请先在设置页手动选择")
             addLog('W', "未选择前无法截屏，请跳过找图/找色步骤")
         } else if (!ScreenCapture.captureAvailable(context)) {
             addLog('W', "前置检查：所选截屏方式未就绪，请检查权限或手动更换")
@@ -570,7 +561,7 @@ object ScriptRunner {
 
     /**
      * 通知栏「隐藏悬浮球」等外部入口关闭悬浮球后调用（floaty 模块不依赖 engine，
-     * 由 Service 反向通知同步开关状态，避免「工具」页开关显示与实际不符）。
+     * 由 Service 反向通知同步开关状态，避免「设置」页开关显示与实际不符）。
      */
     fun onLauncherHiddenByUser() {
         _launcherEnabled.value = false

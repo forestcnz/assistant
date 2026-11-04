@@ -21,6 +21,7 @@ import android.view.WindowManager
 import java.io.File
 import android.widget.Toast
 import com.forest.android.assistant.core.image.ScreenCapture
+import com.forest.android.assistant.ui.AppPalette
 import com.forest.android.assistant.ScreenshotExportActivity
 import com.forest.android.assistant.PickerCapturePermissionActivity
 import kotlin.math.max
@@ -30,15 +31,25 @@ import kotlin.math.abs
 /**
  * 屏幕拾取工具：拖动准星取点，或拖拽框选区域，生成脚本代码或保存截图。
  * - 坐标模式：生成 `click(x, y);`
- * - 取色模式：从最近一帧截屏读取该点像素，生成 `images.findColor(captureScreen(), "#rrggbb", ...)`
+ * - 取色模式：从打开工具时的冻结画面本地读像素（移动时不再截屏），生成
+ *   `images.findColor(captureScreen(), "#rrggbb", ...)`
  * - 范围模式：框选屏幕区域，生成 `var region = [x, y, width, height];`，无需截屏授权。
  *
- * 注意：取色准确性依赖“被采样像素未被悬浮层本身覆盖”，因此准星中心留空且不做全屏压暗。
+ * 注意：取色与截图共用同一张冻结画面，显示的就是采样源，因此移动时颜色即时跟随。
  * 对应设计 docs/README.md 第 4.5 节「坐标拾取器 / 取色器」。
  */
 object PickerOverlay {
 
     private const val TAG = "ScriptJs"
+
+    /** 隐藏浮层后留给系统合成的时间：确保冻结画面里不再有悬浮球/日志面板 */
+    private const val PICKER_OVERLAY_SETTLE_MS = 100L
+
+    /** 等待“隐藏浮层后的新帧”的上限；超时就按截图失败处理，避免长时间卡住 */
+    private const val PICKER_CAPTURE_TIMEOUT_MS = 800L
+
+    /** 授权页关闭后等原任务重新显示的短延迟（原为 250ms） */
+    private const val PERMISSION_RETURN_DELAY_MS = 90L
 
     enum class Mode {
         /** 取坐标，生成 click(x, y) */
@@ -97,47 +108,50 @@ object PickerOverlay {
                 false
             }
         }
-        if (mode == Mode.SCREENSHOT) {
-            // 先隐藏应用自己的控制浮层，截图关键帧不应包含悬浮球/日志面板。
-            restoreLauncherAfterScreenshot = FloatyManager.isLauncherShowing()
-            restoreConsoleAfterScreenshot = ConsoleOverlay.isShowing()
-            screenshotContext = context.applicationContext
-            if (restoreLauncherAfterScreenshot) FloatyManager.hideLauncher(stopKeepAlive = false)
-            if (restoreConsoleAfterScreenshot) ConsoleOverlay.hide()
-            val hiddenAt = SystemClock.uptimeMillis()
+        // 进入拾取：收起任务面板、隐藏悬浮球与日志面板（只切可见性），结束后统一恢复。
+        // 必须在隐藏之前记下“原本是否显示”，否则取消后会连悬浮球一起消失。
+        restoreLauncherAfterScreenshot = FloatyManager.prepareForPicker()
+        restoreConsoleAfterScreenshot = ConsoleOverlay.isShowing() &&
+            ConsoleOverlay.hideForScreenshot()
+        screenshotContext = context.applicationContext
 
-            // 先截取浮层移除后的新帧，再显示截图层；后续框选和裁剪始终使用这张冻结画面。
-            screenshotStarting = true
-            Thread {
-                val frame = try {
-                    Thread.sleep(100)
-                    ScreenCapture.capture(newerThanUptimeMs = hiddenAt)
-                } catch (_: InterruptedException) {
-                    Thread.currentThread().interrupt()
-                    null
+        // 取色与截图需要一帧冻结画面（之后框选/取色/裁剪都基于它）
+        val needsFrame = mode == Mode.SCREENSHOT || mode == Mode.COLOR
+        if (!needsFrame) return attachPicker(context, mode, null)
+
+        val hiddenAt = SystemClock.uptimeMillis()
+        // 先截取浮层隐藏后的新帧，再显示拾取层；后续框选、取色、裁剪始终使用这张冻结画面。
+        screenshotStarting = true
+        Thread {
+            val frame = try {
+                // 浮层隐藏需要一两帧才从合成画面消失：先留出时间，再要求晚于 hiddenAt 的新帧
+                Thread.sleep(PICKER_OVERLAY_SETTLE_MS)
+                ScreenCapture.capture(PICKER_CAPTURE_TIMEOUT_MS, newerThanUptimeMs = hiddenAt)
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+                null
+            }
+            mainHandler.post {
+                screenshotStarting = false
+                if (frame == null) {
+                    restoreScreenshotOverlays()
+                    Toast.makeText(context, "截图失败：无法获取屏幕画面", Toast.LENGTH_LONG).show()
+                } else if (!attachPicker(context, mode, frame)) {
+                    restoreScreenshotOverlays()
                 }
-                mainHandler.post {
-                    screenshotStarting = false
-                    if (frame == null) {
-                        restoreScreenshotOverlays()
-                        Toast.makeText(context, "截图失败：无法获取屏幕画面", Toast.LENGTH_LONG).show()
-                    } else if (!attachPicker(context, mode, frame)) {
-                        restoreScreenshotOverlays()
-                    }
-                }
-            }.start()
-            return true
-        }
-        return attachPicker(context, mode, null)
+            }
+        }.start()
+        return true
     }
 
     /** 独立授权页结束后，待原任务重新显示，再从其画面开始拾取。 */
     fun onCapturePermissionResult(context: Context, mode: Mode, granted: Boolean) {
         permissionStarting = false
         if (granted) {
+            // 授权页关闭后原任务需要一两帧才能重新显示，短延迟即可，不再固定等 250ms
             mainHandler.postDelayed({
                 if (pickerView == null && !screenshotStarting) show(context, mode)
-            }, 250)
+            }, PERMISSION_RETURN_DELAY_MS)
         } else {
             Toast.makeText(
                 context,
@@ -193,11 +207,9 @@ object PickerOverlay {
         restoreConsoleAfterScreenshot = false
         if (context == null || (!restoreLauncher && !restoreConsole)) return
         mainHandler.post {
-            if (restoreLauncher &&
-                (FloatyManager.isShowing() || FloatyManager.isEnabledByUser(context))) {
-                FloatyManager.showLauncher(context)
-            }
-            if (restoreConsole) ConsoleOverlay.show(context)
+            // 悬浮球优先只切回可见性；窗口已被其他流程摧除时重建
+            if (restoreLauncher) FloatyManager.restoreAfterPicker(context)
+            if (restoreConsole && !ConsoleOverlay.restoreAfterScreenshot()) ConsoleOverlay.show(context)
         }
     }
 
@@ -283,13 +295,6 @@ object PickerOverlay {
 
         private var color = 0
         private var hasColor = false
-        private var sampling = false
-
-        /** 用户已点击但取色尚未返回：取样完成后自动确认 */
-        private var pendingConfirm = false
-
-        /** 截屏不可用（未授权）时提示，而不是一直显示“取色中” */
-        private var captureMissing = false
 
         private var selectionStartX = 0f
         private var selectionStartY = 0f
@@ -318,17 +323,22 @@ object PickerOverlay {
         /** 当前模式标签区域（右上角，取消左侧） */
         private val modeRect = RectF()
 
+        // 拾取按钮与信息卡片使用 APP 表面色；准星和暗化遮罩保持屏幕上的对比度。
         private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             textSize = 14f * density
-            color = Color.WHITE
+            color = AppPalette.ON_SURFACE
             isFakeBoldText = true
         }
         private val subPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             textSize = 11f * density
-            color = 0xFFBAC9E4.toInt()
+            color = AppPalette.ON_SURFACE_VARIANT
+        }
+        private val hintPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            textSize = 11f * density
+            color = Color.WHITE
         }
         private val panelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = 0xF21D2B46.toInt()
+            color = 0xF5FFFFFF.toInt()
         }
         private val crossPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = 0xFFFFFFFF.toInt()
@@ -367,6 +377,8 @@ object PickerOverlay {
                 drawSelection(canvas)
                 return
             }
+            // 取色基于冻结画面：把它画出来，保证“看到的像素”就是“取到的颜色”
+            if (mode == Mode.COLOR) drawFrozenFrame(canvas)
             val gap = 9f * density
             val arm = 46f * density
             // 准星（中心留空，避免遮挡被采样像素）
@@ -405,7 +417,6 @@ object PickerOverlay {
                 lines.add(
                     when {
                         hasColor -> "#%06x".format(color and 0xFFFFFF)
-                        captureMissing -> "需截屏授权"
                         else -> "取色中…"
                     }
                 )
@@ -445,20 +456,24 @@ object PickerOverlay {
             )
         }
 
+        /** 把冻结画面按窗口偏移画到画布上（取色与框选共用） */
+        private fun drawFrozenFrame(canvas: Canvas) {
+            val frame = frozenFrame ?: return
+            canvas.drawBitmap(
+                frame,
+                null,
+                RectF(
+                    -location[0].toFloat(),
+                    -location[1].toFloat(),
+                    frame.width - location[0].toFloat(),
+                    frame.height - location[1].toFloat()
+                ),
+                bitmapPaint
+            )
+        }
+
         private fun drawSelection(canvas: Canvas) {
-            frozenFrame?.let { frame ->
-                canvas.drawBitmap(
-                    frame,
-                    null,
-                    RectF(
-                        -location[0].toFloat(),
-                        -location[1].toFloat(),
-                        frame.width - location[0].toFloat(),
-                        frame.height - location[1].toFloat()
-                    ),
-                    bitmapPaint
-                )
-            }
+            drawFrozenFrame(canvas)
             val btnW = 76f * density
             val btnH = 38f * density
             val btnGap = 10f * density
@@ -506,7 +521,7 @@ object PickerOverlay {
             } else {
                 height - margin
             }
-            canvas.drawText(hint, textX, textY, subPaint)
+            canvas.drawText(hint, textX, textY, hintPaint)
         }
 
         private fun drawButton(canvas: Canvas, rect: RectF, label: String) {
@@ -636,38 +651,16 @@ object PickerOverlay {
             return true
         }
 
-        /** 取最近一帧截屏在准星处的像素（不阻塞 UI 线程；坐标为屏幕坐标） */
+        /** 取冻结画面里准星处的像素：本地读取，无截屏开销，移动时立即更新 */
         private fun sample() {
-            if (sampling) return
-            sampling = true
+            val frame = frozenFrame ?: return
+            // 首次绘制前 location 可能还没初始化，这里现取一次窗口原点
+            getLocationOnScreen(location)
             val x = toScreenX(px)
             val y = toScreenY(py)
-            Thread {
-                // 取最近一帧即可（timeout=0 不等待），移动过程中会持续有新帧
-                val frame = ScreenCapture.capture(0)
-                val c = if (frame != null && x >= 0 && y >= 0 && x < frame.width && y < frame.height) {
-                    frame.getPixel(x, y)
-                } else {
-                    null
-                }
-                post {
-                    sampling = false
-                    if (c != null) {
-                        color = c
-                        hasColor = true
-                        captureMissing = false
-                        // 用户点了一下但当时还没取到颜色：这次取样完成后自动完成确认，
-                        // 让取色和取坐标一样「单击一次即出结果」
-                        if (pendingConfirm) {
-                            pendingConfirm = false
-                            confirm()
-                        }
-                    } else {
-                        captureMissing = !ScreenCapture.captureAvailableCached(context)
-                    }
-                    invalidate()
-                }
-            }.start()
+            if (x < 0 || y < 0 || x >= frame.width || y >= frame.height) return
+            color = frame.getPixel(x, y)
+            hasColor = true
         }
 
         /** 点击确认：生成代码（坐标为屏幕坐标，与 click/gesture API 一致） */
@@ -678,16 +671,10 @@ object PickerOverlay {
             when (mode) {
                 Mode.POINT -> onResult("click($x, $y);")
                 Mode.COLOR -> {
+                    // 冻结画面本地取色：点击时立即有结果，无需异步等截屏
+                    sample()
                     if (!hasColor) {
-                        // 首次点击时异步取样可能还没回来：记下待确认，取样完成后自动确认
-                        pendingConfirm = true
-                        Toast.makeText(
-                            context,
-                            if (captureMissing) "取色需要截屏授权，请先在主界面「截屏」去授权"
-                            else "正在取色…",
-                            Toast.LENGTH_SHORT
-                        ).show()
-                        sample()
+                        Toast.makeText(context, "取色失败，请重新打开取色工具", Toast.LENGTH_SHORT).show()
                         return
                     }
                     val hex = "#%06x".format(color and 0xFFFFFF)

@@ -31,5 +31,7 @@ sdxn-*.png
 !.agents/skills/
 .agents/skills/*
 !.agents/skills/git-push-preflight/
+# 本仓库共享的 Android 本地编译 skill
+.agents/skills/android-local-build/
 tests
 .tasks

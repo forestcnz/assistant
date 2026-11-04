@@ -50,9 +50,9 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxValue
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
@@ -180,10 +180,10 @@ class MainActivity : ComponentActivity() {
     /** 各任务的定时设置（列表展示用） */
     private var schedules by mutableStateOf(emptyMap<String, ScheduleManager.Schedule>())
 
-    /** 主导航：任务 / 工具 / 日志 / 权限；恢复旋转前的页面。 */
+    /** 主导航：任务 / 日志 / 权限 / 设置；恢复旋转前的页面。 */
     private var mainTab by mutableStateOf(0)
 
-    private val TAB_TITLES = listOf("任务", "工具", "日志", "权限")
+    private val TAB_TITLES = listOf("任务", "日志", "权限", "设置")
 
     /** 任务副标题（config 的 desc / target），仅任务集合变化时刷新 */
     private var taskSubtitles by mutableStateOf(emptyMap<String, String>())
@@ -506,18 +506,11 @@ class MainActivity : ComponentActivity() {
 
         Scaffold(
             containerColor = MaterialTheme.colorScheme.background,
-            topBar = {
-                TopAppBar(
-                    title = {
-                        Text(getString(R.string.app_name), style = MaterialTheme.typography.titleMedium)
-                    }
-                )
-            },
             bottomBar = {
                 NavigationBar(containerColor = MaterialTheme.colorScheme.surface, tonalElevation = 0.dp,
                     modifier = Modifier.height(64.dp)) {
-                    val icons = listOf(R.drawable.ic_nav_tasks, R.drawable.ic_nav_tools,
-                        R.drawable.ic_tool_log, R.drawable.ic_nav_settings)
+                    val icons = listOf(R.drawable.ic_nav_tasks, R.drawable.ic_tool_log,
+                        R.drawable.ic_nav_permissions, R.drawable.ic_nav_settings)
                     TAB_TITLES.forEachIndexed { index, title ->
                         NavigationBarItem(
                             selected = mainTab == index,
@@ -554,9 +547,9 @@ class MainActivity : ComponentActivity() {
                         pageStates.SaveableStateProvider(mainTab) {
                             when (mainTab) {
                                 0 -> TaskListSection(runState, Modifier.fillMaxSize())
-                                1 -> ToolsTab(launcherEnabled)
-                                2 -> LogsTab(logs)
-                                else -> PermissionsTab()
+                                1 -> LogsTab(logs)
+                                2 -> PermissionsTab()
+                                else -> SettingsTab(launcherEnabled)
                             }
                         }
                     }
@@ -1449,33 +1442,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /** 屏幕工具和悬浮日志；悬浮球开关单独放在工具页顶部。 */
-    @Composable
-    private fun ToolsCard() {
-        WorkCard(modifier = Modifier.fillMaxWidth()) {
-            Column(modifier = Modifier.padding(bottom = 8.dp)) {
-                SectionTitle("屏幕工具", "拾取结果可直接用于脚本")
-                ToolRow("操作录制", "真实执行点击和滑动，截图并生成任务", R.drawable.ic_record) {
-                    com.forest.android.assistant.core.recording.RecordingSetupOverlay.show(this@MainActivity)
-                }
-                ToolRow("取坐标", "点选屏幕位置，生成点击代码", R.drawable.ic_tool_point) {
-                    showPicker(PickerOverlay.Mode.POINT)
-                }
-                ToolRow("取颜色", "拾取屏幕颜色，生成找色代码", R.drawable.ic_tool_color) {
-                    showPicker(PickerOverlay.Mode.COLOR)
-                }
-                ToolRow("选择范围", "框选屏幕区域，生成范围代码", R.drawable.ic_tool_region) {
-                    showPicker(PickerOverlay.Mode.REGION)
-                }
-                ToolRow("区域截图", "框选、命名并保存屏幕区域", R.drawable.ic_tool_shot) {
-                    showPicker(PickerOverlay.Mode.SCREENSHOT)
-                }
-                HorizontalDivider(Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
-                ToolRow("悬浮日志", "在其他应用上方查看实时输出", R.drawable.ic_tool_log) { toggleConsole() }
-            }
-        }
-    }
-
     /** 工具行：名称 + 用途 + 尾部箭头 */
     @Composable
     private fun ToolRow(title: String, desc: String, icon: Int = R.drawable.ic_nav_tools, onClick: () -> Unit) {
@@ -1579,12 +1545,13 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /** 工具页：屏幕工具、悬浮控制与截屏通道。 */
+    /** 设置页：悬浮球与截屏通道；屏幕拾取工具和悬浮日志入口统一收在悬浮窗面板中。 */
     @Composable
-    private fun ToolsTab(launcherEnabled: Boolean) {
+    private fun SettingsTab(launcherEnabled: Boolean) {
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            PageHeading("随手工具", "取点、取色、选范围、截图，让脚本编写更轻松。")
+            PageHeading("应用设置", "管理悬浮球与截屏通道。")
+            // 悬浮日志开关：原属于工具页，屏幕工具展示移除后保留在这里；现在可从悬浮窗面板打开
             WorkCard(modifier = Modifier.fillMaxWidth()) {
                 ToolRow(
                     if (launcherEnabled) "隐藏悬浮球" else "显示悬浮球",
@@ -1594,18 +1561,51 @@ class MainActivity : ComponentActivity() {
                     if (!overlayGranted) FloatyManager.requestOverlayPermission(this@MainActivity)
                     else ScriptRunner.toggleLauncher(this@MainActivity)
                 }
+                // 自动贴边开关：控制拖动松手后是否吸到左右边缘
+                AutoSnapRow()
+                // 截屏通道设置与悬浮球选项放在同一卡片中
+                ToolRow(
+                    "截屏通道设置",
+                    "系统授权截屏或超级权限截屏 · 使用前请手动选择",
+                    R.drawable.ic_tool_shot
+                ) { openCaptureDialog() }
             }
-            ToolsCard()
-            WorkCard(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(bottom = 6.dp)) {
-                    SectionTitle("截屏通道", "使用前请手动选择截屏方式")
-                    ToolRow(
-                        "截屏通道设置",
-                        "系统授权截屏或超级权限截屏",
-                        R.drawable.ic_tool_shot
-                    ) { openCaptureDialog() }
-                }
+        }
+    }
+
+    /**
+     * 自动贴边开关：拖动松手后是否自动吸到左右边缘（半隐藏）。
+     * 状态持久化在 floaty 偏好中，切换后立即作用于当前悬浮球。
+     */
+    @Composable
+    private fun AutoSnapRow() {
+        val context = this@MainActivity
+        var autoSnap by remember { mutableStateOf(FloatyManager.isAutoSnapEnabled(context)) }
+        // 整行点击与 Switch 回调都走这里，避免 Switch 自带回调再取反两次
+        val apply: (Boolean) -> Unit = { next ->
+            autoSnap = next
+            FloatyManager.setAutoSnapEnabled(context, next)
+        }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { apply(!autoSnap) }
+                .heightIn(min = 64.dp)
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = RoundedCornerShape(12.dp)) {
+                Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) { AppIcon(R.drawable.ic_floaty) }
             }
+            Column(modifier = Modifier.weight(1f).padding(horizontal = 12.dp)) {
+                Text("自动贴边", style = MaterialTheme.typography.titleSmall)
+                Text(
+                    if (autoSnap) "拖动松手后吸到左右边缘并半隐藏" else "拖动松手后停在原位，仅收回屏内",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Switch(checked = autoSnap, onCheckedChange = { apply(it) })
         }
     }
 

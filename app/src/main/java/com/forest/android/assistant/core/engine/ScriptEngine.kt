@@ -489,7 +489,7 @@ object ScriptEngine {
                 env.onLog(
                     'W',
                     if (env.screenCaptureReady()) "截屏暂无可用帧，请稍后重试"
-                    else "截屏不可用：请先在工具页选择截屏方式，并调用 requestScreenCapture()"
+                    else "截屏不可用：请先在设置页选择截屏方式，并调用 requestScreenCapture()"
                 )
                 -1L
             } else {
