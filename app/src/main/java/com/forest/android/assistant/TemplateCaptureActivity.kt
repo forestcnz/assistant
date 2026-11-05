@@ -7,6 +7,12 @@ import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.layout.navigationBarsPadding
+import com.forest.android.assistant.ui.PrimaryAction
+import androidx.compose.material3.Surface
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -134,8 +140,17 @@ class TemplateCaptureActivity : ComponentActivity() {
     @Composable
     private fun CaptureScreen() {
         Scaffold(
+            containerColor = MaterialTheme.colorScheme.background,
+            bottomBar = {
+                Surface(color = MaterialTheme.colorScheme.surface) {
+                    Column(Modifier.navigationBarsPadding().padding(horizontal = 18.dp)) {
+                        PrimaryAction(if (saving) "保存中…" else "保存模板", enabled = selectionValid() && !saving) { openSaveDialog() }
+                    }
+                }
+            },
             topBar = {
                 TopAppBar(
+                    colors = androidx.compose.material3.TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface),
                     navigationIcon = {
                         IconButton(onClick = { if (saving) backRequestedWhileSaving = true else finish() }, enabled = !saving) {
                             AppIcon(R.drawable.ic_back, "返回")
@@ -150,10 +165,6 @@ class TemplateCaptureActivity : ComponentActivity() {
                     },
                     actions = {
                         TextButton(onClick = { captureFrame() }, enabled = !saving) { Text("重截") }
-                        TextButton(
-                            onClick = { openSaveDialog() },
-                            enabled = selectionValid() && !saving
-                        ) { Text("保存") }
                     }
                 )
             }
@@ -161,12 +172,14 @@ class TemplateCaptureActivity : ComponentActivity() {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(padding)
+                    .padding(padding).verticalScroll(rememberScrollState()).padding(18.dp)
             ) {
+                Text("在截图上框选需要寻找的按钮或文字，保存到任务素材。", style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 14.dp))
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .weight(1f)
+                        .height(320.dp).clip(MaterialTheme.shapes.medium)
                         .background(Color(AppPalette.INVERSE_SURFACE))
                         .onSizeChanged { viewSize = it },
                     contentAlignment = Alignment.Center
@@ -238,11 +251,11 @@ class TemplateCaptureActivity : ComponentActivity() {
                     }
                 }
 
-                // 底部信息栏：选区尺寸提示
+                // 选区尺寸与坐标信息卡
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(12.dp),
+                        .padding(top = 16.dp).background(MaterialTheme.colorScheme.surface, MaterialTheme.shapes.medium).padding(16.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -255,15 +268,14 @@ class TemplateCaptureActivity : ComponentActivity() {
                         style = MaterialTheme.typography.bodySmall,
                         modifier = Modifier.weight(1f).padding(end = 12.dp)
                     )
-                    if (bitmap != null && sel != null) {
-                        Button(onClick = { openSaveDialog() }, enabled = selectionValid() && !saving) { Text("保存模板") }
-                    }
+
                 }
             }
         }
 
         if (showSaveDialog) {
             AlertDialog(
+            containerColor = MaterialTheme.colorScheme.surface,
                 onDismissRequest = { showSaveDialog = false },
                 title = { Text("保存模板") },
                 text = {

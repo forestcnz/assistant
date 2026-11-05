@@ -28,6 +28,10 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.Button
+import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.layout.imePadding
+import com.forest.android.assistant.ui.AppPalette
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
@@ -115,7 +119,7 @@ class ScriptEditorActivity : ComponentActivity() {
             val extraMsg = intent.getStringExtra(EXTRA_ERROR_MSG)
             val last = ScriptRunner.lastError.value
             val matchedLast = last?.takeIf { it.taskName == taskName }
-            val targetLine = if (extraLine > 0) extraLine else (matchedLast?.line ?: 0)
+            val targetLine = if (intent.hasExtra(EXTRA_ERROR_LINE)) extraLine else (matchedLast?.line ?: 0)
             errorLine = targetLine
             errorHint = when {
                 targetLine <= 0 -> null
@@ -145,7 +149,7 @@ class ScriptEditorActivity : ComponentActivity() {
             containerColor = MaterialTheme.colorScheme.background,
             topBar = {
                 // 编辑器标题栏与内容卡片之间用轻阴影分层，操作项保持原位置。
-                Surface(shadowElevation = 4.dp, color = MaterialTheme.colorScheme.surface) {
+                Surface(shadowElevation = 0.dp, color = MaterialTheme.colorScheme.surface) {
                     TopAppBar(
                         colors = TopAppBarDefaults.topAppBarColors(
                             containerColor = MaterialTheme.colorScheme.surface,
@@ -168,10 +172,7 @@ class ScriptEditorActivity : ComponentActivity() {
                                 keyboard?.hide()
                                 showExamples = true
                             }, enabled = contentLoaded) { Text("示例") }
-                            TextButton(onClick = { showClearDialog = true }, enabled = contentLoaded && content.text.isNotEmpty()) {
-                                Text("清空", color = MaterialTheme.colorScheme.error)
-                            }
-                            TextButton(onClick = { save(showToast = true) }, enabled = contentLoaded) {
+                            Button(onClick = { save(showToast = true) }, enabled = contentLoaded, shape = MaterialTheme.shapes.small, modifier = Modifier.padding(end = 12.dp)) {
                                 Text("保存", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
                             }
                         }
@@ -182,7 +183,7 @@ class ScriptEditorActivity : ComponentActivity() {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(padding)
+                    .padding(padding).imePadding()
             ) {
                 // 上次运行的出错行提示（可关闭；改动后会失效，故仅作定位参考）
                 if (errorLine > 0) {
@@ -197,8 +198,13 @@ class ScriptEditorActivity : ComponentActivity() {
                                     (errorHint?.lineSequence()?.firstOrNull()?.let { "：$it" } ?: ""),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.error,
-                            modifier = Modifier.weight(1f)
+                            modifier = Modifier.weight(1f), maxLines = 3, overflow = TextOverflow.Ellipsis
                         )
+                        TextButton(onClick = {
+                            JsHighlighter.lineRange(content.text, errorLine)?.let { range ->
+                                content = content.copy(selection = TextRange(range.first))
+                            }
+                        }) { Text("定位") }
                         TextButton(onClick = {
                             errorLine = 0
                             errorHint = null
@@ -208,7 +214,7 @@ class ScriptEditorActivity : ComponentActivity() {
 
                 SuggestionBar(
                     prefix = JsHighlighter.wordBefore(content.text, content.selection.start)?.first,
-                    onPick = { snippet -> insertAtCursor(snippet) },
+                    onPick = { snippet -> insertAtCursor(snippet, completeWord = !JsHighlighter.wordBefore(content.text, content.selection.start)?.first.isNullOrBlank()) },
                     onInspect = { apiHelp = it }
                 )
 
@@ -216,25 +222,22 @@ class ScriptEditorActivity : ComponentActivity() {
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(horizontal = 12.dp)
                         .weight(1f)
-                        .clip(MaterialTheme.shapes.medium)
-                        .background(MaterialTheme.colorScheme.surface)
-                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant, MaterialTheme.shapes.medium)
+                        .background(Color(AppPalette.INVERSE_SURFACE))
                 ) {
                     Row(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+                        modifier = Modifier.fillMaxWidth().background(Color(0xFF26373B)).padding(horizontal = 14.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Box(Modifier.size(7.dp).background(MaterialTheme.colorScheme.primary,
                             androidx.compose.foundation.shape.CircleShape))
-                        Text("task.js", style = MaterialTheme.typography.labelLarge,
+                        Text("task.js", color = Color(AppPalette.INVERSE_ON_SURFACE), style = MaterialTheme.typography.labelLarge,
                             fontFamily = FontFamily.Monospace, modifier = Modifier.padding(start = 8.dp))
                         Spacer(Modifier.weight(1f))
-                        Text("JavaScript", style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("JAVASCRIPT", style = MaterialTheme.typography.labelMedium,
+                            color = Color(AppPalette.INVERSE_SUBTLE))
                     }
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    HorizontalDivider(color = Color(0xFF35464A))
                     Box(Modifier.fillMaxSize().padding(12.dp)) {
                     BasicTextField(
                         value = content,
@@ -251,9 +254,9 @@ class ScriptEditorActivity : ComponentActivity() {
                             fontFamily = FontFamily.Monospace,
                             fontSize = 13.sp,
                             lineHeight = 19.sp,
-                            color = MaterialTheme.colorScheme.onSurface
+                            color = Color(AppPalette.INVERSE_ON_SURFACE)
                         ),
-                        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                        cursorBrush = SolidColor(Color(AppPalette.INVERSE_ACCENT)),
                         visualTransformation = remember(errorLine) {
                             JsHighlighter.transformation(errorLine.takeIf { it > 0 })
                         },
@@ -262,21 +265,25 @@ class ScriptEditorActivity : ComponentActivity() {
                     )
                     }
                 }
-                Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                Row(Modifier.fillMaxWidth().background(Color(0xFF26373B)).padding(horizontal = 12.dp),
                     verticalAlignment = Alignment.CenterVertically) {
                     val lineIndex = remember(content.text) { LineIndex.from(content.text) }
                     val position = remember(lineIndex, content.selection.start) {
                         lineIndex.position(content.selection.start.coerceIn(0, content.text.length))
                     }
                     Text("Ln ${position.first}, Col ${position.second}",
-                        style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
+                        style = MaterialTheme.typography.bodySmall, color = Color(AppPalette.INVERSE_SUBTLE), fontFamily = FontFamily.Monospace)
                     Spacer(Modifier.weight(1f))
                     Text(when {
                         !dirty -> "已保存"
                         requiresExplicitSave -> "待保存 · 请点击保存"
-                        else -> "待保存 · 离开时自动保存"
+                        else -> "待保存 · 自动保存"
                     },
-                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        style = MaterialTheme.typography.bodySmall, color = Color(AppPalette.INVERSE_SUBTLE),
+                        modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    TextButton(onClick = { showClearDialog = true }, enabled = contentLoaded && content.text.isNotEmpty()) {
+                        Text("清空", color = Color(AppPalette.INVERSE_ACCENT))
+                    }
                 }
             }
         }
@@ -294,6 +301,7 @@ class ScriptEditorActivity : ComponentActivity() {
         }
         apiHelp?.let { item ->
             AlertDialog(
+            containerColor = MaterialTheme.colorScheme.surface,
                 onDismissRequest = { apiHelp = null },
                 title = { Text(item.name) },
                 text = {
@@ -322,6 +330,7 @@ class ScriptEditorActivity : ComponentActivity() {
         }
         if (showClearDialog) {
             AlertDialog(
+            containerColor = MaterialTheme.colorScheme.surface,
                 onDismissRequest = { showClearDialog = false },
                 title = { Text("清空脚本") },
                 text = { Text("确定清空「$taskName」的编辑内容？点击保存后才会修改脚本文件。") },
@@ -359,8 +368,10 @@ class ScriptEditorActivity : ComponentActivity() {
     @OptIn(ExperimentalFoundationApi::class)
     @Composable
     private fun SuggestionBar(prefix: String?, onPick: (String) -> Unit, onInspect: (ApiDocs.Item) -> Unit) {
-        if (prefix.isNullOrBlank()) return
-        val items = remember(prefix) { ApiDocs.suggestions(prefix, limit = 8) }
+        val items = remember(prefix) {
+            if (prefix.isNullOrBlank()) ApiDocs.items.filter { it.name in listOf("click", "images.findImage", "log") }
+            else ApiDocs.suggestions(prefix, limit = 8)
+        }
         if (items.isEmpty()) return
         Text(
             "API 补全：点击插入 · 长按查看用法",

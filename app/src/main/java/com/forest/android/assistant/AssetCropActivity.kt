@@ -6,6 +6,10 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.draw.clip
+import com.forest.android.assistant.ui.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -84,64 +88,68 @@ class AssetCropActivity : ComponentActivity() {
         val preview = model.preview
         val region = model.region
         val valid = preview != null && region?.isValid(preview.width, preview.height) == true
-        Scaffold(topBar = {
-            TopAppBar(
-                title = {
-                    Column {
+        Scaffold(containerColor = MaterialTheme.colorScheme.background,
+            topBar = {
+                TopAppBar(colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface),
+                    title = { Column {
                         Text("裁剪图片", style = MaterialTheme.typography.titleMedium)
-                        Text(imageName, style = MaterialTheme.typography.bodySmall, maxLines = 1,
-                            overflow = TextOverflow.Ellipsis)
+                        Text(imageName, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    } },
+                    navigationIcon = { IconButton(onClick = { finish() }, enabled = !model.saving) { AppIcon(R.drawable.ic_back, "返回") } },
+                    actions = { TextButton(enabled = preview != null && !model.saving, onClick = { model.region = null }) { Text("重选") } })
+            },
+            bottomBar = {
+                Surface(color = MaterialTheme.colorScheme.surface) {
+                    Column(Modifier.navigationBarsPadding().padding(horizontal = 18.dp)) {
+                        PrimaryAction(if (model.saving) "保存中…" else "保存裁剪", enabled = valid && !model.saving) {
+                            model.save(taskName, imageName, region!!)
+                        }
                     }
-                },
-                navigationIcon = {
-                    IconButton(onClick = { finish() }, enabled = !model.saving) { AppIcon(R.drawable.ic_back, "返回") }
-                },
-                actions = {
-                    TextButton(enabled = preview != null && !model.saving, onClick = { model.region = null }) { Text("重选") }
                 }
-            )
-        }) { padding ->
-            Column(Modifier.fillMaxSize().padding(padding)) {
-                // 深蓝工作区让原图与选区描边保持足够对比，替换旧版深蓝色。
-                Box(Modifier.fillMaxWidth().weight(1f).background(Color(AppPalette.INVERSE_SURFACE)), contentAlignment = Alignment.Center) {
-                    if (preview == null) {
-                        Column(Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            }
+        ) { padding ->
+            BoxWithConstraints(Modifier.fillMaxSize().padding(padding)) {
+                val imageHeight = (maxHeight * .52f).coerceIn(220.dp, 460.dp)
+                Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    Text("拖动选区可移动，拖动四角可调整大小。", style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Box(Modifier.fillMaxWidth().height(imageHeight).clip(MaterialTheme.shapes.medium)
+                        .background(Color(AppPalette.INVERSE_SURFACE)), contentAlignment = Alignment.Center) {
+                        if (preview == null) Column(Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                             if (model.error == null) CircularProgressIndicator()
                             Text(model.error ?: "正在读取图片…", color = Color.White, modifier = Modifier.padding(top = 12.dp))
                             if (model.error != null) TextButton(onClick = { model.load(taskName, imageName) }) { Text("重试") }
-                        }
-                    } else {
-                        CropCanvas(preview, model.region, !model.saving) { model.region = it }
+                        } else CropCanvas(preview, region, !model.saving) { model.region = it }
                     }
-                }
-                Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
                     if (preview != null) {
-                        Text("原图 ${preview.width} × ${preview.height} px", style = MaterialTheme.typography.bodySmall)
-                        Text(if (valid) "选区 ${region!!.width} × ${region.height} px · 起点 (${region.left}, ${region.top})"
-                            else "拖动框选要保留的区域", style = MaterialTheme.typography.bodyMedium)
-                        Text("拖动选区可移动，拖动四角可调整大小", style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text("保存后替换当前素材，原图移入历史素材", style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        model.error?.let { Text(it, color = MaterialTheme.colorScheme.error,
-                            style = MaterialTheme.typography.bodySmall) }
-                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                            TextButton(enabled = !model.saving, onClick = {
-                                model.region = CropRegion(0, 0, preview.width, preview.height)
-                            }) { Text("全选") }
-                            TextButton(enabled = valid && !model.saving, onClick = { exactDialog = true }) { Text("精确调整") }
-                            Spacer(Modifier.weight(1f))
-                            Button(enabled = valid && !model.saving, onClick = {
-                                model.save(taskName, imageName, region!!)
-                            }) { Text(if (model.saving) "保存中…" else "保存裁剪") }
+                        WorkCard(Modifier.fillMaxWidth()) {
+                            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text("当前选区", style = MaterialTheme.typography.titleSmall)
+                                    StatusBadge(if (valid) "可保存" else "待框选", warning = !valid)
+                                }
+                                Text(if (valid) "X ${region!!.left} · Y ${region.top} · 宽 ${region.width} · 高 ${region.height} px"
+                                    else "在图片上拖动，选择需要保留的区域", style = MaterialTheme.typography.bodySmall)
+                                Text("原图 ${preview.width} × ${preview.height} px", style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
                         }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(enabled = !model.saving, onClick = { model.region = CropRegion(0, 0, preview.width, preview.height) },
+                                shape = MaterialTheme.shapes.small) { Text("全选") }
+                            OutlinedButton(enabled = valid && !model.saving, onClick = { exactDialog = true },
+                                shape = MaterialTheme.shapes.small) { Text("精确调整") }
+                        }
+                        Text("保存后替换当前素材，原图移入历史素材；脚本引用保持原路径。",
+                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        model.error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
                     }
                 }
             }
         }
         if (exactDialog && preview != null && region != null) {
-            ExactRegionDialog(region, preview.width, preview.height,
-                onDismiss = { exactDialog = false },
+            ExactRegionDialog(region, preview.width, preview.height, onDismiss = { exactDialog = false },
                 onApply = { model.region = it; exactDialog = false })
         }
     }
@@ -298,7 +306,7 @@ private fun ExactRegionDialog(region: CropRegion, imageWidth: Int, imageHeight: 
     val parsed = if (numbers.all { it != null && it in 0..maxOf(imageWidth, imageHeight) })
         CropRegion(numbers[0]!!, numbers[1]!!, numbers[0]!! + numbers[2]!!, numbers[1]!! + numbers[3]!!) else null
     val valid = parsed?.isValid(imageWidth, imageHeight) == true
-    AlertDialog(onDismissRequest = onDismiss, title = { Text("精确调整选区") }, text = {
+    AlertDialog(containerColor = MaterialTheme.colorScheme.surface, onDismissRequest = onDismiss, title = { Text("精确调整选区") }, text = {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("以原图像素为单位", style = MaterialTheme.typography.bodySmall)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

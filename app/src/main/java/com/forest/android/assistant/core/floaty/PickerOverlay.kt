@@ -338,10 +338,10 @@ object PickerOverlay {
             color = Color.WHITE
         }
         private val panelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = 0xF5FFFFFF.toInt()
+            color = AppPalette.SURFACE
         }
         private val crossPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = 0xFFFFFFFF.toInt()
+            color = AppPalette.PRIMARY
             style = Paint.Style.STROKE
             strokeWidth = 2f * density
         }
@@ -390,10 +390,10 @@ object PickerOverlay {
 
             // 右上角显示当前模式和取消按钮
             val btnW = 64f * density
-            val btnH = 34f * density
+            val btnH = 44f * density
             val btnGap = 8f * density
             cancelRect.set(width - btnW - 16f * density, 16f * density, width - 16f * density, 16f * density + btnH)
-            modeRect.set(cancelRect.left - btnW - btnGap, 16f * density, cancelRect.left - btnGap, 16f * density + btnH)
+            modeRect.set(16f * density, 16f * density, 100f * density, 16f * density + btnH)
             val modeLabel = if (mode == Mode.POINT) "取坐标" else "取色"
             canvas.drawRoundRect(modeRect, 8f * density, 8f * density, panelPaint)
             canvas.drawText(
@@ -410,50 +410,19 @@ object PickerOverlay {
                 textPaint
             )
 
-            // 信息面板（避开准星中心，右下偏移）
-            val lines = ArrayList<String>()
-            lines.add("x=${toScreenX(px)}  y=${toScreenY(py)}")
+            // 固定底部信息卡，避免提示文字跟随准星移出屏幕。
+            val margin = 16f * density
+            val panelTop = height - 142f * density
+            val panel = RectF(margin, panelTop, width - margin, height - margin)
+            canvas.drawRoundRect(panel, 16f * density, 16f * density, panelPaint)
+            canvas.drawText("X ${toScreenX(px)}   Y ${toScreenY(py)}", margin * 2, panelTop + 27f * density, textPaint)
             if (mode == Mode.COLOR) {
-                lines.add(
-                    when {
-                        hasColor -> "#%06x".format(color and 0xFFFFFF)
-                        else -> "取色中…"
-                    }
-                )
+                val label = if (hasColor) "#%06X".format(color and 0xFFFFFF) else "取色中…"
+                canvas.drawText(label, width - margin * 2 - textPaint.measureText(label), panelTop + 27f * density, textPaint)
             }
-            val lineH = 18f * density
-            val pad = 10f * density
-            var panelW = 0f
-            lines.forEach { panelW = maxOf(panelW, maxOf(textPaint.measureText(it), subPaint.measureText(it))) }
-            panelW += pad * 2 + if (mode == Mode.COLOR) 26f * density else 0f
-            val panelH = pad * 2 + lineH * lines.size + 16f * density
-            var left = px + 22f * density
-            var top = py + 22f * density
-            if (left + panelW > width) left = px - 22f * density - panelW
-            if (top + panelH > height) top = py - 22f * density - panelH
-            left = left.coerceIn(0f, maxOf(0f, width - panelW))
-            top = top.coerceIn(0f, maxOf(0f, height - panelH))
-            canvas.drawRoundRect(
-                RectF(left, top, left + panelW, top + panelH),
-                8f * density, 8f * density, panelPaint
-            )
-            var ty = top + pad + 14f * density
-            canvas.drawText(lines[0], left + pad, ty, textPaint)
-            if (mode == Mode.COLOR) {
-                ty += lineH
-                canvas.drawText(lines[1], left + pad + 26f * density, ty, textPaint)
-                swatchPaint.color = if (hasColor) color else 0xFF444444.toInt()
-                canvas.drawRect(
-                    left + pad, ty - 12f * density, left + pad + 18f * density, ty + 2f * density,
-                    swatchPaint
-                )
-            }
-            ty += lineH + 2f * density
-            canvas.drawText(
-                if (mode == Mode.POINT) "点击=生成 click(x,y)，拖动=移动准星"
-                else "点击=生成颜色串，拖动=移动准星",
-                left + pad, ty, subPaint
-            )
+            canvas.drawText("拖动调整位置，点击下方按钮复制结果。", margin * 2, panelTop + 52f * density, subPaint)
+            saveRect.set(margin * 2, panelTop + 66f * density, width - margin * 2, panelTop + 110f * density)
+            drawButton(canvas, saveRect, if (mode == Mode.POINT) "生成点击代码" else "复制颜色代码", primary = true)
         }
 
         /** 把冻结画面按窗口偏移画到画布上（取色与框选共用） */
@@ -475,12 +444,12 @@ object PickerOverlay {
         private fun drawSelection(canvas: Canvas) {
             drawFrozenFrame(canvas)
             val btnW = 76f * density
-            val btnH = 38f * density
+            val btnH = 44f * density
             val btnGap = 10f * density
             val margin = 18f * density
             cancelRect.set(width - btnW - margin, margin, width - margin, margin + btnH)
-            resetRect.set(cancelRect.left - btnW - btnGap, margin, cancelRect.left - btnGap, margin + btnH)
-            saveRect.set(resetRect.left - btnW - btnGap, margin, resetRect.left - btnGap, margin + btnH)
+            resetRect.set(margin * 2, height - margin - 58f * density, margin * 2 + btnW, height - margin - 14f * density)
+            saveRect.set(resetRect.right + btnGap, resetRect.top, width - margin * 2, resetRect.bottom)
 
             if (hasSelection) {
                 val left = min(selectionStartX, selectionEndX)
@@ -502,7 +471,8 @@ object PickerOverlay {
                 isCapturing -> "截图中"
                 else -> "保存"
             }
-            drawButton(canvas, saveRect, captureText)
+            canvas.drawRoundRect(RectF(margin, height - 142f * density, width - margin, height - margin), 16f * density, 16f * density, panelPaint)
+            drawButton(canvas, saveRect, captureText, primary = true)
             drawButton(canvas, resetRect, "重选")
             drawButton(canvas, cancelRect, "取消")
 
@@ -515,19 +485,19 @@ object PickerOverlay {
                 mode == Mode.REGION -> "按住并拖动选择范围，生成 [x, y, 宽度, 高度]"
                 else -> "按住并拖动，框选要保存的区域"
             }
-            val textX = margin
-            val textY = if (saveRect.bottom + 34f * density < height) {
-                saveRect.bottom + 26f * density
-            } else {
-                height - margin
-            }
-            canvas.drawText(hint, textX, textY, hintPaint)
+            canvas.drawText(android.text.TextUtils.ellipsize(hint, android.text.TextPaint(subPaint),
+                (width - margin * 4).coerceAtLeast(1f), android.text.TextUtils.TruncateAt.END).toString(),
+                margin * 2, height - 113f * density, subPaint)
         }
 
-        private fun drawButton(canvas: Canvas, rect: RectF, label: String) {
-            canvas.drawRoundRect(rect, 9f * density, 9f * density, panelPaint)
+        private fun drawButton(canvas: Canvas, rect: RectF, label: String, primary: Boolean = false) {
+            panelPaint.color = if (primary) AppPalette.PRIMARY else AppPalette.SURFACE
+            textPaint.color = if (primary) AppPalette.ON_PRIMARY else AppPalette.ON_SURFACE
+            canvas.drawRoundRect(rect, 11f * density, 11f * density, panelPaint)
             val textX = rect.centerX() - textPaint.measureText(label) / 2
             canvas.drawText(label, textX, rect.centerY() + 5f * density, textPaint)
+            panelPaint.color = AppPalette.SURFACE
+            textPaint.color = AppPalette.ON_SURFACE
         }
 
         private fun selectionWidth(): Int = abs(selectionEndX.toInt() - selectionStartX.toInt())
@@ -559,13 +529,23 @@ object PickerOverlay {
                         PickerOverlay.hide()
                         return true
                     }
+                    if (saveRect.contains(event.x, event.y)) {
+                        consumedByButton = true
+                        confirm()
+                        return true
+                    }
                     if (modeRect.contains(event.x, event.y)) {
+                        consumedByButton = true
+                        return true
+                    }
+                    if (event.y >= height - 142f * density) {
                         consumedByButton = true
                         return true
                     }
                     return true
                 }
                 MotionEvent.ACTION_MOVE -> {
+                    if (consumedByButton) return true
                     if (abs(event.x - downX) > 6f * density || abs(event.y - downY) > 6f * density) {
                         moved = true
                     }
@@ -619,6 +599,7 @@ object PickerOverlay {
                             consumedByButton = true
                             hasSelection = false
                         }
+                        y >= height - 142f * density -> consumedByButton = true
                         else -> {
                             isSelecting = true
                             hasSelection = false

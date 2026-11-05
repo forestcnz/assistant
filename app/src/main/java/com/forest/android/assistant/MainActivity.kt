@@ -7,6 +7,8 @@ import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.material3.FilterChip
 import androidx.compose.foundation.background
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
@@ -16,7 +18,6 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -32,32 +33,23 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilledIconButton
-import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.IconButtonDefaults
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SwipeToDismissBox
-import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -73,11 +65,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.graphics.Color
@@ -100,9 +90,9 @@ import com.forest.android.assistant.core.task.TaskManager
 import com.forest.android.assistant.core.task.TaskLoop
 import com.forest.android.assistant.core.task.ImageHistory
 import com.forest.android.assistant.core.task.TaskZip
+import androidx.compose.material3.SwitchDefaults
+import com.forest.android.assistant.ui.*
 import com.forest.android.assistant.ui.AppIcon
-import com.forest.android.assistant.ui.CaptureModeCard
-import com.forest.android.assistant.ui.PermissionStatusCard
 import com.forest.android.assistant.ui.ScriptTheme
 import com.forest.android.assistant.ui.StartupComic
 import com.forest.android.assistant.ui.WorkCard
@@ -132,7 +122,10 @@ class MainActivity : ComponentActivity() {
     private var showCreateDialog by mutableStateOf(false)
     private var taskMetadataVersion by mutableStateOf(0)
 
+
+
     /** 任务操作菜单/素材管理 */
+    private var showTransferDialog by mutableStateOf(false)
     private var menuTask by mutableStateOf<String?>(null)
     private var renamingTask by mutableStateOf<String?>(null)
     private var deletingTask by mutableStateOf<String?>(null)
@@ -147,6 +140,7 @@ class MainActivity : ComponentActivity() {
     private var previewAsset by mutableStateOf<TaskManager.ImageInfo?>(null)
     private var previewBitmap by mutableStateOf<android.graphics.Bitmap?>(null)
     private var previewLoadJob: kotlinx.coroutines.Job? = null
+    private var deletingAsset by mutableStateOf<TaskManager.ImageInfo?>(null)
     private var renameAsset by mutableStateOf<TaskManager.ImageInfo?>(null)
     /** 素材重命名的脚本引用预览（确认后才会落盘） */
     private var renamePreview by mutableStateOf<TaskManager.ImageRenamePreview?>(null)
@@ -188,7 +182,6 @@ class MainActivity : ComponentActivity() {
     /** 主导航：任务 / 日志 / 权限 / 设置；恢复旋转前的页面。 */
     private var mainTab by mutableStateOf(0)
 
-    private val TAB_TITLES = listOf("任务", "日志", "权限", "设置")
 
     /** 任务副标题（config 的 desc / target），仅任务集合变化时刷新 */
     private var taskSubtitles by mutableStateOf(emptyMap<String, String>())
@@ -209,6 +202,9 @@ class MainActivity : ComponentActivity() {
             if (task != null) {
                 assetsTask = task
                 assets = TaskManager.imageInfos(this, task)
+                previewAsset?.let { previous ->
+                    assets.firstOrNull { it.file.name == previous.file.name }?.let { loadAssetPreview(it) }
+                }
             }
             if (result.resultCode == RESULT_OK) {
                 val name = result.data?.getStringExtra(AssetCropActivity.EXTRA_IMAGE).orEmpty()
@@ -220,8 +216,6 @@ class MainActivity : ComponentActivity() {
     private fun cropAsset(info: TaskManager.ImageInfo) {
         val task = assetsTask ?: return
         previewLoadJob?.cancel()
-        previewAsset = null
-        previewBitmap = null
         cropImageLauncher.launch(Intent(this, AssetCropActivity::class.java)
             .putExtra(AssetCropActivity.EXTRA_TASK, task)
             .putExtra(AssetCropActivity.EXTRA_IMAGE, info.file.name))
@@ -368,12 +362,30 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         pendingExportFile = savedInstanceState?.getString("pending_export_file")?.let(::File)
+        menuTask = savedInstanceState?.getString("detail_task")
         assetsTask = savedInstanceState?.getString("assets_task")
         assetsTask?.let { assets = TaskManager.imageInfos(this, it) }
         taskTransferBusy = pendingExportFile != null
         mainTab = savedInstanceState?.getInt("main_tab", 0)?.coerceIn(0, 3) ?: 0
         if (intent.getBooleanExtra(EXTRA_SHOW_TASKS, false)) mainTab = 0
         showCreateDialog = savedInstanceState?.getBoolean("create_dialog", false) ?: false
+        if (savedInstanceState != null) {
+            loopEditing = savedInstanceState.getString("loop_task")
+            loopMode = TaskLoop.Mode.entries.firstOrNull { it.name == savedInstanceState.getString("loop_mode") } ?: loopMode
+            loopCountValue = savedInstanceState.getString("loop_count", loopCountValue)
+            loopDurationValue = savedInstanceState.getString("loop_duration", loopDurationValue)
+            loopIntervalValue = savedInstanceState.getString("loop_interval", loopIntervalValue)
+            loopDurationUnit = DurationUnit.entries.firstOrNull { it.name == savedInstanceState.getString("loop_unit") } ?: loopDurationUnit
+            scheduleEditing = savedInstanceState.getString("schedule_task")
+            scheduleEditing?.let { currentSchedule = ScheduleManager.scheduleOf(this, it) }
+            scheduleType = ScheduleManager.Type.entries.firstOrNull { it.name == savedInstanceState.getString("schedule_type") } ?: scheduleType
+            scheduleValue = savedInstanceState.getString("schedule_value", scheduleValue)
+            historyTask = savedInstanceState.getString("history_task")
+            historyTask?.let { historyEntries = RunHistory.read(this, it) }
+            savedInstanceState.getString("preview_image")?.let { image ->
+                assets.firstOrNull { it.file.name == image }?.let { loadAssetPreview(it) }
+            }
+        }
         setContent {
             ScriptTheme {
                 var showStartup by rememberSaveable {
@@ -455,6 +467,18 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
+        outState.putString("loop_task", loopEditing)
+        outState.putString("loop_mode", loopMode.name)
+        outState.putString("loop_count", loopCountValue)
+        outState.putString("loop_duration", loopDurationValue)
+        outState.putString("loop_interval", loopIntervalValue)
+        outState.putString("loop_unit", loopDurationUnit.name)
+        outState.putString("schedule_task", scheduleEditing)
+        outState.putString("schedule_type", scheduleType.name)
+        outState.putString("schedule_value", scheduleValue)
+        outState.putString("history_task", historyTask)
+        outState.putString("preview_image", previewAsset?.file?.name)
+        outState.putString("detail_task", menuTask)
         outState.putString("assets_task", assetsTask)
         outState.putInt("main_tab", mainTab)
         outState.putBoolean("create_dialog", showCreateDialog)
@@ -511,29 +535,7 @@ class MainActivity : ComponentActivity() {
 
         Scaffold(
             containerColor = MaterialTheme.colorScheme.background,
-            bottomBar = {
-                Surface(shadowElevation = 6.dp, color = MaterialTheme.colorScheme.surface) {
-                NavigationBar(containerColor = MaterialTheme.colorScheme.surface, tonalElevation = 0.dp) {
-                    val icons = listOf(R.drawable.ic_nav_tasks, R.drawable.ic_tool_log,
-                        R.drawable.ic_nav_permissions, R.drawable.ic_nav_settings)
-                    TAB_TITLES.forEachIndexed { index, title ->
-                        NavigationBarItem(
-                            selected = mainTab == index,
-                            onClick = { mainTab = index },
-                            icon = { AppIcon(icons[index]) },
-                            label = { Text(title, fontWeight = if (mainTab == index) FontWeight.SemiBold else FontWeight.Normal) },
-                            colors = NavigationBarItemDefaults.colors(
-                                indicatorColor = MaterialTheme.colorScheme.primaryContainer,
-                                selectedIconColor = MaterialTheme.colorScheme.primary,
-                                selectedTextColor = MaterialTheme.colorScheme.primary,
-                                unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                                unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        )
-                    }
-                }
-                }
-            }
+            bottomBar = { AppBottomNavigation(mainTab) { mainTab = it } }
         ) { padding ->
             // 内容在宽屏居中；各页面分别保存滚动位置。
             Column(
@@ -543,8 +545,7 @@ class MainActivity : ComponentActivity() {
             ) {
                 Box(
                     modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 16.dp),
+                        .fillMaxSize(),
                     contentAlignment = Alignment.TopCenter
                 ) {
                     Column(
@@ -566,6 +567,19 @@ class MainActivity : ComponentActivity() {
         }
 
 
+
+        if (showTransferDialog) AlertDialog(containerColor = MaterialTheme.colorScheme.surface, onDismissRequest = { showTransferDialog = false },
+            title = { Text("导入与导出") }, text = {
+                Column {
+                    DesignRow("导入任务 ZIP", "支持单任务和任务合集", R.drawable.ic_import, enabled = !taskTransferBusy) {
+                        showTransferDialog = false
+                        importZipLauncher.launch(arrayOf("application/zip", "application/octet-stream", "*/*"))
+                    }
+                    DesignRow("导出全部任务", "保存脚本、素材和配置", R.drawable.ic_export,
+                        enabled = tasks.isNotEmpty() && !taskTransferBusy) { showTransferDialog = false; exportAllTasks() }
+                    Text("导入与保存位置由系统文件选择器提供。", style = MaterialTheme.typography.bodySmall)
+                }
+            }, confirmButton = { TextButton(onClick = { showTransferDialog = false }) { Text("关闭") } })
         if (showCreateDialog) {
             CreateTaskDialog(
                 onDismiss = { showCreateDialog = false },
@@ -575,6 +589,7 @@ class MainActivity : ComponentActivity() {
                         Toast.makeText(this, "创建失败：名称非法或已存在", Toast.LENGTH_SHORT).show()
                     } else {
                         showCreateDialog = false
+                        menuTask = created.name
                         Toast.makeText(this, "已创建「" + created.name + "」（" + scaffold.label + "）", Toast.LENGTH_SHORT).show()
                         ScriptRunner.appendLog("已创建任务: " + created.name + "（脚手架：" + scaffold.label + "）")
                         tasks = TaskManager.listTasks(this)
@@ -589,31 +604,25 @@ class MainActivity : ComponentActivity() {
                 taskName = name,
                 onDismiss = { menuTask = null },
                 onEditScript = {
-                    menuTask = null
                     editTask(name)
                 },
-                onRename = { menuTask = null; renamingTask = name },
-                onDelete = { menuTask = null; deletingTask = name },
+                onRename = { renamingTask = name },
+                onDelete = { deletingTask = name },
                 onManageAssets = {
-                    menuTask = null
                     assetsTask = name
                     assets = TaskManager.imageInfos(this, name)
                 },
                 onHistory = {
-                    menuTask = null
                     historyTask = name
                     historyEntries = RunHistory.read(this, name)
                 },
                 onExportZip = {
-                    menuTask = null
                     exportZip(name)
                 },
                 onLoop = {
-                    menuTask = null
                     openLoopSettings(name)
                 },
                 onSchedule = {
-                    menuTask = null
                     scheduleEditing = name
                     currentSchedule = ScheduleManager.scheduleOf(this, name)
                     scheduleType = currentSchedule?.type ?: ScheduleManager.Type.ONCE_AFTER_MINUTES
@@ -631,12 +640,13 @@ class MainActivity : ComponentActivity() {
         renamingTask?.let { name -> RenameTaskDialog(name) }
         deletingTask?.let { name ->
             AlertDialog(
+            containerColor = MaterialTheme.colorScheme.surface,
                 onDismissRequest = { if (!taskMutationBusy) deletingTask = null },
                 title = { Text("删除任务") },
                 text = { Text("确定删除「$name」？脚本、素材、录制范围图和运行历史都会删除，定时任务也会取消。此操作无法撤销。") },
                 confirmButton = {
                     TextButton(enabled = !taskMutationBusy, onClick = {
-                        performTaskChange({ TaskManager.deleteTask(this, name) }, "已删除任务「$name」") { deletingTask = null }
+                        performTaskChange({ TaskManager.deleteTask(this, name) }, "已删除任务「$name」") { deletingTask = null; menuTask = null }
                     }) { Text(if (taskMutationBusy) "正在删除…" else "删除", color = MaterialTheme.colorScheme.error) }
                 },
                 dismissButton = { TextButton(enabled = !taskMutationBusy, onClick = { deletingTask = null }) { Text("取消") } }
@@ -645,6 +655,7 @@ class MainActivity : ComponentActivity() {
 
         if (showClearTasksDialog) {
             AlertDialog(
+            containerColor = MaterialTheme.colorScheme.surface,
                 onDismissRequest = { if (!taskMutationBusy) showClearTasksDialog = false },
                 title = { Text("清空全部任务") },
                 text = { Text("确定删除全部 ${tasks.size} 个任务？脚本、素材、录制范围图和运行历史都会删除，定时任务也会取消。此操作无法撤销。") },
@@ -661,18 +672,47 @@ class MainActivity : ComponentActivity() {
             )
         }
 
+        assetsTask?.let { name ->
+            AssetsDialog(
+                taskName = name,
+                images = assets,
+                onDismiss = { assetsTask = null },
+                onRefresh = { assets = TaskManager.imageInfos(this, name) },
+                onImport = {
+                    importImageLauncher.launch(arrayOf("image/*"))
+                },
+                onHistory = { openAssetsHistory(name) },
+                onPreview = { info -> loadAssetPreview(info) }
+            )
+        }
+
         previewAsset?.let { info ->
             AssetPreviewDialog(
                 info = info,
                 bitmap = previewBitmap,
                 onCrop = { cropAsset(info) },
                 onDismiss = {
+                    previewLoadJob?.cancel()
                     previewAsset = null
                     previewBitmap = null
                 }
             )
         }
 
+        deletingAsset?.let { info ->
+            AlertDialog(containerColor = MaterialTheme.colorScheme.surface, onDismissRequest = { deletingAsset = null }, title = { Text("删除素材") },
+                text = { Text("确定删除「${info.file.name}」？引用这张图片的脚本可能无法运行。此操作无法撤销。") },
+                confirmButton = { TextButton(onClick = {
+                    if (TaskManager.deleteImage(info.file)) {
+                        assetsTask?.let { assets = TaskManager.imageInfos(this@MainActivity, it) }
+                        previewLoadJob?.cancel()
+                        previewAsset = null
+                        previewBitmap = null
+                        deletingAsset = null
+                    } else Toast.makeText(this@MainActivity, "删除失败，请重试", Toast.LENGTH_SHORT).show()
+                }) { Text("删除", color = MaterialTheme.colorScheme.error) } },
+                dismissButton = { TextButton(onClick = { deletingAsset = null }) { Text("取消") } })
+        }
         renameAsset?.let { info ->
             RenameAssetDialog(
                 info = info,
@@ -708,6 +748,7 @@ class MainActivity : ComponentActivity() {
                         Toast.makeText(this, tip, Toast.LENGTH_SHORT).show()
                         ScriptRunner.appendLog(tip)
                         assets = TaskManager.imageInfos(this, task)
+                        assets.firstOrNull { it.file.name == renamed.name }?.let { loadAssetPreview(it) }
                     } else {
                         Toast.makeText(this, "重命名失败（名称非法或已存在）", Toast.LENGTH_SHORT).show()
                     }
@@ -801,26 +842,6 @@ class MainActivity : ComponentActivity() {
             )
         }
 
-        assetsTask?.let { name ->
-            AssetsDialog(
-                taskName = name,
-                images = assets,
-                onDismiss = { assetsTask = null },
-                onRefresh = { assets = TaskManager.imageInfos(this, name) },
-                onImport = {
-                    importImageLauncher.launch(arrayOf("image/*"))
-                },
-                onHistory = { openAssetsHistory(name) },
-                onPreview = { info -> loadAssetPreview(info) },
-                onCrop = { info -> cropAsset(info) },
-                onRename = { info -> renameAsset = info },
-                onDelete = { info ->
-                    TaskManager.deleteImage(info.file)
-                    assets = TaskManager.imageInfos(this, name)
-                }
-            )
-        }
-
         assetsHistoryTask?.let { name ->
             AssetsHistoryDialog(
                 entries = assetsHistory,
@@ -832,64 +853,30 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /** 任务行：名称 + 定时状态 + 编辑 + 更多操作；从悬浮窗启动任务。 */
+    /** 任务行：名称、定时状态与详情入口；执行操作统一进入悬浮面板。 */
     @Composable
     private fun TaskRow(task: TaskManager.TaskInfo, runState: ScriptRunner.RunState) {
         val schedule = schedules[task.name]
-        val canDelete = !runState.running && !RecordingService.active && !taskMutationBusy && !taskTransferBusy
-        val dismissState = rememberSwipeToDismissBoxState(confirmValueChange = { value ->
-            if (value == SwipeToDismissBoxValue.EndToStart) deletingTask = task.name
-            false
-        })
-        SwipeToDismissBox(
-            state = dismissState,
-            enableDismissFromStartToEnd = false,
-            enableDismissFromEndToStart = canDelete,
-            backgroundContent = {
-                Box(
-                    modifier = Modifier.fillMaxSize()
-                        .background(MaterialTheme.colorScheme.errorContainer, MaterialTheme.shapes.medium)
-                        .padding(end = 24.dp),
-                    contentAlignment = Alignment.CenterEnd
-                ) {
-                    Text("删除", color = MaterialTheme.colorScheme.onErrorContainer)
-                }
+        DesignRow(task.name,
+            schedule?.describe() ?: taskSubtitles[task.name]?.ifBlank { "脚本任务 · 待运行" } ?: "脚本任务 · 待运行",
+            if (schedule != null) R.drawable.ic_clock else R.drawable.ic_code,
+            enabled = !taskMutationBusy && !taskTransferBusy,
+            trailing = {
+                if (runState.running && runState.taskName == task.name) StatusBadge("运行中")
+                else if (schedule != null) StatusBadge("已定时", warning = true)
+                else AppIcon(R.drawable.ic_arrow, modifier = Modifier.size(16.dp))
             }
-        ) {
-            WorkCard(modifier = Modifier.fillMaxWidth()) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 88.dp)
-                        .padding(start = 14.dp, end = 4.dp, top = 12.dp, bottom = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    // 图标只表达任务类型，编辑和更多操作仍使用原有入口。
-                    Surface(color = MaterialTheme.colorScheme.primaryContainer,
-                        contentColor = MaterialTheme.colorScheme.primary, shape = RoundedCornerShape(14.dp)) {
-                        Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) {
-                            AppIcon(if (schedule != null) R.drawable.ic_clock else R.drawable.ic_code)
-                        }
-                    }
-                    Spacer(Modifier.width(12.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(task.name, style = MaterialTheme.typography.titleSmall,
-                            maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        Text(when {
-                            schedule != null -> "定时：${schedule.describe()}"
-                            else -> taskSubtitles[task.name]?.ifBlank { "待运行" } ?: "待运行"
-                        },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(top = 4.dp),
-                            maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    }
-                    TextButton(onClick = { editTask(task.name) }, enabled = !runState.running,
-                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp)) { Text("编辑") }
-                    IconButton(onClick = { menuTask = task.name }, enabled = !runState.running) {
-                        AppIcon(R.drawable.ic_more, "${task.name}的更多操作")
-                    }
-                }
-            }
+        ) { menuTask = task.name }
+    }
+
+
+    private fun openFloatingTasks() {
+        if (!FloatyManager.hasOverlayPermission(this)) {
+            FloatyManager.requestOverlayPermission(this)
+            return
         }
+        if (!ScriptRunner.launcherEnabled.value) ScriptRunner.toggleLauncher(this)
+        if (!FloatyManager.showTaskPanel(this)) Toast.makeText(this, "无法打开悬浮面板，请重新开启悬浮球", Toast.LENGTH_SHORT).show()
     }
 
     private fun editTask(name: String) {
@@ -900,42 +887,70 @@ class MainActivity : ComponentActivity() {
             .putExtra(ScriptEditorActivity.EXTRA_ERROR_MSG, err?.message))
     }
 
+    private fun editHistoryError(taskName: String, entry: RunHistory.Entry) {
+        val source = listOfNotNull(entry.message, entry.stack).joinToString("\n")
+        val line = Regex("task\\.js:(\\d+)(?::\\d+)?").find(source)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+        startActivity(Intent(this, ScriptEditorActivity::class.java)
+            .putExtra(ScriptEditorActivity.EXTRA_TASK, taskName)
+            .putExtra(ScriptEditorActivity.EXTRA_ERROR_LINE, line)
+            .putExtra(ScriptEditorActivity.EXTRA_ERROR_MSG, entry.message))
+    }
+
     /** 任务操作菜单：编辑脚本 / 循环执行 / 定时任务 / 模板截取 / 素材管理 */
     @Composable
     private fun TaskMenuDialog(
-        taskName: String,
-        onDismiss: () -> Unit,
-        onEditScript: () -> Unit,
-        onRename: () -> Unit,
-        onDelete: () -> Unit,
-        onManageAssets: () -> Unit,
-        onLoop: () -> Unit,
-        onSchedule: () -> Unit,
-        onExportZip: () -> Unit,
-        onHistory: () -> Unit
+        taskName: String, onDismiss: () -> Unit, onEditScript: () -> Unit, onRename: () -> Unit,
+        onDelete: () -> Unit, onManageAssets: () -> Unit, onLoop: () -> Unit,
+        onSchedule: () -> Unit, onExportZip: () -> Unit, onHistory: () -> Unit
     ) {
-        AlertDialog(
-            onDismissRequest = onDismiss,
-            title = { Text(taskName) },
+        val runState by ScriptRunner.state.collectAsState()
+        val busy = runState.running || RecordingService.active || taskMutationBusy || taskTransferBusy
+        var showMenu by remember { mutableStateOf(false) }
+        var latestRun by remember(taskName) { mutableStateOf<RunHistory.Entry?>(null) }
+        LaunchedEffect(taskName, runState.running) {
+            latestRun = withContext(Dispatchers.IO) { RunHistory.read(this@MainActivity, taskName).firstOrNull() }
+        }
+        val loop = remember(taskName, taskMetadataVersion) { TaskManager.readConfig(this@MainActivity, taskName).loop.describe() }
+        DetailPage(taskName, "脚本任务" + (latestRun?.let { " · 最近运行" + it.outcome.label } ?: " · 尚未运行"), onDismiss,
+            actions = { IconButton(onClick = { showMenu = true }) { AppIcon(R.drawable.ic_more, "任务操作") } }) {
+            SectionLabel("编辑与执行")
+            WorkCard(Modifier.fillMaxWidth()) {
+                DesignRow("编辑脚本", "task.js · JavaScript", R.drawable.ic_code, enabled = !runState.running, onClick = onEditScript)
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                DesignRow("循环执行", loop, R.drawable.ic_clock, enabled = !runState.running, onClick = onLoop)
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                DesignRow("定时运行", schedules[taskName]?.describe() ?: "尚未设置运行时间", R.drawable.ic_clock, onClick = onSchedule)
+            }
+            SectionLabel("素材与记录")
+            WorkCard(Modifier.fillMaxWidth()) {
+                ToolRow("素材管理", "预览、裁剪与整理任务图片", R.drawable.ic_tool_shot, onManageAssets)
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                ToolRow("运行历史", "查看每次运行结果与耗时", R.drawable.ic_tool_log, onHistory)
+            }
+            SectionLabel("其他操作")
+            WorkCard(Modifier.fillMaxWidth()) {
+                DesignRow("重命名任务", "保留脚本、素材及定时设置", R.drawable.ic_code, enabled = !busy, onClick = onRename)
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                DesignRow("导出任务 ZIP", "打包脚本、配置和素材", R.drawable.ic_export, enabled = !taskTransferBusy, onClick = onExportZip)
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                DesignRow("删除任务", "删除相关记录与素材", R.drawable.ic_stop, enabled = !busy, onClick = onDelete)
+            }
+        }
+        if (showMenu) AlertDialog(containerColor = MaterialTheme.colorScheme.surface, onDismissRequest = { showMenu = false }, title = { Text("任务操作") },
             text = {
                 Column(Modifier.verticalScroll(rememberScrollState())) {
-                    ToolRow("编辑脚本", "修改任务脚本", R.drawable.ic_code, onEditScript)
-                    ToolRow("重命名", "修改任务名称，保留脚本与素材", R.drawable.ic_code, onRename)
-                    ToolRow("删除任务", "删除脚本、素材及相关记录", R.drawable.ic_stop, onDelete)
-                    ToolRow("循环执行", remember(taskName, taskMetadataVersion) {
-                        TaskManager.readConfig(this@MainActivity, taskName).loop.describe()
-                    }, R.drawable.ic_clock, onLoop)
-                    ToolRow("定时运行", schedules[taskName]?.describe() ?: "尚未设置运行时间",
-                        R.drawable.ic_clock, onSchedule)
-                    ToolRow("运行历史", "查看执行结果与耗时", R.drawable.ic_tool_log, onHistory)
-                    HorizontalDivider(Modifier.padding(vertical = 8.dp))
-                    ToolRow("素材管理", "预览、裁剪、导入与整理图片", R.drawable.ic_tool_color, onManageAssets)
-                    HorizontalDivider(Modifier.padding(vertical = 8.dp))
-                    ToolRow("导出 ZIP", "分享脚本、素材与配置", R.drawable.ic_export, onExportZip)
+                    listOf(Triple("编辑脚本", R.drawable.ic_code, onEditScript),
+                        Triple("循环执行", R.drawable.ic_clock, onLoop),
+                        Triple("定时运行", R.drawable.ic_clock, onSchedule),
+                        Triple("素材管理", R.drawable.ic_tool_shot, onManageAssets),
+                        Triple("运行历史", R.drawable.ic_tool_log, onHistory),
+                        Triple("重命名任务", R.drawable.ic_code, onRename),
+                        Triple("导出任务 ZIP", R.drawable.ic_export, onExportZip),
+                        Triple("删除任务", R.drawable.ic_stop, onDelete)).forEach { (label, icon, action) ->
+                        DesignRow(label, "", icon, enabled = !busy) { showMenu = false; action() }
+                    }
                 }
-            },
-            confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } }
-        )
+            }, confirmButton = { TextButton(onClick = { showMenu = false }) { Text("关闭") } })
     }
 
     /** 从任务配置加载循环设置；旧任务没有 mode 时沿用原有执行次数。 */
@@ -980,66 +995,40 @@ class MainActivity : ComponentActivity() {
     /** 整个任务循环设置：每轮重新运行 task.js，间隔只发生在轮次之间。 */
     @Composable
     private fun LoopDialog(
-        taskName: String,
-        mode: TaskLoop.Mode,
-        count: String,
-        duration: String,
-        durationUnit: DurationUnit,
-        interval: String,
-        onModeChange: (TaskLoop.Mode) -> Unit,
-        onCountChange: (String) -> Unit,
-        onDurationChange: (String) -> Unit,
-        onDurationUnitChange: (DurationUnit) -> Unit,
-        onIntervalChange: (String) -> Unit,
-        onDismiss: () -> Unit,
-        onSave: () -> Unit
+        taskName: String, mode: TaskLoop.Mode, count: String, duration: String, durationUnit: DurationUnit,
+        interval: String, onModeChange: (TaskLoop.Mode) -> Unit, onCountChange: (String) -> Unit,
+        onDurationChange: (String) -> Unit, onDurationUnitChange: (DurationUnit) -> Unit,
+        onIntervalChange: (String) -> Unit, onDismiss: () -> Unit, onSave: () -> Unit
     ) {
-        AlertDialog(
-            onDismissRequest = onDismiss,
-            title = { Text("循环执行 · $taskName") },
-            text = {
-                Column(Modifier.heightIn(max = 440.dp).verticalScroll(rememberScrollState())) {
-                    Text("每轮从头执行整个任务；出错或按停止键时结束。",
-                        style = MaterialTheme.typography.bodySmall)
-                    listOf(
-                        TaskLoop.Mode.COUNT to "指定次数",
-                        TaskLoop.Mode.DURATION to "指定执行时间",
-                        TaskLoop.Mode.UNTIL_STOPPED to "直到手动停止"
-                    ).forEach { (option, label) ->
-                        Row(Modifier.fillMaxWidth().clickable { onModeChange(option) },
-                            verticalAlignment = Alignment.CenterVertically) {
-                            RadioButton(selected = mode == option, onClick = null)
-                            Text(label)
-                        }
-                    }
-                    if (mode == TaskLoop.Mode.COUNT) {
-                        OutlinedTextField(count, onCountChange, modifier = Modifier.fillMaxWidth(),
-                            singleLine = true, label = { Text("执行次数") },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
-                    }
+        DetailPage("循环执行", taskName, onDismiss, footer = { PrimaryAction("保存循环设置", onClick = onSave) }) {
+            Text("每轮从头执行整个任务；出错或按停止键时结束。", style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Column(Modifier.selectableGroup(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                ChoiceCard("指定次数", "运行固定次数后结束", mode == TaskLoop.Mode.COUNT) { onModeChange(TaskLoop.Mode.COUNT) }
+                ChoiceCard("指定执行时间", "到时中断当前轮", mode == TaskLoop.Mode.DURATION) { onModeChange(TaskLoop.Mode.DURATION) }
+                ChoiceCard("直到手动停止", "持续运行，手动结束", mode == TaskLoop.Mode.UNTIL_STOPPED) { onModeChange(TaskLoop.Mode.UNTIL_STOPPED) }
+            }
+            SectionLabel("运行参数")
+            WorkCard(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    if (mode == TaskLoop.Mode.COUNT) OutlinedTextField(count, onCountChange, Modifier.fillMaxWidth(),
+                        singleLine = true, label = { Text("执行次数") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
                     if (mode == TaskLoop.Mode.DURATION) {
-                        OutlinedTextField(duration, onDurationChange, modifier = Modifier.fillMaxWidth(),
-                            singleLine = true, label = { Text("执行时间") },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
-                        Row {
+                        OutlinedTextField(duration, onDurationChange, Modifier.fillMaxWidth(), singleLine = true,
+                            label = { Text("执行时间") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+                        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             DurationUnit.entries.forEach { unit ->
-                                TextButton(onClick = { onDurationUnitChange(unit) }) {
-                                    Text(if (durationUnit == unit) "● ${unit.label}" else unit.label)
-                                }
+                                FilterChip(durationUnit == unit, { onDurationUnitChange(unit) }, label = { Text(unit.label) })
                             }
                         }
-                        Text("计时从启动任务开始；到时会中断当前轮。",
-                            style = MaterialTheme.typography.bodySmall)
                     }
-                    OutlinedTextField(interval, onIntervalChange, modifier = Modifier.fillMaxWidth(),
-                        singleLine = true, label = { Text("两轮间隔（秒）") },
-                        supportingText = { Text("0 表示完成后立即开始下一轮") },
+                    if (mode == TaskLoop.Mode.UNTIL_STOPPED) Text("运行到按停止键为止。", style = MaterialTheme.typography.bodySmall)
+                    OutlinedTextField(interval, onIntervalChange, Modifier.fillMaxWidth(), singleLine = true,
+                        label = { Text("两轮间隔 · 秒") }, supportingText = { Text("0 表示完成后立即开始下一轮") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
                 }
-            },
-            confirmButton = { TextButton(onClick = onSave) { Text("保存") } },
-            dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
-        )
+            }
+        }
     }
 
     /** 把对话框输入解析为定时设置；参数非法返回 null */
@@ -1052,7 +1041,7 @@ class MainActivity : ComponentActivity() {
 
         ScheduleManager.Type.EVERY_MINUTES -> {
             val m = scheduleValue.trim().toIntOrNull() ?: return null
-            if (m <= 0) null
+            if (m < 15) null
             else ScheduleManager.Schedule(taskName, scheduleType, intervalMinutes = m)
         }
 
@@ -1068,171 +1057,104 @@ class MainActivity : ComponentActivity() {
     /** 定时任务设置对话框：选类型 + 填参数，可保存或取消定时 */
     @Composable
     private fun ScheduleDialog(
-        taskName: String,
-        current: ScheduleManager.Schedule?,
-        type: ScheduleManager.Type,
-        value: String,
-        onTypeChange: (ScheduleManager.Type) -> Unit,
-        onValueChange: (String) -> Unit,
-        onDismiss: () -> Unit,
-        onSave: () -> Unit,
-        onCancelSchedule: () -> Unit
+        taskName: String, current: ScheduleManager.Schedule?, type: ScheduleManager.Type, value: String,
+        onTypeChange: (ScheduleManager.Type) -> Unit, onValueChange: (String) -> Unit,
+        onDismiss: () -> Unit, onSave: () -> Unit, onCancelSchedule: () -> Unit
     ) {
-        AlertDialog(
-            onDismissRequest = onDismiss,
-            title = { Text("定时任务 · $taskName") },
-            text = {
-                Column {
-                    Text(
-                        current?.let { "当前：${it.describe()}" } ?: "当前：未设置",
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                    Row(modifier = Modifier.padding(vertical = 8.dp)) {
-                        listOf(
-                            ScheduleManager.Type.ONCE_AFTER_MINUTES to "一次",
-                            ScheduleManager.Type.EVERY_MINUTES to "间隔",
-                            ScheduleManager.Type.DAILY_AT to "每天"
-                        ).forEach { (t, label) ->
-                            TextButton(onClick = { onTypeChange(t) }) {
-                                Text(
-                                    if (type == t) "● $label" else label,
-                                    color = if (type == t) MaterialTheme.colorScheme.primary
-                                    else MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-                    }
-                    OutlinedTextField(
-                        value = value,
-                        onValueChange = onValueChange,
-                        singleLine = true,
-                        label = {
-                            Text(
-                                when (type) {
-                                    ScheduleManager.Type.ONCE_AFTER_MINUTES -> "多少分钟后执行一次"
-                                    ScheduleManager.Type.EVERY_MINUTES -> "每隔多少分钟（最少 15）"
-                                    ScheduleManager.Type.DAILY_AT -> "每天几点（HH:mm）"
-                                }
-                            )
-                        }
-                    )
-                    Text(
-                        when (type) {
-                            ScheduleManager.Type.ONCE_AFTER_MINUTES -> "到点自动运行一次"
-                            ScheduleManager.Type.EVERY_MINUTES -> "每隔 N 分钟运行一次，首次在 N 分钟后"
-                            ScheduleManager.Type.DAILY_AT -> "每天该时刻自动运行"
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.padding(top = 6.dp)
-                    )
-                }
-            },
-            confirmButton = { TextButton(onClick = onSave) { Text("保存") } },
-            dismissButton = {
-                Row {
-                    if (current != null) {
-                        TextButton(onClick = onCancelSchedule) { Text("取消定时") }
-                    }
-                    TextButton(onClick = onDismiss) { Text("关闭") }
+        DetailPage("定时运行", taskName, onDismiss, footer = { PrimaryAction("保存定时设置", onClick = onSave) }) {
+            Text(current?.let { "当前设置：${it.describe()}" } ?: "当前尚未设置定时",
+                Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(11.dp)).padding(12.dp),
+                style = MaterialTheme.typography.bodySmall, color = Color(AppPalette.TERTIARY))
+            SectionLabel("运行频率")
+            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf(ScheduleManager.Type.ONCE_AFTER_MINUTES to "一次", ScheduleManager.Type.EVERY_MINUTES to "间隔",
+                    ScheduleManager.Type.DAILY_AT to "每天").forEach { (option, label) ->
+                    FilterChip(type == option, { onTypeChange(option) }, label = { Text(label) })
                 }
             }
-        )
+            WorkCard(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(value, onValueChange, Modifier.fillMaxWidth(), singleLine = true,
+                        label = { Text(when (type) {
+                            ScheduleManager.Type.ONCE_AFTER_MINUTES -> "多少分钟后运行一次"
+                            ScheduleManager.Type.EVERY_MINUTES -> "每隔多少分钟（至少 15）"
+                            ScheduleManager.Type.DAILY_AT -> "每天几点 · HH:mm"
+                        }) }, keyboardOptions = KeyboardOptions(keyboardType = if (type == ScheduleManager.Type.DAILY_AT) KeyboardType.Text else KeyboardType.Number))
+                    Text(when (type) {
+                        ScheduleManager.Type.ONCE_AFTER_MINUTES -> "到点自动运行一次。"
+                        ScheduleManager.Type.EVERY_MINUTES -> "首次在设定的间隔后运行。"
+                        ScheduleManager.Type.DAILY_AT -> "每天该时刻自动运行。"
+                    }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            if (current != null) TextButton(onClick = onCancelSchedule) { Text("取消当前定时", color = MaterialTheme.colorScheme.error) }
+        }
     }
 
     /** 素材管理：列出任务 images/ 下的图片，支持预览、裁剪与整理。 */
     @Composable
     private fun AssetsDialog(
-        taskName: String,
-        images: List<TaskManager.ImageInfo>,
-        onDismiss: () -> Unit,
-        onRefresh: () -> Unit,
-        onImport: () -> Unit,
-        onHistory: () -> Unit,
-        onPreview: (TaskManager.ImageInfo) -> Unit,
-        onCrop: (TaskManager.ImageInfo) -> Unit,
-        onRename: (TaskManager.ImageInfo) -> Unit,
-        onDelete: (TaskManager.ImageInfo) -> Unit
+        taskName: String, images: List<TaskManager.ImageInfo>, onDismiss: () -> Unit,
+        onRefresh: () -> Unit, onImport: () -> Unit, onHistory: () -> Unit,
+        onPreview: (TaskManager.ImageInfo) -> Unit
     ) {
-        AlertDialog(
-            onDismissRequest = onDismiss,
-            title = { Text("素材 · $taskName") },
-            text = {
-                Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        TextButton(onClick = onImport) { Text("+ 从相册导入") }
-                        TextButton(onClick = onHistory) { Text("历史素材") }
-                    }
-                    if (images.isEmpty()) {
-                        Text("images/ 目录暂无图片，可从相册导入素材", style = MaterialTheme.typography.bodySmall)
-                    } else {
-                        images.forEach { info ->
-                            Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable { onPreview(info) }
-                                ) {
-                                    Text(info.file.name, style = MaterialTheme.typography.bodyMedium,
-                                        maxLines = 2, overflow = TextOverflow.Ellipsis)
-                                    Text(
-                                        info.dimensionText() + " · " + info.sizeText() + "（点击预览）",
-                                        style = MaterialTheme.typography.bodySmall
-                                    )
-                                }
-                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                                    TextButton(onClick = { onCrop(info) }, enabled = info.width > 0 && info.height > 0) { Text("裁剪") }
-                                    TextButton(onClick = { onRename(info) }) { Text("重命名") }
-                                    TextButton(onClick = { onDelete(info) }) { Text("删除") }
-                                }
-                                HorizontalDivider()
-                            }
+        DetailPage("素材管理", taskName, onDismiss, actions = { TextButton(onClick = onImport) { Text("导入") } }) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("任务图片", style = MaterialTheme.typography.titleMedium)
+                Text("${images.size} 张图片", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            if (images.isEmpty()) EmptyState("还没有素材", "从相册导入图片，或使用悬浮工具截取模板。", R.drawable.ic_tool_shot, "从相册导入", onImport)
+            else WorkCard(Modifier.fillMaxWidth()) {
+                images.forEachIndexed { index, info ->
+                    Row(Modifier.fillMaxWidth().clickable { onPreview(info) }.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                        AssetThumbnail(info.file, info.file.lastModified(), info.file.length())
+                        Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
+                            Text(info.file.name, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            Text(info.dimensionText() + " · " + info.sizeText(), style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
+                        AppIcon(R.drawable.ic_arrow, modifier = Modifier.size(16.dp))
                     }
-                    TextButton(onClick = onRefresh) { Text("刷新") }
+                    if (index < images.lastIndex) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 }
-            },
-            confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } }
-        )
+            }
+            SectionLabel("素材工具")
+            WorkCard(Modifier.fillMaxWidth()) {
+                ToolRow("从相册导入", "选择图片并添加到当前任务", R.drawable.ic_import, onImport)
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                ToolRow("历史素材", "查看裁剪前保留的原图", R.drawable.ic_clock, onHistory)
+            }
+            TextButton(onClick = onRefresh) { Text("刷新素材") }
+        }
     }
 
     /** 历史素材仅提供移回操作，不提供预览、裁剪、重命名或删除入口。 */
     @Composable
-    private fun AssetsHistoryDialog(
-        entries: List<ImageHistory.Entry>,
-        busy: Boolean,
-        error: String?,
-        onDismiss: () -> Unit,
-        onMoveBack: (ImageHistory.Entry) -> Unit
-    ) {
-        AlertDialog(
-            onDismissRequest = { if (!busy) onDismiss() },
-            title = { Text("历史素材") },
-            text = {
-                Column(Modifier.verticalScroll(rememberScrollState())) {
-                    Text("移回后恢复原文件名，直接覆盖当前同名素材。",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    if (busy) Text("正在处理…", modifier = Modifier.padding(vertical = 8.dp))
-                    if (error != null) Text(error, color = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.padding(vertical = 8.dp))
-                    if (entries.isEmpty() && !busy && error == null) {
-                        Text("暂无历史素材，裁剪前的原图会保存在这里。", modifier = Modifier.padding(vertical = 16.dp))
-                    }
-                    entries.forEach { entry ->
-                        Column(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
-                            Text(entry.originalName, style = MaterialTheme.typography.bodyMedium,
-                                maxLines = 2, overflow = TextOverflow.Ellipsis)
-                            Text(entry.archivedAt, style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            TextButton(onClick = { onMoveBack(entry) }, enabled = !busy,
-                                modifier = Modifier.align(Alignment.End)) { Text("移回素材") }
-                            HorizontalDivider()
+    private fun AssetsHistoryDialog(entries: List<ImageHistory.Entry>, busy: Boolean, error: String?,
+        onDismiss: () -> Unit, onMoveBack: (ImageHistory.Entry) -> Unit) {
+        DetailPage("历史素材", "裁剪前保留的原始图片", { if (!busy) onDismiss() }) {
+            Text("移回后恢复原文件名，并直接覆盖当前同名素材。",
+                Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(11.dp)).padding(12.dp),
+                style = MaterialTheme.typography.bodySmall, color = Color(AppPalette.TERTIARY))
+            if (busy) CircularProgressIndicator()
+            error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            if (entries.isEmpty() && !busy && error == null) EmptyState("暂无历史素材", "裁剪前的原图会保存在这里。", R.drawable.ic_clock)
+            if (entries.isNotEmpty()) {
+                SectionLabel("已归档版本")
+                WorkCard(Modifier.fillMaxWidth()) {
+                    entries.forEachIndexed { index, entry ->
+                        Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(entry.originalName, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                Text(entry.archivedAt, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            TextButton(onClick = { onMoveBack(entry) }, enabled = !busy) { Text("移回素材") }
                         }
+                        if (index < entries.lastIndex) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                     }
                 }
-            },
-            confirmButton = { TextButton(onClick = onDismiss, enabled = !busy) { Text("关闭") } }
-        )
+            }
+        }
     }
 
     /** 素材预览：显示图片与尺寸/大小信息 */
@@ -1261,38 +1183,35 @@ class MainActivity : ComponentActivity() {
     }
 
     @Composable
-    private fun AssetPreviewDialog(
-        info: TaskManager.ImageInfo,
-        bitmap: android.graphics.Bitmap?,
-        onCrop: () -> Unit,
-        onDismiss: () -> Unit
-    ) {
-        AlertDialog(
-            onDismissRequest = onDismiss,
-            title = { Text(info.file.name) },
-            text = {
-                Column {
-                    Text(
-                        info.dimensionText() + " · " + info.sizeText(),
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                    if (bitmap != null) {
-                        androidx.compose.foundation.Image(
-                            bitmap = bitmap.asImageBitmap(),
-                            contentDescription = info.file.name,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(top = 8.dp),
-                            contentScale = androidx.compose.ui.layout.ContentScale.Fit
-                        )
-                    } else {
-                        Text("无法解码该图片（可能不是有效的图片文件）", style = MaterialTheme.typography.bodySmall)
-                    }
+    private fun AssetPreviewDialog(info: TaskManager.ImageInfo, bitmap: android.graphics.Bitmap?,
+        onCrop: () -> Unit, onDismiss: () -> Unit) {
+        DetailPage("图片详情", info.file.name, onDismiss) {
+            Text("图片预览", style = MaterialTheme.typography.titleMedium)
+            WorkCard(Modifier.fillMaxWidth()) {
+                if (bitmap != null) Image(bitmap.asImageBitmap(), contentDescription = info.file.name,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 160.dp, max = 300.dp).padding(16.dp),
+                    contentScale = androidx.compose.ui.layout.ContentScale.Fit)
+                else Text("无法解码该图片，请检查文件是否有效。", Modifier.padding(24.dp), style = MaterialTheme.typography.bodySmall)
+            }
+            SectionLabel("文件信息")
+            WorkCard(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(info.file.name, style = MaterialTheme.typography.titleSmall)
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    Text(info.dimensionText() + " · " + info.sizeText(), style = MaterialTheme.typography.bodySmall)
+                    Text("images/${info.file.name}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-            },
-            confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } },
-            dismissButton = { TextButton(onClick = onCrop, enabled = bitmap != null) { Text("裁剪") } }
-        )
+            }
+            SectionLabel("图片操作")
+            val busy = ScriptRunner.state.collectAsState().value.running || RecordingService.active
+            WorkCard(Modifier.fillMaxWidth()) {
+                DesignRow("裁剪图片", "原图将保存到历史素材", R.drawable.ic_tool_region, enabled = bitmap != null && !busy, onClick = onCrop)
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                DesignRow("重命名图片", "预览并同步修改脚本引用", R.drawable.ic_code, enabled = !busy) { renameAsset = info }
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                DesignRow("删除图片", "移除当前图片", R.drawable.ic_stop, enabled = !busy) { deletingAsset = info }
+            }
+        }
     }
 
     /** 素材重命名对话框 */
@@ -1304,6 +1223,7 @@ class MainActivity : ComponentActivity() {
     ) {
         var name by remember(info.file.absolutePath) { mutableStateOf(info.file.name) }
         AlertDialog(
+            containerColor = MaterialTheme.colorScheme.surface,
             onDismissRequest = onDismiss,
             title = { Text("重命名素材") },
             text = {
@@ -1337,6 +1257,7 @@ class MainActivity : ComponentActivity() {
     ) {
         val plan = preview.plan
         AlertDialog(
+            containerColor = MaterialTheme.colorScheme.surface,
             onDismissRequest = onDismiss,
             title = { Text("重命名为 ${preview.newName}") },
             text = {
@@ -1383,236 +1304,132 @@ class MainActivity : ComponentActivity() {
         )
     }
 
-    /** 分区卡片标题：统一「标题 + 可选说明」的层级，替代散落的裸文本 */
-    @Composable
-    private fun SectionTitle(title: String, hint: String? = null) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 8.dp)
-        ) {
-            Text(title, style = MaterialTheme.typography.titleSmall)
-            if (hint != null) {
-                Text(
-                    hint,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
-    }
-
     /** 三项权限纵向显示为状态卡，状态底色与文字同步反映授权情况。 */
     @Composable
     private fun PermissionCard() {
-        WorkCard(modifier = Modifier.fillMaxWidth()) {
-            Column {
-                SectionTitle("权限状态", "点击卡片管理权限")
-                // 保留三项权限入口，纵向排列以完整显示用途与状态，并适应大字体。
-                Box(Modifier.fillMaxWidth().padding(start = 14.dp, end = 14.dp, bottom = 14.dp)) {
-                    Column(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        PermissionStatusCard(
-                            title = "无障碍",
-                            description = "点击、滑动与手势",
-                            iconRes = R.drawable.ic_permission_gesture,
-                            ready = a11yEnabled,
-                            status = if (a11yEnabled) "已开启" else "未开启",
-                            actionLabel = if (a11yEnabled) "查看保活设置" else "开启无障碍服务",
-                            modifier = Modifier.fillMaxWidth(),
-                            onClick = {
-                                if (a11yEnabled) keepAliveDialog = true
-                                else startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-                            }
-                        )
-                        PermissionStatusCard(
-                            title = "悬浮窗",
-                            description = "在其他应用上显示",
-                            iconRes = R.drawable.ic_floaty,
-                            ready = overlayGranted,
-                            status = if (overlayGranted) "已授权" else "未授权",
-                            actionLabel = if (overlayGranted) "查看悬浮窗授权状态" else "授予悬浮窗权限",
-                            modifier = Modifier.fillMaxWidth(),
-                            onClick = {
-                                if (overlayGranted) {
-                                    Toast.makeText(this@MainActivity, "悬浮窗权限已授权", Toast.LENGTH_SHORT).show()
-                                } else {
-                                    FloatyManager.requestOverlayPermission(this@MainActivity)
-                                }
-                            }
-                        )
-                        PermissionStatusCard(
-                            title = "截屏",
-                            description = "找图、取色与识别",
-                            iconRes = R.drawable.ic_capture_system,
-                            ready = captureReady,
-                            status = if (captureReady) "可用" else "未就绪",
-                            actionLabel = "选择截屏方式",
-                            modifier = Modifier.fillMaxWidth(),
-                            onClick = { openCaptureDialog() }
-                        )
-                    }
-                }
+        WorkCard(Modifier.fillMaxWidth()) {
+            DesignRow("无障碍服务", "点击、滑动与手势", R.drawable.ic_permission_gesture,
+                trailing = { StatusBadge(if (a11yEnabled) "已开启" else "未开启", warning = !a11yEnabled) }) {
+                if (a11yEnabled) keepAliveDialog = true
+                else startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
             }
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            DesignRow("悬浮窗", "在其他应用上显示控制面板", R.drawable.ic_floaty,
+                trailing = { StatusBadge(if (overlayGranted) "已授权" else "未授权", warning = !overlayGranted) }) {
+                if (overlayGranted) mainTab = 3 else FloatyManager.requestOverlayPermission(this@MainActivity)
+            }
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            DesignRow("截屏能力", ScreenCapture.mode(this@MainActivity).label, R.drawable.ic_tool_shot,
+                trailing = { StatusBadge(if (captureReady) "可用" else "未就绪", warning = !captureReady) }) { openCaptureDialog() }
         }
     }
 
     /** 工具行：名称 + 用途 + 尾部箭头 */
     @Composable
     private fun ToolRow(title: String, desc: String, icon: Int = R.drawable.ic_nav_tools, onClick: () -> Unit) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable { onClick() }
-                .heightIn(min = 80.dp)
-                .padding(horizontal = 16.dp, vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Surface(color = if (title == "删除任务") MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.primaryContainer,
-                contentColor = if (title == "删除任务") MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
-                shape = RoundedCornerShape(14.dp)) {
-                Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) { AppIcon(icon) }
-            }
-            Column(modifier = Modifier.weight(1f).padding(horizontal = 12.dp)) {
-                Text(title, style = MaterialTheme.typography.titleSmall)
-                Text(
-                    desc,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            AppIcon(R.drawable.ic_arrow, modifier = Modifier.size(16.dp))
-        }
+        DesignRow(title, desc, icon, onClick = onClick)
     }
 
     /** 任务列表区：标题行（数量 + 导入/导出全部 + 新建） + 列表 */
     @Composable
     private fun TaskListSection(runState: ScriptRunner.RunState, modifier: Modifier = Modifier) {
-        Column(modifier = modifier.fillMaxWidth()) {
-            PageHeading("任务空间", "从悬浮球选择任务，让重复自动完成。")
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(bottom = 14.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text("全部任务", style = MaterialTheme.typography.titleSmall)
-                    Text("${tasks.size} 个任务", style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                FilledTonalIconButton(onClick = { showClearTasksDialog = true },
-                    enabled = tasks.isNotEmpty() && !runState.running && !RecordingService.active &&
-                        !taskTransferBusy && !taskMutationBusy,
-                    modifier = Modifier.size(48.dp),
-                    colors = IconButtonDefaults.filledTonalIconButtonColors(
-                        containerColor = MaterialTheme.colorScheme.errorContainer,
-                        contentColor = MaterialTheme.colorScheme.error),
-                    shape = MaterialTheme.shapes.small) {
-                    TaskActionLabel(R.drawable.ic_clear_tasks, "清空", "清空全部任务")
-                }
-                Spacer(Modifier.width(4.dp))
-                FilledTonalIconButton(onClick = {
-                    importZipLauncher.launch(arrayOf("application/zip", "application/octet-stream", "*/*"))
-                }, enabled = !taskTransferBusy, modifier = Modifier.size(48.dp), shape = MaterialTheme.shapes.small) {
-                    TaskActionLabel(R.drawable.ic_import, "导入", "导入 ZIP")
-                }
-                Spacer(Modifier.width(4.dp))
-                FilledTonalIconButton(onClick = { exportAllTasks() },
-                    enabled = tasks.isNotEmpty() && !taskTransferBusy,
-                    modifier = Modifier.size(48.dp), shape = MaterialTheme.shapes.small) {
-                    TaskActionLabel(R.drawable.ic_export, "导出", "导出全部")
-                }
-                Spacer(Modifier.width(4.dp))
-                FilledIconButton(onClick = { showCreateDialog = true },
-                    modifier = Modifier.size(48.dp), shape = MaterialTheme.shapes.small) {
-                    TaskActionLabel(R.drawable.ic_add, "新建", "新建任务")
-                }
-            }
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-                contentPadding = PaddingValues(bottom = 16.dp)
-            ) {
-                items(tasks, key = { it.name }) { task ->
-                    TaskRow(task, runState)
-                }
-                if (tasks.isEmpty()) {
-                    item {
-                        WorkCard(Modifier.fillMaxWidth()) {
-                            Column(Modifier.fillMaxWidth().padding(28.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                                Surface(color = MaterialTheme.colorScheme.primaryContainer,
-                                    contentColor = MaterialTheme.colorScheme.primary, shape = RoundedCornerShape(20.dp)) {
-                                    Box(Modifier.size(72.dp), contentAlignment = Alignment.Center) {
-                                        AppIcon(R.drawable.ic_nav_tasks, modifier = Modifier.size(32.dp))
-                                    }
-                                }
-                                Text("创建你的第一个任务", style = MaterialTheme.typography.titleMedium,
-                                    modifier = Modifier.padding(top = 16.dp, bottom = 6.dp))
-                                Text("从空白、签到或找图模板开始，也可导入单任务或合集 ZIP。",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    textAlign = TextAlign.Center)
-                            }
+        Column(modifier) {
+            PageHeading("任务空间", "把重复的事交给脚本，留时间给自己。")
+            LazyColumn(Modifier.fillMaxWidth().weight(1f),
+                contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(0.dp)) {
+                item {
+                    Row(Modifier.fillMaxWidth().padding(bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("全部任务", style = MaterialTheme.typography.titleMedium)
+                            Text("${tasks.size} 个任务 · 按名称管理", style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
+                        IconButton(onClick = { showCreateDialog = true }) { AppIcon(R.drawable.ic_add, "新建任务") }
+                        IconButton(onClick = { showTransferDialog = true }) { AppIcon(R.drawable.ic_more, "导入与导出") }
+                    }
+                }
+                if (tasks.isEmpty()) item {
+                    EmptyState("还没有任务", "用空白、签到或找图模板快速开始，也可以导入已有 ZIP 文件。",
+                        R.drawable.ic_nav_tasks, "创建第一个任务") { showCreateDialog = true }
+                }
+                // 行按需组合，长任务列表不一次性加载所有内容。
+                itemsIndexed(tasks, key = { _, task -> task.name }) { index, task ->
+                    Surface(Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.surface,
+                        shape = RoundedCornerShape(topStart = if (index == 0) 18.dp else 0.dp,
+                            topEnd = if (index == 0) 18.dp else 0.dp,
+                            bottomStart = if (index == tasks.lastIndex) 18.dp else 0.dp,
+                            bottomEnd = if (index == tasks.lastIndex) 18.dp else 0.dp)) {
+                        Column {
+                            TaskRow(task, runState)
+                            if (index < tasks.lastIndex) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                        }
+                    }
+                }
+                item { Column(Modifier.padding(top = 10.dp, bottom = 10.dp)) { SectionLabel("任务工具") } }
+                item {
+                    WorkCard(Modifier.fillMaxWidth()) {
+                        DesignRow("导入任务", "支持单任务与任务合集 ZIP", R.drawable.ic_import,
+                            enabled = !taskTransferBusy) {
+                            importZipLauncher.launch(arrayOf("application/zip", "application/octet-stream", "*/*"))
+                        }
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                        DesignRow("导出全部", "备份任务、素材和配置", R.drawable.ic_export,
+                            enabled = tasks.isNotEmpty() && !taskTransferBusy) { exportAllTasks() }
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                        DesignRow("清空全部任务", "删除所有任务及运行记录", R.drawable.ic_clear_tasks,
+                            enabled = tasks.isNotEmpty() && !runState.running && !RecordingService.active &&
+                                !taskTransferBusy && !taskMutationBusy) { showClearTasksDialog = true }
                     }
                 }
             }
         }
     }
 
-    /** 原有四个顶部操作增加文字标签，图标和文字共用同一个点击区域。 */
-    @Composable
-    private fun TaskActionLabel(icon: Int, label: String, description: String) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            AppIcon(icon, description, Modifier.size(18.dp))
-            Text(label, fontSize = 10.sp, lineHeight = 13.sp, maxLines = 1)
-        }
-    }
-
     /** 权限页：三项能力与截屏通道设置。 */
     @Composable
     private fun PermissionsTab() {
-        // 纵向权限卡自身可滚动，横屏和大字体下不再压缩卡片高度。
-        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            PageHeading("运行准备", "按需开启权限，准备好脚本运行环境。")
-            PermissionCard()
-            Spacer(Modifier.height(16.dp))
+        Column(Modifier.fillMaxSize()) {
+            PageHeading("运行准备", "按需开启权限，清楚知道每项能力的状态。")
+            Column(Modifier.verticalScroll(rememberScrollState()).padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                SectionLabel("必需能力")
+                PermissionCard()
+                Text("先开启权限，再执行依赖该能力的任务；截屏方式需要手动确认并测试。",
+                    Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(11.dp)).padding(12.dp),
+                    style = MaterialTheme.typography.bodySmall, color = Color(AppPalette.TERTIARY))
+            }
         }
     }
 
     /** 设置页：悬浮球与截屏通道；屏幕拾取工具和悬浮日志入口统一收在悬浮窗面板中。 */
     @Composable
     private fun SettingsTab(launcherEnabled: Boolean) {
-        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            PageHeading("应用设置", "管理悬浮球与截屏通道。")
-            // 悬浮球与自动贴边保留在「悬浮控制」卡片中；截屏通道单独成卡，入口数量不变。
-            WorkCard(modifier = Modifier.fillMaxWidth()) {
-                SectionTitle("悬浮控制", "在其他应用中也能随时开始工作")
-                ToolRow(
-                    if (launcherEnabled) "隐藏悬浮球" else "显示悬浮球",
-                    if (launcherEnabled) "已开启 · 点击后隐藏" else "随时选择任务、控制运行",
-                    R.drawable.ic_floaty
-                ) {
-                    if (!overlayGranted) FloatyManager.requestOverlayPermission(this@MainActivity)
-                    else ScriptRunner.toggleLauncher(this@MainActivity)
+        Column(Modifier.fillMaxSize()) {
+            PageHeading("应用设置", "让工具在你习惯的位置，按你喜欢的方式工作。")
+            Column(Modifier.verticalScroll(rememberScrollState()).padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                SectionLabel("悬浮控制")
+                WorkCard(Modifier.fillMaxWidth()) {
+                    val toggle: () -> Unit = {
+                        if (!overlayGranted) FloatyManager.requestOverlayPermission(this@MainActivity)
+                        else ScriptRunner.toggleLauncher(this@MainActivity)
+                    }
+                    DesignRow("显示悬浮球", "在其他应用中快速启动任务", R.drawable.ic_floaty,
+                        trailing = { Switch(checked = launcherEnabled, onCheckedChange = { toggle() },
+                            colors = SwitchDefaults.colors(checkedTrackColor = Color(AppPalette.SUCCESS))) }, onClick = toggle)
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    AutoSnapRow()
                 }
-                HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
-                // 自动贴边开关：控制拖动松手后是否吸到左右边缘
-                AutoSnapRow()
+                SectionLabel("截图与识别")
+                WorkCard(Modifier.fillMaxWidth()) {
+                    ToolRow("截屏通道设置", ScreenCapture.mode(this@MainActivity).label + " · 点击更换并测试",
+                        R.drawable.ic_tool_shot) { openCaptureDialog() }
+                }
+                SectionLabel("快捷入口")
+                WorkCard(Modifier.fillMaxWidth()) {
+                    ToolRow("打开悬浮任务面板", "查看任务队列及快捷工具", R.drawable.ic_nav_tasks) { openFloatingTasks() }
+                }
             }
-            WorkCard(modifier = Modifier.fillMaxWidth()) {
-                ToolRow(
-                    "截屏通道设置",
-                    "系统授权截屏或超级权限截屏 · 使用前请手动选择",
-                    R.drawable.ic_tool_shot
-                ) { openCaptureDialog() }
-            }
-            Spacer(Modifier.height(16.dp))
         }
     }
 
@@ -1622,70 +1439,40 @@ class MainActivity : ComponentActivity() {
      */
     @Composable
     private fun AutoSnapRow() {
-        val context = this@MainActivity
-        var autoSnap by remember { mutableStateOf(FloatyManager.isAutoSnapEnabled(context)) }
-        // 整行点击与 Switch 回调都走这里，避免 Switch 自带回调再取反两次
+        var autoSnap by remember { mutableStateOf(FloatyManager.isAutoSnapEnabled(this@MainActivity)) }
         val apply: (Boolean) -> Unit = { next ->
             autoSnap = next
-            FloatyManager.setAutoSnapEnabled(context, next)
+            FloatyManager.setAutoSnapEnabled(this@MainActivity, next)
         }
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable { apply(!autoSnap) }
-                .heightIn(min = 88.dp)
-                .padding(horizontal = 16.dp, vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Surface(color = MaterialTheme.colorScheme.primaryContainer,
-                contentColor = MaterialTheme.colorScheme.primary, shape = RoundedCornerShape(14.dp)) {
-                Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) { AppIcon(R.drawable.ic_floaty) }
-            }
-            Column(modifier = Modifier.weight(1f).padding(horizontal = 12.dp)) {
-                Text("自动贴边", style = MaterialTheme.typography.titleSmall)
-                Text(
-                    if (autoSnap) "拖动松手后吸到左右边缘并半隐藏" else "拖动松手后停在原位，仅收回屏内",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            Switch(checked = autoSnap, onCheckedChange = { apply(it) })
-        }
+        DesignRow("自动贴边", "拖动后吸附到屏幕左右边缘", R.drawable.ic_tool_point,
+            trailing = { Switch(checked = autoSnap, onCheckedChange = apply,
+                colors = SwitchDefaults.colors(checkedTrackColor = Color(AppPalette.SUCCESS))) }) { apply(!autoSnap) }
     }
 
     /** 日志页：独立显示实时输出。 */
     @Composable
     private fun LogsTab(logs: List<ScriptRunner.LogEntry>) {
         Column(Modifier.fillMaxSize()) {
-            PageHeading("运行日志", "查看脚本输出，快速定位问题。")
-            WorkCard(modifier = Modifier.fillMaxWidth().weight(1f).padding(bottom = 16.dp)) {
-                Column(modifier = Modifier.fillMaxSize()) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth()
-                            .padding(start = 16.dp, end = 8.dp, top = 10.dp, bottom = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(Modifier.size(7.dp).background(MaterialTheme.colorScheme.primary, CircleShape))
-                        Spacer(Modifier.width(8.dp))
-                        Text("实时输出", style = MaterialTheme.typography.titleSmall)
-                        Text("${logs.size} 条", style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 8.dp))
-                        Spacer(modifier = Modifier.weight(1f))
-                        if (logs.isNotEmpty()) {
-                            TextButton(onClick = { ScriptRunner.clearLogs() }) { Text("清空") }
-                        }
+            PageHeading("运行日志", "每次执行，都有迹可循。")
+            Column(Modifier.fillMaxSize().padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("实时输出", style = MaterialTheme.typography.titleMedium)
+                        Text("${logs.size} 条记录", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                    HorizontalDivider()
-                    if (logs.isEmpty()) {
-                        Column(Modifier.fillMaxSize().padding(24.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                            AppIcon(R.drawable.ic_tool_log, modifier = Modifier.size(36.dp))
-                            Text("等待第一条日志", style = MaterialTheme.typography.titleMedium,
-                                modifier = Modifier.padding(top = 16.dp, bottom = 6.dp))
-                            Text("运行任务后，脚本输出会显示在这里。", style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
+                    if (logs.isNotEmpty()) TextButton(onClick = { ScriptRunner.clearLogs() }) { Text("清空") }
+                }
+                if (logs.isEmpty()) {
+                    EmptyState("等待第一条日志", "运行任务后，脚本输出和状态会出现在这里。",
+                        R.drawable.ic_tool_log, "去任务空间") { mainTab = 0 }
+                } else {
+                    WorkCard(Modifier.fillMaxWidth().weight(1f)) {
+                        Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                            StatusBadge("实时输出")
+                            Spacer(Modifier.weight(1f))
+                            Text("最近 ${logs.size} 条", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
-                    } else {
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                         LogPanel(logs, Modifier.fillMaxWidth().weight(1f))
                     }
                 }
@@ -1695,19 +1482,24 @@ class MainActivity : ComponentActivity() {
 
     @Composable
     private fun PageHeading(title: String, subtitle: String) {
-        // 标识与说明只承担页面层级，不增加新的导航或功能入口。
-        Row(Modifier.fillMaxWidth().padding(top = 20.dp, bottom = 20.dp), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text("雕雕助手", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-                Text(title, style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(top = 4.dp))
-                Text(subtitle, style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 6.dp))
-            }
-            Spacer(Modifier.width(12.dp))
-            Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = RoundedCornerShape(18.dp)) {
-                Box(Modifier.size(52.dp), contentAlignment = Alignment.Center) {
-                    Image(painterResource(R.drawable.ic_brand_mark), contentDescription = null, modifier = Modifier.size(38.dp))
+        Surface(color = MaterialTheme.colorScheme.surface) {
+            Column {
+                Row(Modifier.fillMaxWidth().padding(horizontal = 22.dp, vertical = 20.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("雕雕助手 / AUTOMATION", fontSize = 10.sp, letterSpacing = 1.sp,
+                            fontWeight = FontWeight.Bold, color = Color(AppPalette.ON_PRIMARY_CONTAINER))
+                        Text(title, style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(top = 10.dp))
+                        Text(subtitle, style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 5.dp))
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Image(
+                        painter = painterResource(R.drawable.ic_brand_mark),
+                        contentDescription = null,
+                        modifier = Modifier.size(38.dp)
+                    )
                 }
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             }
         }
     }
@@ -1716,6 +1508,7 @@ class MainActivity : ComponentActivity() {
     @Composable
     private fun KeepAliveDialog(onDismiss: () -> Unit, onOpenAppSettings: () -> Unit) {
         androidx.compose.material3.AlertDialog(
+            containerColor = MaterialTheme.colorScheme.surface,
             onDismissRequest = onDismiss,
             title = { Text("保活指引") },
             text = {
@@ -1747,56 +1540,36 @@ class MainActivity : ComponentActivity() {
 
     /** 运行历史对话框：时间 / 耗时 / 退出原因 / 异常信息与堆栈 */
     @Composable
-    private fun RunHistoryDialog(
-        taskName: String,
-        entries: List<RunHistory.Entry>,
-        onDismiss: () -> Unit,
-        onClear: () -> Unit
-    ) {
-        androidx.compose.material3.AlertDialog(
-            onDismissRequest = onDismiss,
-            title = { Text("运行历史 · $taskName") },
-            text = {
-                androidx.compose.foundation.layout.Column(
-                    modifier = Modifier.verticalScroll(rememberScrollState())
-                ) {
-                    if (entries.isEmpty()) {
-                        Text("暂无运行记录", style = MaterialTheme.typography.bodySmall)
-                    }
-                    entries.forEach { e ->
-                        val color = when (e.outcome) {
-                            RunHistory.Outcome.ERROR -> MaterialTheme.colorScheme.error
-                            RunHistory.Outcome.STOPPED -> MaterialTheme.colorScheme.tertiary
-                            else -> MaterialTheme.colorScheme.onSurface
+    private fun RunHistoryDialog(taskName: String, entries: List<RunHistory.Entry>, onDismiss: () -> Unit, onClear: () -> Unit) {
+        DetailPage("运行历史", taskName, onDismiss,
+            actions = { TextButton(onClick = onClear, enabled = entries.isNotEmpty()) { Text("清空") } }) {
+            if (entries.isEmpty()) EmptyState("暂无运行记录", "执行任务后，可以在这里查看结果与耗时。", R.drawable.ic_tool_log)
+            else {
+                Text("最近运行 · 共 ${entries.size} 次", style = MaterialTheme.typography.titleSmall)
+                entries.forEach { entry ->
+                    val error = entry.outcome == RunHistory.Outcome.ERROR
+                    val stopped = entry.outcome == RunHistory.Outcome.STOPPED
+                    WorkCard(Modifier.fillMaxWidth()) {
+                        Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                            IconTile(if (error || stopped) R.drawable.ic_stop else R.drawable.ic_check, danger = error, warm = stopped)
+                            Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
+                                Text(entry.outcome.label, style = MaterialTheme.typography.titleSmall)
+                                Text("${entry.time} · ${entry.durationText()} · ${entry.source}",
+                                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            StatusBadge(entry.outcome.label, warning = stopped, error = error)
                         }
-                        Text(
-                            e.time + "  " + e.outcome.label + "  " + e.durationText() + "  " + e.source,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = color
-                        )
-                        e.message?.let { msg ->
-                            Text(
-                                "    " + msg,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.error
-                            )
-                        }
-                        e.stack?.let { stack ->
-                            // 只展示前几行堆栈，避免对话框过长
-                            Text(
-                                stack.lineSequence().take(6).joinToString("  ←  "),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                        entry.message?.let { Text(it, Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+                            style = MaterialTheme.typography.bodySmall, color = if (error) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant) }
+                        if (error) {
+                            entry.stack?.let { Text(it.lineSequence().take(6).joinToString("\n"),
+                                Modifier.padding(14.dp), fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall) }
+                            TextButton(onClick = { editHistoryError(taskName, entry) }, modifier = Modifier.padding(horizontal = 8.dp)) { Text("打开脚本并定位") }
                         }
                     }
                 }
-            },
-            confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } },
-            dismissButton = {
-                TextButton(onClick = onClear, enabled = entries.isNotEmpty()) { Text("清空历史") }
             }
-        )
+        }
     }
 
     /** 导出任务 ZIP，并让用户选择保存位置。 */
@@ -1872,96 +1645,39 @@ class MainActivity : ComponentActivity() {
 
     /** 必须手动选择并确认，不提供自动模式或自动切换。 */
     @Composable
-    private fun CaptureChannelDialog(
-        onDismiss: () -> Unit,
-        onSelect: (ScreenCapture.Mode) -> Unit
-    ) {
-        AlertDialog(
-            onDismissRequest = { if (!captureModeTesting) onDismiss() },
-            title = { Text("选择截屏方式") },
-            text = {
-                BoxWithConstraints(Modifier.fillMaxWidth()) {
-                    val widthLimit = (maxWidth - 12.dp) / 2
-                    // 高度由弹窗扣除标题和底部操作后提供，不用屏幕总高度估算。
-                    val textSpace = (36 * LocalDensity.current.fontScale).dp + 24.dp
-                    val heightLimit = if (constraints.hasBoundedHeight) {
-                        (maxHeight - textSpace).coerceAtLeast(112.dp)
-                    } else widthLimit
-                    val cardSize = minOf(widthLimit, heightLimit)
-                    Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
-                        Text(
-                            "当前设置：" + ScreenCapture.mode(this@MainActivity).label,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Row(
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp).selectableGroup(),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally)
-                        ) {
-                            listOf(
-                                ScreenCapture.Mode.MEDIAPROJECTION,
-                                ScreenCapture.Mode.ROOT
-                            ).forEach { mode ->
-                                CaptureModeCard(
-                                    mode = mode,
-                                    selected = selectedCaptureMode == mode,
-                                    onClick = {
-                                        if (!captureModeTesting) {
-                                            selectedCaptureMode = mode
-                                            captureModeError = null
-                                        }
-                                    },
-                                    enabled = !captureModeTesting,
-                                    modifier = Modifier.size(cardSize)
-                                )
-                            }
-                        }
-                        Text(
-                            "仅使用所选方式，不会自动切换。",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+    private fun CaptureChannelDialog(onDismiss: () -> Unit, onSelect: (ScreenCapture.Mode) -> Unit) {
+        DetailPage(if (captureModeTesting) "正在测试截屏" else if (captureModeError != null) "截屏测试失败" else "截屏方式",
+            "更换截屏能力并测试", { if (!captureModeTesting) onDismiss() },
+            footer = { PrimaryAction(if (captureModeTesting) "正在测试…" else if (captureModeError != null) "重试测试" else "确认选择并测试",
+                enabled = selectedCaptureMode != ScreenCapture.Mode.UNSELECTED && !captureModeTesting) { onSelect(selectedCaptureMode) } }) {
+            Text("当前设置：${ScreenCapture.mode(this@MainActivity).label}。测试成功后才会保存新方式。",
+                Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(11.dp)).padding(12.dp),
+                style = MaterialTheme.typography.bodySmall, color = Color(AppPalette.TERTIARY))
+            if (captureModeTesting) {
+                WorkCard(Modifier.fillMaxWidth()) {
+                    Column(Modifier.fillMaxWidth().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                        CircularProgressIndicator()
+                        Text("正在截取测试画面", style = MaterialTheme.typography.titleMedium)
+                        Text("系统授权方式可能会弹出授权提示，请稍候。", style = MaterialTheme.typography.bodySmall)
                     }
                 }
-            },
-            // 操作区不参与内容滚动，横屏或大字体下也保留完整按钮。
-            confirmButton = {
-                Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    captureModeError?.let { message ->
-                        Text(
-                            text = message,
-                            color = MaterialTheme.colorScheme.error,
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    }
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        TextButton(
-                            enabled = !captureModeTesting,
-                            onClick = { if (!captureModeTesting) onDismiss() }
-                        ) { Text("取消") }
-                        Spacer(Modifier.width(8.dp))
-                        Button(
-                            enabled = selectedCaptureMode != ScreenCapture.Mode.UNSELECTED && !captureModeTesting,
-                            onClick = { onSelect(selectedCaptureMode) }
-                        ) {
-                            if (captureModeTesting) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(16.dp),
-                                    strokeWidth = 2.dp,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                                Spacer(Modifier.width(8.dp))
-                            }
-                            Text(if (captureModeTesting) "正在测试…" else "确认选择")
-                        }
+            } else {
+                captureModeError?.let {
+                    EmptyState("截屏测试未通过", it + "\n原有设置仍然保留，可重试或更换方式。", R.drawable.ic_tool_shot)
+                }
+                SectionLabel("选择通道")
+                Column(Modifier.selectableGroup(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    listOf(ScreenCapture.Mode.MEDIAPROJECTION, ScreenCapture.Mode.ROOT).forEach { mode ->
+                        ChoiceCard(mode.label,
+                            if (mode == ScreenCapture.Mode.ROOT) "需要设备已授予超级用户权限。" else "通过系统弹窗授权，可用于找图和 OCR。",
+                            selectedCaptureMode == mode) { selectedCaptureMode = mode; captureModeError = null }
                     }
                 }
+                Text("仅使用所选方式，不会自动切换到另一种方式。", style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-        )
+        }
     }
 
     /** 开关悬浮控制台（可滚动日志面板，需悬浮窗权限） */
@@ -2057,6 +1773,7 @@ class MainActivity : ComponentActivity() {
             trimmed.any { it == '/' || it == '\\' || it.isISOControl() } ||
             tasks.any { it.name == trimmed && it.name != oldName }
         AlertDialog(
+            containerColor = MaterialTheme.colorScheme.surface,
             onDismissRequest = { if (!taskMutationBusy) renamingTask = null },
             title = { Text("重命名任务") },
             text = {
@@ -2069,7 +1786,7 @@ class MainActivity : ComponentActivity() {
             },
             confirmButton = {
                 TextButton(enabled = !invalid && !taskMutationBusy, onClick = {
-                    performTaskChange({ TaskManager.renameTask(this, oldName, trimmed) }, "已改名为「$trimmed」") { renamingTask = null }
+                    performTaskChange({ TaskManager.renameTask(this, oldName, trimmed) }, "已改名为「$trimmed」") { renamingTask = null; menuTask = trimmed }
                 }) { Text(if (taskMutationBusy) "正在保存…" else "保存") }
             },
             dismissButton = { TextButton(enabled = !taskMutationBusy, onClick = { renamingTask = null }) { Text("取消") } }
@@ -2116,6 +1833,7 @@ class MainActivity : ComponentActivity() {
             else -> null
         }
         AlertDialog(
+            containerColor = MaterialTheme.colorScheme.surface,
             onDismissRequest = onDismiss,
             title = { Text("新建任务") },
             text = {
@@ -2155,7 +1873,7 @@ class MainActivity : ComponentActivity() {
                 }
             },
             confirmButton = {
-                Button(onClick = { onConfirm(trimmed, scaffold) }, enabled = trimmed.isNotBlank() && nameError == null) {
+                Button(onClick = { onConfirm(trimmed, scaffold) }, shape = MaterialTheme.shapes.small, enabled = trimmed.isNotBlank() && nameError == null) {
                     Text("创建并编辑")
                 }
             },

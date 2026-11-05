@@ -102,7 +102,7 @@ class RecordingOverlay(
         ellipsize = TextUtils.TruncateAt.END
     }
 
-    /** 步数徽标：浅蓝胶囊 */
+    /** 步数徽标：暖色胶囊 */
     private val stepChip = TextView(context).apply {
         setTextColor(AppPalette.ON_PRIMARY_CONTAINER)
         textSize = 9f
@@ -116,20 +116,20 @@ class RecordingOverlay(
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
         // 标题区与内容区同底色，只靠间距和字号分层。
-        setPadding(dp(10), dp(8), dp(10), 0)
-        addView(logo, LinearLayout.LayoutParams(dp(22), dp(22)))
+        setPadding(dp(6), dp(8), dp(2), dp(8))
+        logo.visibility = View.GONE
         addView(LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             addView(stateRow)
-            addView(hintText, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(1) })
+            hintText.visibility = View.GONE
         }, LinearLayout.LayoutParams(0, -2, 1f).apply {
             leftMargin = dp(8)
             rightMargin = dp(6)
         })
-        addView(stepChip)
+        stepChip.visibility = View.GONE
     }
 
-    // —— 底部按钮：带图标的「暂停/继续」+ 深蓝主按钮「完成」 ——
+    // —— 底部按钮：带图标的「暂停/继续」+ 橙色主按钮「完成」 ——
 
     private val toggleLabel = TextView(context).apply {
         gravity = Gravity.CENTER
@@ -157,7 +157,7 @@ class RecordingOverlay(
 
     private val actions = LinearLayout(context).apply {
         orientation = LinearLayout.HORIZONTAL
-        setPadding(dp(10), 0, dp(10), dp(9))
+        setPadding(dp(4), dp(6), dp(8), dp(6))
         addView(toggleLabel, LinearLayout.LayoutParams(0, dp(34), 1f).apply { rightMargin = dp(6) })
         addView(finishLabel, LinearLayout.LayoutParams(0, dp(34), 1.2f))
     }
@@ -168,12 +168,14 @@ class RecordingOverlay(
         background = solid(AppPalette.SURFACE, 14, 1, AppPalette.OUTLINE_VARIANT)
         clipToOutline = true
         elevation = dp(10).toFloat()
-        addView(header)
-        addView(actions, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        addView(header, LinearLayout.LayoutParams(0, -2, 1f))
+        addView(actions, LinearLayout.LayoutParams(dp(134), -2))
     }
 
     // 比原 200dp 更窄，减少对目标应用的遮挡。
-    private val panelParams = params(dp(168), WindowManager.LayoutParams.WRAP_CONTENT).apply {
+    private val panelParams = params(minOf(dp(300), context.resources.displayMetrics.widthPixels - dp(16)), WindowManager.LayoutParams.WRAP_CONTENT).apply {
         gravity = Gravity.BOTTOM or Gravity.START
         x = dp(8)
         y = dp(12)
@@ -390,8 +392,9 @@ class RecordingOverlay(
             ready -> "准备就绪"
             else -> "已暂停"
         }
+        stateText.text = "${stateText.text} · $count 步"
         statusDot.background = oval(when {
-            recording -> red
+            recording -> primary
             ready -> primary
             else -> subtle
         })
