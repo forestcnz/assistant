@@ -26,37 +26,37 @@ private val ScriptColors = lightColorScheme(
     onPrimary = Color(AppPalette.ON_PRIMARY),
     primaryContainer = Color(AppPalette.PRIMARY_CONTAINER),
     onPrimaryContainer = Color(AppPalette.ON_PRIMARY_CONTAINER),
-    secondary = Color(0xFF536582),
+    secondary = Color(0xFF5B6777),
     onSecondary = Color.White,
     secondaryContainer = Color(AppPalette.SECONDARY_CONTAINER),
-    onSecondaryContainer = Color(0xFF34455F),
+    onSecondaryContainer = Color(0xFF33414F),
     tertiary = Color(AppPalette.TERTIARY),
     onTertiary = Color.White,
     tertiaryContainer = Color(AppPalette.TERTIARY_CONTAINER),
-    onTertiaryContainer = Color(0xFF175861),
+    onTertiaryContainer = Color(0xFF5E3C08),
     background = Color(AppPalette.BACKGROUND),
     onBackground = Color(AppPalette.ON_SURFACE),
     surface = Color(AppPalette.SURFACE),
     surfaceTint = Color(AppPalette.PRIMARY),
-    surfaceDim = Color(0xFFDCE2EE),
+    surfaceDim = Color(0xFFE0E3E7),
     surfaceBright = Color.White,
     surfaceContainerLowest = Color(AppPalette.SURFACE),
     surfaceContainerLow = Color(AppPalette.SURFACE_CONTAINER_LOW),
     surfaceContainer = Color(AppPalette.SURFACE_CONTAINER),
-    surfaceContainerHigh = Color(0xFFE7ECF5),
-    surfaceContainerHighest = Color(0xFFDDE5F2),
+    surfaceContainerHigh = Color(0xFFEAEDF1),
+    surfaceContainerHighest = Color(0xFFE2E6EA),
     onSurface = Color(AppPalette.ON_SURFACE),
     surfaceVariant = Color(AppPalette.SECONDARY_CONTAINER),
     onSurfaceVariant = Color(AppPalette.ON_SURFACE_VARIANT),
-    inverseSurface = Color(0xFF1D2B46),
-    inverseOnSurface = Color.White,
-    inversePrimary = Color(0xFFADC6FF),
+    inverseSurface = Color(AppPalette.INVERSE_SURFACE),
+    inverseOnSurface = Color(AppPalette.INVERSE_ON_SURFACE),
+    inversePrimary = Color(AppPalette.INVERSE_ACCENT),
     outline = Color(AppPalette.OUTLINE),
     outlineVariant = Color(AppPalette.OUTLINE_VARIANT),
     error = Color(AppPalette.ERROR),
     onError = Color(AppPalette.ON_ERROR),
     errorContainer = Color(AppPalette.ERROR_CONTAINER),
-    onErrorContainer = Color(0xFF8C2533)
+    onErrorContainer = Color(0xFF842C32)
 )
 
 /** 所有原生页面共用配色、文字层级与圆角；不依赖动态壁纸色。 */
@@ -66,10 +66,10 @@ fun ScriptTheme(content: @Composable () -> Unit) {
         colorScheme = ScriptColors,
         typography = Typography(
             headlineLarge = TextStyle(fontSize = 28.sp, lineHeight = 36.sp, fontWeight = FontWeight.Bold),
-            headlineSmall = TextStyle(fontSize = 24.sp, lineHeight = 32.sp, fontWeight = FontWeight.Bold),
+            headlineSmall = TextStyle(fontSize = 26.sp, lineHeight = 34.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.5).sp),
             titleLarge = TextStyle(fontSize = 21.sp, lineHeight = 28.sp, fontWeight = FontWeight.SemiBold),
             titleMedium = TextStyle(fontSize = 16.sp, lineHeight = 24.sp, fontWeight = FontWeight.SemiBold),
-            titleSmall = TextStyle(fontSize = 14.sp, lineHeight = 20.sp, fontWeight = FontWeight.SemiBold),
+            titleSmall = TextStyle(fontSize = 15.sp, lineHeight = 22.sp, fontWeight = FontWeight.SemiBold),
             bodyLarge = TextStyle(fontSize = 15.sp, lineHeight = 23.sp),
             bodyMedium = TextStyle(fontSize = 14.sp, lineHeight = 22.sp),
             bodySmall = TextStyle(fontSize = 12.sp, lineHeight = 18.sp),
@@ -77,26 +77,29 @@ fun ScriptTheme(content: @Composable () -> Unit) {
             labelMedium = TextStyle(fontSize = 12.sp, lineHeight = 18.sp, fontWeight = FontWeight.Medium)
         ),
         shapes = Shapes(
-            extraSmall = RoundedCornerShape(4.dp),
-            small = RoundedCornerShape(6.dp),
-            medium = RoundedCornerShape(8.dp),
-            large = RoundedCornerShape(10.dp),
-            extraLarge = RoundedCornerShape(12.dp)
+            extraSmall = RoundedCornerShape(8.dp),
+            small = RoundedCornerShape(12.dp),
+            medium = RoundedCornerShape(16.dp),
+            large = RoundedCornerShape(20.dp),
+            extraLarge = RoundedCornerShape(24.dp)
         ),
         content = content
     )
 }
 
 @Composable
-fun AppIcon(@DrawableRes resource: Int, description: String? = null, modifier: Modifier = Modifier) {
-    Icon(painterResource(resource), contentDescription = description, modifier = modifier.size(22.dp))
+fun AppIcon(@DrawableRes resource: Int, description: String? = null, modifier: Modifier = Modifier.size(22.dp)) {
+    // 调用方可为装饰图标和紧凑按钮指定尺寸，默认仍为 22dp。
+    Icon(painterResource(resource), contentDescription = description, modifier = modifier)
 }
 
 @Composable
 fun WorkCard(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
     Card(
         modifier = modifier,
+        shape = MaterialTheme.shapes.large,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
         content = content
     )

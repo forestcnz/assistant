@@ -4,14 +4,17 @@ import android.content.Context
 import android.content.Intent
 import android.content.res.ColorStateList
 import android.graphics.PixelFormat
+import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.provider.Settings
+import android.text.InputType
 import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
 import android.widget.Button
 import android.widget.EditText
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.RadioButton
 import android.widget.RadioGroup
@@ -41,6 +44,7 @@ object RecordingSetupOverlay {
     private const val BG = AppPalette.SURFACE
     private const val TEXT = AppPalette.ON_SURFACE
     private const val SUBTLE = AppPalette.ON_SURFACE_VARIANT
+    private const val FIELD_BG = AppPalette.SURFACE_CONTAINER_LOW
     private var window: View? = null
     private var windowManager: WindowManager? = null
 
@@ -57,26 +61,60 @@ object RecordingSetupOverlay {
         val d = app.resources.displayMetrics.density
         fun dp(value: Int) = (value * d).toInt()
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+
+        /** 输入框统一为圆角浅底，替代默认下划线，便于在深色任务面板之外单独阅读。 */
+        fun fieldBackground(fill: Int = FIELD_BG) = GradientDrawable().apply {
+            setColor(fill)
+            cornerRadius = dp(12).toFloat()
+            setStroke(dp(1), AppPalette.OUTLINE_VARIANT)
+        }
+
         val card = LinearLayout(app).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(18), dp(16), dp(18), dp(14))
             background = GradientDrawable().apply {
                 setColor(BG)
-                cornerRadius = dp(16).toFloat()
+                cornerRadius = dp(18).toFloat()
                 setStroke(dp(1), AppPalette.OUTLINE_VARIANT)
             }
             elevation = dp(12).toFloat()
         }
-        val title = TextView(app).apply {
-            text = "录制操作"
-            textSize = 18f
-            setTextColor(TEXT)
-            // 与录制悬浮条一致的 logo
-            setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_record_logo, 0, 0, 0)
-            compoundDrawablePadding = dp(8)
+
+        // —— 单色暖白卡片：标题区与内容区同底色，不再上下分色 ——
+        val header = LinearLayout(app).apply {
+            orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(16), dp(14), dp(16), dp(14))
+            addView(ImageView(app).apply {
+                setImageResource(R.drawable.ic_record_logo)
+                scaleType = ImageView.ScaleType.FIT_CENTER
+                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            }, LinearLayout.LayoutParams(dp(30), dp(30)))
+            addView(TextView(app).apply {
+                text = "录制操作"
+                textSize = 18f
+                typeface = Typeface.DEFAULT_BOLD
+                setTextColor(TEXT)
+            }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                leftMargin = dp(10)
+            })
         }
-        card.addView(title)
+        card.addView(header)
+        // 细分隔线只做层级区分，不引入第二种底色。
+        card.addView(View(app).apply { setBackgroundColor(AppPalette.OUTLINE_VARIANT) },
+            LinearLayout.LayoutParams(-1, dp(1)))
+
+        val content = LinearLayout(app).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(14), dp(18), dp(14))
+        }
+
+        fun hint(text: String) = TextView(app).apply {
+            this.text = text
+            textSize = 12f
+            setTextColor(SUBTLE)
+            setLineSpacing(0f, 1.15f)
+        }
+
         val name = EditText(app).apply {
             setSingleLine(true)
             setText("录制_" + SimpleDateFormat("MMdd_HHmmss", Locale.ROOT).format(Date()))
@@ -84,31 +122,46 @@ object RecordingSetupOverlay {
             setTextColor(TEXT)
             setHintTextColor(SUBTLE)
             hint = "任务名称"
-            setPadding(dp(8), dp(8), dp(8), dp(8))
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(12), 0, dp(12), 0)
+            background = fieldBackground()
         }
-        card.addView(name, LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(10) })
+        content.addView(name, LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(8) })
+
         val modes = RadioGroup(app).apply {
             orientation = RadioGroup.HORIZONTAL
             setPadding(0, dp(4), 0, dp(4))
         }
         // 两种模式：坐标模式额外汇出找图备用素材；图片模式用于找图回放
         // （纯坐标录制改为悬浮面板上的一键入口，不在本弹窗里选）
-        val coordinate = RadioButton(app).apply { text = "记录坐标"; setTextColor(TEXT); id = View.generateViewId(); isChecked = true }
-        val image = RadioButton(app).apply { text = "记录图片"; setTextColor(TEXT); id = View.generateViewId() }
+        fun modeButton(label: String, hintText: String, checked: Boolean): RadioButton =
+            RadioButton(app).apply {
+                text = label
+                textSize = 14f
+                setTextColor(TEXT)
+                buttonTintList = ColorStateList.valueOf(AppPalette.PRIMARY)
+                id = View.generateViewId()
+                isChecked = checked
+                setPadding(dp(6), dp(6), dp(6), dp(6))
+                contentDescription = "$label，$hintText"
+            }
+        val coordinate = modeButton("记录坐标", "记录点击位置，适合固定界面", true)
+        val image = modeButton("记录图片", "为每步截取模板，适合界面变化", false)
         modes.addView(coordinate, RadioGroup.LayoutParams(0, -2, 1f))
         modes.addView(image, RadioGroup.LayoutParams(0, -2, 1f))
-        card.addView(modes)
-        val cropFields = LinearLayout(app).apply {
-            orientation = LinearLayout.HORIZONTAL
-        }
-        fun addSizeField(row: LinearLayout, label: String, defaultValue: Int): EditText {
+        content.addView(modes)
+
+        fun addSizeField(row: LinearLayout, label: String, defaultValue: Int, marginTop: Int = 0): EditText {
             val field = EditText(app).apply {
                 setSingleLine(true)
-                inputType = android.text.InputType.TYPE_CLASS_NUMBER
+                inputType = InputType.TYPE_CLASS_NUMBER
                 setText(defaultValue.toString())
                 setSelectAllOnFocus(true)
                 textSize = 14f
                 setTextColor(TEXT)
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(12), 0, dp(12), 0)
+                background = fieldBackground()
             }
             row.addView(LinearLayout(app).apply {
                 orientation = LinearLayout.VERTICAL
@@ -117,41 +170,54 @@ object RecordingSetupOverlay {
                     textSize = 12f
                     setTextColor(SUBTLE)
                 })
-                addView(field, LinearLayout.LayoutParams(-1, dp(44)))
-            }, LinearLayout.LayoutParams(0, -2, 1f))
+                addView(field, LinearLayout.LayoutParams(-1, dp(44)).apply { topMargin = dp(6) })
+            }, LinearLayout.LayoutParams(0, -2, 1f).apply {
+                marginEnd = if (row.childCount == 0) dp(8) else 0
+                topMargin = marginTop
+            })
             return field
         }
-        val cropWidth = addSizeField(cropFields, "截图宽度（20～500）", 100)
-        val cropHeight = addSizeField(cropFields, "截图高度（20～500）", 100)
-        card.addView(cropFields, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(6) })
+
+        val cropFields = LinearLayout(app).apply { orientation = LinearLayout.HORIZONTAL }
+        val cropWidth = addSizeField(cropFields, "截图宽度（20～500）", 100, dp(6))
+        val cropHeight = addSizeField(cropFields, "截图高度（20～500）", 100, dp(6))
+        content.addView(cropFields, LinearLayout.LayoutParams(-1, -2))
+
         val regionFields = LinearLayout(app).apply { orientation = LinearLayout.HORIZONTAL }
-        val searchRegionWidth = addSizeField(regionFields, "页面范围宽度（像素）", DEFAULT_SEARCH_REGION_SIZE)
-        val searchRegionHeight = addSizeField(regionFields, "页面范围高度（像素）", DEFAULT_SEARCH_REGION_SIZE)
-        card.addView(regionFields, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(6) })
-        card.addView(TextView(app).apply {
-            text = "点击开始后在当前应用真实执行操作。每步按设定的页面范围截取模板素材；" +
-                "范围须覆盖截图尺寸，超出屏幕时自动调整。纯坐标（不截图）录制请用悬浮面板的「纯坐标录制」入口。"
-            textSize = 12f
-            setTextColor(SUBTLE)
-        }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(6) })
+        val searchRegionWidth = addSizeField(regionFields, "页面范围宽度（像素）", DEFAULT_SEARCH_REGION_SIZE, dp(6))
+        val searchRegionHeight = addSizeField(regionFields, "页面范围高度（像素）", DEFAULT_SEARCH_REGION_SIZE, dp(6))
+        content.addView(regionFields, LinearLayout.LayoutParams(-1, -2))
+
+        // 说明保留原有的截屏范围与坐标模式指引，不新增设置项。
+        content.addView(hint(
+            "点击开始后在当前应用真实执行操作。每步按页面范围截取模板素材，" +
+                "范围须覆盖截图尺寸；纯坐标（不截图）录制请用悬浮面板的「纯坐标录制」入口。"
+        ), LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(6) })
+
         val actions = LinearLayout(app).apply {
             orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.END or Gravity.CENTER_VERTICAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(8), 0, 0)
         }
         val cancel = Button(app).apply {
             text = "取消"
+            textSize = 14f
+            isAllCaps = false
             backgroundTintList = ColorStateList.valueOf(AppPalette.SECONDARY_CONTAINER)
             setTextColor(TEXT)
             setOnClickListener { scope.cancel(); hide() }
         }
         val start = Button(app).apply {
             text = "显示录制悬浮条"
+            textSize = 14f
+            isAllCaps = false
             backgroundTintList = ColorStateList.valueOf(AppPalette.PRIMARY)
             setTextColor(AppPalette.ON_PRIMARY)
         }
-        actions.addView(cancel)
-        actions.addView(start)
-        card.addView(actions, LinearLayout.LayoutParams(-1, dp(52)).apply { topMargin = dp(8) })
+        actions.addView(cancel, LinearLayout.LayoutParams(0, dp(52), 1f).apply { rightMargin = dp(8) })
+        actions.addView(start, LinearLayout.LayoutParams(0, dp(52), 1.45f))
+        content.addView(actions, LinearLayout.LayoutParams(-1, -2))
+        card.addView(content)
 
         start.setOnClickListener {
             val taskName = name.text.toString().trim()
@@ -199,7 +265,7 @@ object RecordingSetupOverlay {
             }
         }
         val params = WindowManager.LayoutParams(
-            minOf(dp(360), app.resources.displayMetrics.widthPixels - dp(32)),
+            minOf(dp(320), app.resources.displayMetrics.widthPixels - dp(24)),
             WindowManager.LayoutParams.WRAP_CONTENT,
             // minSdk 29：悬浮窗类型固定为 TYPE_APPLICATION_OVERLAY，TYPE_PHONE 已废弃
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,

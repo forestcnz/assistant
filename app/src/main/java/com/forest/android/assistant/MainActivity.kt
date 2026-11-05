@@ -8,6 +8,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectableGroup
@@ -31,6 +32,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.AlertDialog
@@ -39,6 +41,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
@@ -71,12 +74,14 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
@@ -507,8 +512,8 @@ class MainActivity : ComponentActivity() {
         Scaffold(
             containerColor = MaterialTheme.colorScheme.background,
             bottomBar = {
-                NavigationBar(containerColor = MaterialTheme.colorScheme.surface, tonalElevation = 0.dp,
-                    modifier = Modifier.height(64.dp)) {
+                Surface(shadowElevation = 6.dp, color = MaterialTheme.colorScheme.surface) {
+                NavigationBar(containerColor = MaterialTheme.colorScheme.surface, tonalElevation = 0.dp) {
                     val icons = listOf(R.drawable.ic_nav_tasks, R.drawable.ic_tool_log,
                         R.drawable.ic_nav_permissions, R.drawable.ic_nav_settings)
                     TAB_TITLES.forEachIndexed { index, title ->
@@ -516,14 +521,17 @@ class MainActivity : ComponentActivity() {
                             selected = mainTab == index,
                             onClick = { mainTab = index },
                             icon = { AppIcon(icons[index]) },
-                            label = { Text(title) },
+                            label = { Text(title, fontWeight = if (mainTab == index) FontWeight.SemiBold else FontWeight.Normal) },
                             colors = NavigationBarItemDefaults.colors(
                                 indicatorColor = MaterialTheme.colorScheme.primaryContainer,
                                 selectedIconColor = MaterialTheme.colorScheme.primary,
-                                selectedTextColor = MaterialTheme.colorScheme.primary
+                                selectedTextColor = MaterialTheme.colorScheme.primary,
+                                unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         )
                     }
+                }
                 }
             }
         ) { padding ->
@@ -536,7 +544,7 @@ class MainActivity : ComponentActivity() {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(horizontal = 12.dp, vertical = 4.dp),
+                        .padding(horizontal = 16.dp),
                     contentAlignment = Alignment.TopCenter
                 ) {
                     Column(
@@ -850,20 +858,29 @@ class MainActivity : ComponentActivity() {
         ) {
             WorkCard(modifier = Modifier.fillMaxWidth()) {
                 Row(
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp)
-                        .padding(start = 12.dp, end = 2.dp, top = 4.dp, bottom = 4.dp),
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 88.dp)
+                        .padding(start = 14.dp, end = 4.dp, top = 12.dp, bottom = 12.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    // 图标只表达任务类型，编辑和更多操作仍使用原有入口。
+                    Surface(color = MaterialTheme.colorScheme.primaryContainer,
+                        contentColor = MaterialTheme.colorScheme.primary, shape = RoundedCornerShape(14.dp)) {
+                        Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) {
+                            AppIcon(if (schedule != null) R.drawable.ic_clock else R.drawable.ic_code)
+                        }
+                    }
+                    Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
                         Text(task.name, style = MaterialTheme.typography.titleSmall,
-                            maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            maxLines = 2, overflow = TextOverflow.Ellipsis)
                         Text(when {
                             schedule != null -> "定时：${schedule.describe()}"
                             else -> taskSubtitles[task.name]?.ifBlank { "待运行" } ?: "待运行"
                         },
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            modifier = Modifier.padding(top = 4.dp),
+                            maxLines = 2, overflow = TextOverflow.Ellipsis)
                     }
                     TextButton(onClick = { editTask(task.name) }, enabled = !runState.running,
                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp)) { Text("编辑") }
@@ -1385,17 +1402,17 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /** 三项权限横向显示为等大方卡，边框与状态文字同步反映授权情况。 */
+    /** 三项权限纵向显示为状态卡，状态底色与文字同步反映授权情况。 */
     @Composable
-    private fun PermissionCard(maxTileSize: Dp) {
+    private fun PermissionCard() {
         WorkCard(modifier = Modifier.fillMaxWidth()) {
             Column {
                 SectionTitle("权限状态", "点击卡片管理权限")
-                BoxWithConstraints(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 16.dp)) {
-                    val tileSize = minOf((maxWidth - 24.dp) / 3, maxTileSize)
-                    Row(
+                // 保留三项权限入口，纵向排列以完整显示用途与状态，并适应大字体。
+                Box(Modifier.fillMaxWidth().padding(start = 14.dp, end = 14.dp, bottom = 14.dp)) {
+                    Column(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally)
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         PermissionStatusCard(
                             title = "无障碍",
@@ -1404,7 +1421,7 @@ class MainActivity : ComponentActivity() {
                             ready = a11yEnabled,
                             status = if (a11yEnabled) "已开启" else "未开启",
                             actionLabel = if (a11yEnabled) "查看保活设置" else "开启无障碍服务",
-                            modifier = Modifier.size(tileSize),
+                            modifier = Modifier.fillMaxWidth(),
                             onClick = {
                                 if (a11yEnabled) keepAliveDialog = true
                                 else startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
@@ -1417,7 +1434,7 @@ class MainActivity : ComponentActivity() {
                             ready = overlayGranted,
                             status = if (overlayGranted) "已授权" else "未授权",
                             actionLabel = if (overlayGranted) "查看悬浮窗授权状态" else "授予悬浮窗权限",
-                            modifier = Modifier.size(tileSize),
+                            modifier = Modifier.fillMaxWidth(),
                             onClick = {
                                 if (overlayGranted) {
                                     Toast.makeText(this@MainActivity, "悬浮窗权限已授权", Toast.LENGTH_SHORT).show()
@@ -1433,7 +1450,7 @@ class MainActivity : ComponentActivity() {
                             ready = captureReady,
                             status = if (captureReady) "可用" else "未就绪",
                             actionLabel = "选择截屏方式",
-                            modifier = Modifier.size(tileSize),
+                            modifier = Modifier.fillMaxWidth(),
                             onClick = { openCaptureDialog() }
                         )
                     }
@@ -1449,11 +1466,13 @@ class MainActivity : ComponentActivity() {
             modifier = Modifier
                 .fillMaxWidth()
                 .clickable { onClick() }
-                .heightIn(min = 64.dp)
-                .padding(horizontal = 16.dp, vertical = 12.dp),
+                .heightIn(min = 80.dp)
+                .padding(horizontal = 16.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = RoundedCornerShape(12.dp)) {
+            Surface(color = if (title == "删除任务") MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.primaryContainer,
+                contentColor = if (title == "删除任务") MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                shape = RoundedCornerShape(14.dp)) {
                 Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) { AppIcon(icon) }
             }
             Column(modifier = Modifier.weight(1f).padding(horizontal = 12.dp)) {
@@ -1464,7 +1483,7 @@ class MainActivity : ComponentActivity() {
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            AppIcon(R.drawable.ic_arrow)
+            AppIcon(R.drawable.ic_arrow, modifier = Modifier.size(16.dp))
         }
     }
 
@@ -1472,42 +1491,50 @@ class MainActivity : ComponentActivity() {
     @Composable
     private fun TaskListSection(runState: ScriptRunner.RunState, modifier: Modifier = Modifier) {
         Column(modifier = modifier.fillMaxWidth()) {
+            PageHeading("任务空间", "从悬浮球选择任务，让重复自动完成。")
             Row(
-                modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp),
+                modifier = Modifier.fillMaxWidth().padding(bottom = 14.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("全部任务 · ${tasks.size}", style = MaterialTheme.typography.titleSmall)
-                Spacer(modifier = Modifier.weight(1f))
+                Column(Modifier.weight(1f)) {
+                    Text("全部任务", style = MaterialTheme.typography.titleSmall)
+                    Text("${tasks.size} 个任务", style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
                 FilledTonalIconButton(onClick = { showClearTasksDialog = true },
                     enabled = tasks.isNotEmpty() && !runState.running && !RecordingService.active &&
                         !taskTransferBusy && !taskMutationBusy,
-                    shape = MaterialTheme.shapes.medium) {
-                    AppIcon(R.drawable.ic_clear_tasks, "清空全部任务")
+                    modifier = Modifier.size(48.dp),
+                    colors = IconButtonDefaults.filledTonalIconButtonColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer,
+                        contentColor = MaterialTheme.colorScheme.error),
+                    shape = MaterialTheme.shapes.small) {
+                    TaskActionLabel(R.drawable.ic_clear_tasks, "清空", "清空全部任务")
                 }
                 Spacer(Modifier.width(4.dp))
                 FilledTonalIconButton(onClick = {
                     importZipLauncher.launch(arrayOf("application/zip", "application/octet-stream", "*/*"))
-                }, enabled = !taskTransferBusy, shape = MaterialTheme.shapes.medium) {
-                    AppIcon(R.drawable.ic_import, "导入 ZIP")
+                }, enabled = !taskTransferBusy, modifier = Modifier.size(48.dp), shape = MaterialTheme.shapes.small) {
+                    TaskActionLabel(R.drawable.ic_import, "导入", "导入 ZIP")
                 }
                 Spacer(Modifier.width(4.dp))
                 FilledTonalIconButton(onClick = { exportAllTasks() },
                     enabled = tasks.isNotEmpty() && !taskTransferBusy,
-                    shape = MaterialTheme.shapes.medium) {
-                    AppIcon(R.drawable.ic_export, "导出全部")
+                    modifier = Modifier.size(48.dp), shape = MaterialTheme.shapes.small) {
+                    TaskActionLabel(R.drawable.ic_export, "导出", "导出全部")
                 }
                 Spacer(Modifier.width(4.dp))
                 FilledIconButton(onClick = { showCreateDialog = true },
-                    shape = MaterialTheme.shapes.medium) {
-                    AppIcon(R.drawable.ic_add, "新建任务")
+                    modifier = Modifier.size(48.dp), shape = MaterialTheme.shapes.small) {
+                    TaskActionLabel(R.drawable.ic_add, "新建", "新建任务")
                 }
             }
             LazyColumn(
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-                contentPadding = PaddingValues(bottom = 8.dp)
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                contentPadding = PaddingValues(bottom = 16.dp)
             ) {
                 items(tasks, key = { it.name }) { task ->
                     TaskRow(task, runState)
@@ -1516,12 +1543,18 @@ class MainActivity : ComponentActivity() {
                     item {
                         WorkCard(Modifier.fillMaxWidth()) {
                             Column(Modifier.fillMaxWidth().padding(28.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                                AppIcon(R.drawable.ic_nav_tasks, modifier = Modifier.size(40.dp))
+                                Surface(color = MaterialTheme.colorScheme.primaryContainer,
+                                    contentColor = MaterialTheme.colorScheme.primary, shape = RoundedCornerShape(20.dp)) {
+                                    Box(Modifier.size(72.dp), contentAlignment = Alignment.Center) {
+                                        AppIcon(R.drawable.ic_nav_tasks, modifier = Modifier.size(32.dp))
+                                    }
+                                }
                                 Text("创建你的第一个任务", style = MaterialTheme.typography.titleMedium,
                                     modifier = Modifier.padding(top = 16.dp, bottom = 6.dp))
                                 Text("从空白、签到或找图模板开始，也可导入单任务或合集 ZIP。",
                                     style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    textAlign = TextAlign.Center)
                             }
                         }
                     }
@@ -1530,18 +1563,24 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /** 原有四个顶部操作增加文字标签，图标和文字共用同一个点击区域。 */
+    @Composable
+    private fun TaskActionLabel(icon: Int, label: String, description: String) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            AppIcon(icon, description, Modifier.size(18.dp))
+            Text(label, fontSize = 10.sp, lineHeight = 13.sp, maxLines = 1)
+        }
+    }
+
     /** 权限页：三项能力与截屏通道设置。 */
     @Composable
     private fun PermissionsTab() {
-        BoxWithConstraints(Modifier.fillMaxSize()) {
-            // 为页面标题、分区标题和间距留出空间，限制横屏卡片高度。
-            val reservedHeight = (88 * LocalDensity.current.fontScale).dp + 76.dp
-            val maxTileSize = (maxHeight - reservedHeight).coerceIn(80.dp, 180.dp)
-            Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                PageHeading("运行准备", "按需开启权限，准备好脚本运行环境。")
-                PermissionCard(maxTileSize)
-            }
+        // 纵向权限卡自身可滚动，横屏和大字体下不再压缩卡片高度。
+        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            PageHeading("运行准备", "按需开启权限，准备好脚本运行环境。")
+            PermissionCard()
+            Spacer(Modifier.height(16.dp))
         }
     }
 
@@ -1549,10 +1588,11 @@ class MainActivity : ComponentActivity() {
     @Composable
     private fun SettingsTab(launcherEnabled: Boolean) {
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            verticalArrangement = Arrangement.spacedBy(12.dp)) {
             PageHeading("应用设置", "管理悬浮球与截屏通道。")
-            // 悬浮日志开关：原属于工具页，屏幕工具展示移除后保留在这里；现在可从悬浮窗面板打开
+            // 悬浮球与自动贴边保留在「悬浮控制」卡片中；截屏通道单独成卡，入口数量不变。
             WorkCard(modifier = Modifier.fillMaxWidth()) {
+                SectionTitle("悬浮控制", "在其他应用中也能随时开始工作")
                 ToolRow(
                     if (launcherEnabled) "隐藏悬浮球" else "显示悬浮球",
                     if (launcherEnabled) "已开启 · 点击后隐藏" else "随时选择任务、控制运行",
@@ -1561,15 +1601,18 @@ class MainActivity : ComponentActivity() {
                     if (!overlayGranted) FloatyManager.requestOverlayPermission(this@MainActivity)
                     else ScriptRunner.toggleLauncher(this@MainActivity)
                 }
+                HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
                 // 自动贴边开关：控制拖动松手后是否吸到左右边缘
                 AutoSnapRow()
-                // 截屏通道设置与悬浮球选项放在同一卡片中
+            }
+            WorkCard(modifier = Modifier.fillMaxWidth()) {
                 ToolRow(
                     "截屏通道设置",
                     "系统授权截屏或超级权限截屏 · 使用前请手动选择",
                     R.drawable.ic_tool_shot
                 ) { openCaptureDialog() }
             }
+            Spacer(Modifier.height(16.dp))
         }
     }
 
@@ -1590,11 +1633,12 @@ class MainActivity : ComponentActivity() {
             modifier = Modifier
                 .fillMaxWidth()
                 .clickable { apply(!autoSnap) }
-                .heightIn(min = 64.dp)
-                .padding(horizontal = 16.dp, vertical = 8.dp),
+                .heightIn(min = 88.dp)
+                .padding(horizontal = 16.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = RoundedCornerShape(12.dp)) {
+            Surface(color = MaterialTheme.colorScheme.primaryContainer,
+                contentColor = MaterialTheme.colorScheme.primary, shape = RoundedCornerShape(14.dp)) {
                 Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) { AppIcon(R.drawable.ic_floaty) }
             }
             Column(modifier = Modifier.weight(1f).padding(horizontal = 12.dp)) {
@@ -1614,14 +1658,18 @@ class MainActivity : ComponentActivity() {
     private fun LogsTab(logs: List<ScriptRunner.LogEntry>) {
         Column(Modifier.fillMaxSize()) {
             PageHeading("运行日志", "查看脚本输出，快速定位问题。")
-            WorkCard(modifier = Modifier.fillMaxWidth().weight(1f)) {
+            WorkCard(modifier = Modifier.fillMaxWidth().weight(1f).padding(bottom = 16.dp)) {
                 Column(modifier = Modifier.fillMaxSize()) {
                     Row(
                         modifier = Modifier.fillMaxWidth()
-                            .padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
+                            .padding(start = 16.dp, end = 8.dp, top = 10.dp, bottom = 10.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("实时输出 · ${logs.size}", style = MaterialTheme.typography.titleSmall)
+                        Box(Modifier.size(7.dp).background(MaterialTheme.colorScheme.primary, CircleShape))
+                        Spacer(Modifier.width(8.dp))
+                        Text("实时输出", style = MaterialTheme.typography.titleSmall)
+                        Text("${logs.size} 条", style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 8.dp))
                         Spacer(modifier = Modifier.weight(1f))
                         if (logs.isNotEmpty()) {
                             TextButton(onClick = { ScriptRunner.clearLogs() }) { Text("清空") }
@@ -1629,10 +1677,14 @@ class MainActivity : ComponentActivity() {
                     }
                     HorizontalDivider()
                     if (logs.isEmpty()) {
-                        Text("暂无输出\n运行任务后，日志会显示在这里。",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(16.dp))
+                        Column(Modifier.fillMaxSize().padding(24.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                            AppIcon(R.drawable.ic_tool_log, modifier = Modifier.size(36.dp))
+                            Text("等待第一条日志", style = MaterialTheme.typography.titleMedium,
+                                modifier = Modifier.padding(top = 16.dp, bottom = 6.dp))
+                            Text("运行任务后，脚本输出会显示在这里。", style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
+                        }
                     } else {
                         LogPanel(logs, Modifier.fillMaxWidth().weight(1f))
                     }
@@ -1643,10 +1695,20 @@ class MainActivity : ComponentActivity() {
 
     @Composable
     private fun PageHeading(title: String, subtitle: String) {
-        Column(Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
-            Text(title, style = MaterialTheme.typography.headlineSmall)
-            Text(subtitle, style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
+        // 标识与说明只承担页面层级，不增加新的导航或功能入口。
+        Row(Modifier.fillMaxWidth().padding(top = 20.dp, bottom = 20.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("雕雕助手", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                Text(title, style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(top = 4.dp))
+                Text(subtitle, style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 6.dp))
+            }
+            Spacer(Modifier.width(12.dp))
+            Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = RoundedCornerShape(18.dp)) {
+                Box(Modifier.size(52.dp), contentAlignment = Alignment.Center) {
+                    Image(painterResource(R.drawable.ic_brand_mark), contentDescription = null, modifier = Modifier.size(38.dp))
+                }
+            }
         }
     }
 

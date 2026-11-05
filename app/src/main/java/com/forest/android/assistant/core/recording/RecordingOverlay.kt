@@ -2,6 +2,7 @@ package com.forest.android.assistant.core.recording
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.content.res.ColorStateList
 import android.graphics.PixelFormat
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -22,9 +23,9 @@ import kotlin.math.roundToInt
 
 /**
  * 录制悬浮窗（紧凑版）：
- * - 蓝白渐变卡片 + 浅蓝描边 + 圆角；
+ * - 暖白单色卡片 + 圆角，不再做上下分色；
  * - 头部：logo、状态点 + 状态文字、提示行、右侧步数徽标，整条可拖动；
- * - 底部：胶囊按钮「暂停/继续」和蓝色主按钮「完成」；
+ * - 底部：带图标的「暂停/继续」和主按钮「完成」；
  * - 所有文字单行 + 固定尺寸，状态切换不会让窗口一跳一跳。
  *
  * 交互约束：
@@ -48,9 +49,7 @@ class RecordingOverlay(
     // minSdk 29：悬浮窗类型固定为 TYPE_APPLICATION_OVERLAY
     private val windowType = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
 
-    // —— 悬浮条沿用 APP 内部的浅色主题配色 ——
-    private val bgTop = AppPalette.SURFACE_CONTAINER_LOW
-    private val bgBottom = AppPalette.SURFACE
+    // —— 悬浮条与 APP 共用浅色表面，整张卡片只用一种底色 ——
     private val textColor = AppPalette.ON_SURFACE
     private val subtle = AppPalette.ON_SURFACE_VARIANT
     private val primary = AppPalette.PRIMARY
@@ -61,13 +60,6 @@ class RecordingOverlay(
     private fun solid(fill: Int, radiusDp: Int, strokeDp: Int = 0, stroke: Int = 0) =
         GradientDrawable().apply {
             setColor(fill)
-            cornerRadius = dp(radiusDp).toFloat()
-            if (strokeDp > 0) setStroke(dp(strokeDp), stroke)
-        }
-
-    /** 竖向渐变背景，用于卡片与主按钮 */
-    private fun verticalGradient(top: Int, bottom: Int, radiusDp: Int, strokeDp: Int = 0, stroke: Int = 0) =
-        GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(top, bottom)).apply {
             cornerRadius = dp(radiusDp).toFloat()
             if (strokeDp > 0) setStroke(dp(strokeDp), stroke)
         }
@@ -117,12 +109,13 @@ class RecordingOverlay(
         typeface = Typeface.DEFAULT_BOLD
         gravity = Gravity.CENTER
         setPadding(dp(7), dp(3), dp(7), dp(3))
-        background = solid(AppPalette.PRIMARY_CONTAINER, 20)
+        background = solid(AppPalette.PRIMARY_CONTAINER, 20, 1, AppPalette.OUTLINE_VARIANT)
     }
 
     private val header = LinearLayout(context).apply {
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
+        // 标题区与内容区同底色，只靠间距和字号分层。
         setPadding(dp(10), dp(8), dp(10), 0)
         addView(logo, LinearLayout.LayoutParams(dp(22), dp(22)))
         addView(LinearLayout(context).apply {
@@ -136,13 +129,16 @@ class RecordingOverlay(
         addView(stepChip)
     }
 
-    // —— 底部按钮：胶囊「暂停/继续」+ 蓝色主按钮「完成」 ——
+    // —— 底部按钮：带图标的「暂停/继续」+ 深蓝主按钮「完成」 ——
 
     private val toggleLabel = TextView(context).apply {
         gravity = Gravity.CENTER
         textSize = 11f
         typeface = Typeface.DEFAULT_BOLD
-        setTextColor(textColor)
+        setTextColor(AppPalette.ON_SURFACE)
+        setPadding(dp(4), 0, dp(4), 0)
+        compoundDrawablePadding = dp(4)
+        compoundDrawableTintList = ColorStateList.valueOf(AppPalette.ON_SURFACE)
         background = solid(AppPalette.SECONDARY_CONTAINER, 20, 1, AppPalette.OUTLINE_VARIANT)
     }
 
@@ -152,6 +148,10 @@ class RecordingOverlay(
         textSize = 11f
         typeface = Typeface.DEFAULT_BOLD
         setTextColor(onPrimary)
+        setPadding(dp(4), 0, dp(4), 0)
+        setCompoundDrawablesRelativeWithIntrinsicBounds(R.drawable.ic_check, 0, 0, 0)
+        compoundDrawablePadding = dp(4)
+        compoundDrawableTintList = ColorStateList.valueOf(onPrimary)
         background = solid(primary, 20)
     }
 
@@ -164,13 +164,16 @@ class RecordingOverlay(
 
     private val panel = LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL
-        background = verticalGradient(bgTop, bgBottom, 14, 1, AppPalette.OUTLINE_VARIANT)
+        // 单一暖白底色，避免上下两种颜色。
+        background = solid(AppPalette.SURFACE, 14, 1, AppPalette.OUTLINE_VARIANT)
+        clipToOutline = true
         elevation = dp(10).toFloat()
         addView(header)
         addView(actions, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
     }
 
-    private val panelParams = params(dp(200), WindowManager.LayoutParams.WRAP_CONTENT).apply {
+    // 比原 200dp 更窄，减少对目标应用的遮挡。
+    private val panelParams = params(dp(168), WindowManager.LayoutParams.WRAP_CONTENT).apply {
         gravity = Gravity.BOTTOM or Gravity.START
         x = dp(8)
         y = dp(12)
@@ -319,6 +322,8 @@ class RecordingOverlay(
             inside(toggleLabel) -> PanelHit.TOGGLE
             inside(finishLabel) -> PanelHit.FINISH
             inside(header) -> PanelHit.DRAG
+            // 卡片留白也属于悬浮条，避免按钮周围的触摸被录成目标应用操作。
+            inside(panel) -> PanelHit.DRAG
             else -> null
         }
     }
@@ -360,7 +365,7 @@ class RecordingOverlay(
         setTouchLayerEnabled(false)
         stateText.text = "执行中…"
         statusDot.background = oval(primary)
-        hintText.text = "正在回放本步操作，请稍候"
+        hintText.text = "正在回放"
         // 按钮暂时置灰，避免执行中误触
         actions.alpha = 0.55f
     }
@@ -393,9 +398,9 @@ class RecordingOverlay(
         stepChip.text = "$count 步"
         hintText.text = message.ifBlank {
             when {
-                recording -> "松手即执行，点按钮不会记录"
-                ready -> "切换到目标应用，点开始录制"
-                else -> "点继续接着录，点完成生成任务"
+                recording -> "松手即执行"
+                ready -> "切到目标应用"
+                else -> "继续或完成"
             }
         }
         toggleLabel.text = when {
@@ -403,6 +408,8 @@ class RecordingOverlay(
             ready -> "开始"
             else -> "继续"
         }
+        toggleLabel.setCompoundDrawablesRelativeWithIntrinsicBounds(
+            if (recording) R.drawable.ic_pause else R.drawable.ic_play, 0, 0, 0)
         actions.alpha = 1f
     }
 

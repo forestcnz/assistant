@@ -9,6 +9,7 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -18,6 +19,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.BasicTextField
@@ -27,8 +29,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.Surface
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -36,6 +41,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.TextRange
@@ -138,30 +144,39 @@ class ScriptEditorActivity : ComponentActivity() {
         Scaffold(
             containerColor = MaterialTheme.colorScheme.background,
             topBar = {
-                TopAppBar(
-                    navigationIcon = {
-                        IconButton(onClick = { finish() }) {
-                            AppIcon(R.drawable.ic_back, if (requiresExplicitSave) "返回" else "返回并自动保存")
+                // 编辑器标题栏与内容卡片之间用轻阴影分层，操作项保持原位置。
+                Surface(shadowElevation = 4.dp, color = MaterialTheme.colorScheme.surface) {
+                    TopAppBar(
+                        colors = TopAppBarDefaults.topAppBarColors(
+                            containerColor = MaterialTheme.colorScheme.surface,
+                            titleContentColor = MaterialTheme.colorScheme.onSurface
+                        ),
+                        navigationIcon = {
+                            IconButton(onClick = { finish() }) {
+                                AppIcon(R.drawable.ic_back, if (requiresExplicitSave) "返回" else "返回并自动保存")
+                            }
+                        },
+                        title = {
+                            Column {
+                                Text("脚本编辑", style = MaterialTheme.typography.titleMedium)
+                                Text(taskName, style = MaterialTheme.typography.bodySmall, maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        },
+                        actions = {
+                            TextButton(onClick = {
+                                keyboard?.hide()
+                                showExamples = true
+                            }, enabled = contentLoaded) { Text("示例") }
+                            TextButton(onClick = { showClearDialog = true }, enabled = contentLoaded && content.text.isNotEmpty()) {
+                                Text("清空", color = MaterialTheme.colorScheme.error)
+                            }
+                            TextButton(onClick = { save(showToast = true) }, enabled = contentLoaded) {
+                                Text("保存", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+                            }
                         }
-                    },
-                    title = {
-                        Column {
-                            Text("脚本编辑", style = MaterialTheme.typography.titleMedium)
-                            Text(taskName, style = MaterialTheme.typography.bodySmall, maxLines = 1,
-                                overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                    },
-                    actions = {
-                        TextButton(onClick = {
-                            keyboard?.hide()
-                            showExamples = true
-                        }, enabled = contentLoaded) { Text("示例") }
-                        TextButton(onClick = { showClearDialog = true }, enabled = contentLoaded && content.text.isNotEmpty()) {
-                            Text("清空", color = MaterialTheme.colorScheme.error)
-                        }
-                        TextButton(onClick = { save(showToast = true) }, enabled = contentLoaded) { Text("保存") }
-                    }
-                )
+                    )
+                }
             }
         ) { padding ->
             Column(
@@ -197,14 +212,30 @@ class ScriptEditorActivity : ComponentActivity() {
                     onInspect = { apiHelp = it }
                 )
 
-                Box(
+                // 代码卡片：顶部文件名与语言标签只做信息展示，编辑区域仍为原来的输入框。
+                Column(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(horizontal = 12.dp)
                         .weight(1f)
-                        .background(MaterialTheme.colorScheme.surface, MaterialTheme.shapes.small)
-                        .padding(12.dp)
+                        .clip(MaterialTheme.shapes.medium)
+                        .background(MaterialTheme.colorScheme.surface)
+                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant, MaterialTheme.shapes.medium)
                 ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(Modifier.size(7.dp).background(MaterialTheme.colorScheme.primary,
+                            androidx.compose.foundation.shape.CircleShape))
+                        Text("task.js", style = MaterialTheme.typography.labelLarge,
+                            fontFamily = FontFamily.Monospace, modifier = Modifier.padding(start = 8.dp))
+                        Spacer(Modifier.weight(1f))
+                        Text("JavaScript", style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    Box(Modifier.fillMaxSize().padding(12.dp)) {
                     BasicTextField(
                         value = content,
                         onValueChange = { new ->
@@ -229,6 +260,7 @@ class ScriptEditorActivity : ComponentActivity() {
                         enabled = contentLoaded,
                         modifier = Modifier.fillMaxSize()
                     )
+                    }
                 }
                 Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically) {

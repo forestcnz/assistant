@@ -34,6 +34,7 @@ import com.forest.android.assistant.core.image.AssetCropper
 import com.forest.android.assistant.core.image.CropImageFit
 import com.forest.android.assistant.core.image.CropRegion
 import com.forest.android.assistant.ui.AppIcon
+import com.forest.android.assistant.ui.AppPalette
 import com.forest.android.assistant.ui.ScriptTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
@@ -101,7 +102,8 @@ class AssetCropActivity : ComponentActivity() {
             )
         }) { padding ->
             Column(Modifier.fillMaxSize().padding(padding)) {
-                Box(Modifier.fillMaxWidth().weight(1f).background(Color(0xFF192234)), contentAlignment = Alignment.Center) {
+                // 深蓝工作区让原图与选区描边保持足够对比，替换旧版深蓝色。
+                Box(Modifier.fillMaxWidth().weight(1f).background(Color(AppPalette.INVERSE_SURFACE)), contentAlignment = Alignment.Center) {
                     if (preview == null) {
                         Column(Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                             if (model.error == null) CircularProgressIndicator()
@@ -272,7 +274,7 @@ private fun CropCanvas(preview: AssetCropper.Preview, region: CropRegion?, enabl
         drawRect(dim, Offset(0f, bottom), Size(size.width, size.height - bottom))
         drawRect(dim, Offset(0f, top), Size(left, bottom - top))
         drawRect(dim, Offset(right, top), Size(size.width - right, bottom - top))
-        drawRect(Color(0xFFADC6FF), Offset(left, top), Size(right - left, bottom - top), style = Stroke(2.dp.toPx()))
+        drawRect(Color(AppPalette.INVERSE_ACCENT), Offset(left, top), Size(right - left, bottom - top), style = Stroke(2.dp.toPx()))
         for (step in 1..2) {
             val x = left + (right - left) * step / 3f
             val y = top + (bottom - top) * step / 3f
@@ -280,7 +282,7 @@ private fun CropCanvas(preview: AssetCropper.Preview, region: CropRegion?, enabl
             drawLine(Color.White.copy(alpha = 0.4f), Offset(left, y), Offset(right, y), 1.dp.toPx())
         }
         listOf(Offset(left, top), Offset(right, top), Offset(left, bottom), Offset(right, bottom)).forEach {
-            drawCircle(Color(0xFFADC6FF), 6.dp.toPx(), it)
+            drawCircle(Color(AppPalette.INVERSE_ACCENT), 6.dp.toPx(), it)
             drawCircle(Color.White, 6.dp.toPx(), it, style = Stroke(1.dp.toPx()))
         }
     }

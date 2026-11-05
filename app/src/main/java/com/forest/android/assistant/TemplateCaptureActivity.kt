@@ -52,6 +52,7 @@ import com.forest.android.assistant.core.image.ScreenCapture
 import com.forest.android.assistant.core.task.TaskManager
 import com.forest.android.assistant.ui.ScriptTheme
 import com.forest.android.assistant.ui.AppIcon
+import com.forest.android.assistant.ui.AppPalette
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import androidx.lifecycle.lifecycleScope
@@ -166,7 +167,7 @@ class TemplateCaptureActivity : ComponentActivity() {
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(1f)
-                        .background(Color(0xFF1D2B46))
+                        .background(Color(AppPalette.INVERSE_SURFACE))
                         .onSizeChanged { viewSize = it },
                     contentAlignment = Alignment.Center
                 ) {
@@ -174,7 +175,7 @@ class TemplateCaptureActivity : ComponentActivity() {
                     if (bmp == null) {
                         Column(Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                             if (error == null) {
-                                CircularProgressIndicator(color = Color(0xFFADC6FF))
+                                CircularProgressIndicator(color = Color(AppPalette.INVERSE_ACCENT))
                                 Spacer(Modifier.height(16.dp))
                             }
                             Text(error ?: "正在获取屏幕截图…", color = Color.White,
@@ -228,7 +229,7 @@ class TemplateCaptureActivity : ComponentActivity() {
                             drawRect(dim, Offset(rect.right, rect.top), Size(size.width - rect.right, rect.height))
                             // 选区边框
                             drawRect(
-                                color = Color(0xFFADC6FF),
+                                color = Color(AppPalette.INVERSE_ACCENT),
                                 topLeft = rect.topLeft,
                                 size = rect.size,
                                 style = Stroke(width = 3f)

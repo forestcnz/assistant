@@ -40,12 +40,12 @@ fun CaptureModeCard(
     enabled: Boolean = true
 ) {
     val colors = MaterialTheme.colorScheme
-    val shape = RoundedCornerShape(16.dp)
+    val shape = RoundedCornerShape(20.dp)
     val systemCapture = mode == ScreenCapture.Mode.MEDIAPROJECTION
     BoxWithConstraints(
         modifier = modifier
             .clip(shape)
-            .background(if (selected) colors.primaryContainer else colors.surface)
+            .background(if (selected) colors.primaryContainer else colors.surfaceContainerLow)
             .border(if (selected) 2.dp else 1.dp, if (selected) colors.primary else colors.outlineVariant, shape)
             .selectable(selected = selected, enabled = enabled, role = Role.RadioButton, onClick = onClick)
     ) {
@@ -57,7 +57,7 @@ fun CaptureModeCard(
         ) {
             Box(
                 modifier = Modifier.size(if (compact) 32.dp else 40.dp)
-                    .background(if (selected) colors.primary.copy(alpha = 0.10f) else colors.surfaceContainerLow, CircleShape),
+                    .background(if (selected) colors.primary.copy(alpha = 0.10f) else colors.secondaryContainer, RoundedCornerShape(12.dp)),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
