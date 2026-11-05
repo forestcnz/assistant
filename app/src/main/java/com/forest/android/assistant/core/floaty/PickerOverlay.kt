@@ -170,8 +170,8 @@ object PickerOverlay {
         val view = PickerView(context, mode, frozenFrame) { code -> deliver(context, code) }
         // minSdk 29：悬浮窗类型固定为 TYPE_APPLICATION_OVERLAY
         val windowType = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-        // 取点和取色没有屏幕上的取消按钮，由获得焦点的拾取层处理系统返回。
-        val usesBackToCancel = mode == Mode.POINT || mode == Mode.COLOR
+        // 使用读数条的拾取模式由获得焦点的浮层处理系统返回。
+        val usesBackToCancel = mode != Mode.SCREENSHOT
         val params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.MATCH_PARENT,
@@ -288,7 +288,8 @@ object PickerOverlay {
 
         /** 当前拾取模式由工具入口确定 */
         private val mode: Mode = initialMode
-        private val isAreaMode = mode == Mode.REGION || mode == Mode.SCREENSHOT
+        private val isScreenshot = mode == Mode.SCREENSHOT
+        private val isAreaMode = mode == Mode.REGION || isScreenshot
 
         private val density = resources.displayMetrics.density
 
@@ -310,7 +311,7 @@ object PickerOverlay {
         private var isSelecting = false
         private var isCapturing = false
 
-        /** 选区确认按钮区域（生成代码 / 保存截图） */
+        /** 截图保存按钮区域。 */
         private val saveRect = RectF()
 
         /** 选区重选按钮区域 */
@@ -340,7 +341,7 @@ object PickerOverlay {
             style = Paint.Style.STROKE
             strokeWidth = density
         }
-        private val backCallback = if (Build.VERSION.SDK_INT >= 33 && !isAreaMode) {
+        private val backCallback = if (Build.VERSION.SDK_INT >= 33 && !isScreenshot) {
             OnBackInvokedCallback { PickerOverlay.hide() }
         } else null
 
@@ -369,14 +370,10 @@ object PickerOverlay {
             color = 0x99000000.toInt()
             style = Paint.Style.FILL
         }
-        private val selectionFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = 0x00FFFFFF
-            style = Paint.Style.FILL
-        }
         private val bitmapPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
 
         init {
-            isFocusableInTouchMode = !isAreaMode
+            isFocusableInTouchMode = !isScreenshot
             // 初始位置取屏幕中心
             post {
                 if (px == 0f && py == 0f) {
@@ -402,7 +399,7 @@ object PickerOverlay {
         }
 
         override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-            if (isAreaMode || event.keyCode != KeyEvent.KEYCODE_BACK) return super.dispatchKeyEvent(event)
+            if (isScreenshot || event.keyCode != KeyEvent.KEYCODE_BACK) return super.dispatchKeyEvent(event)
             if (event.action == KeyEvent.ACTION_UP && !event.isCanceled) PickerOverlay.hide()
             return true
         }
@@ -425,44 +422,46 @@ object PickerOverlay {
             canvas.drawLine(px, py + gap, px, py + arm, crossPaint)
             canvas.drawCircle(px, py, 10f * density, crossPaint)
 
-            drawReadout(canvas, arm)
-        }
-
-        private fun drawReadout(canvas: Canvas, arm: Float) {
             val x = toScreenX(px)
             val y = toScreenY(py)
-            val coordinates = "X $x  Y $y"
             val sampledColor = if (mode == Mode.COLOR) sampleColor(x, y) else null
             val hex = if (mode == Mode.COLOR) sampledColor?.let { colorHex(it) } ?: "无可用颜色" else null
+            drawReadout(canvas, px, py - arm, py + arm, "X $x  Y $y", hex, sampledColor)
+        }
+
+        private fun drawReadout(
+            canvas: Canvas, anchorX: Float, anchorTop: Float, anchorBottom: Float,
+            firstLine: String, secondLine: String? = null, sampledColor: Int? = null
+        ) {
             val margin = 6f * density
             val padding = 4f * density
             val rowHeight = 16f * density
             val swatchSize = 12f * density
             val swatchGap = if (sampledColor != null) swatchSize + 5f * density else 0f
-            val hexWidth = if (hex != null) readoutTextPaint.measureText(hex) else 0f
-            val chipWidth = max(readoutTextPaint.measureText(coordinates), hexWidth + swatchGap) + 16f * density
-            val chipHeight = (if (hex == null) rowHeight else 2 * rowHeight) + 2 * padding
-            val left = (px - chipWidth / 2).coerceIn(margin, (width - margin - chipWidth).coerceAtLeast(margin))
-            val below = py + arm + margin
+            val secondLineWidth = if (secondLine != null) readoutTextPaint.measureText(secondLine) else 0f
+            val chipWidth = max(readoutTextPaint.measureText(firstLine), secondLineWidth + swatchGap) + 16f * density
+            val chipHeight = (if (secondLine == null) rowHeight else 2 * rowHeight) + 2 * padding
+            val left = (anchorX - chipWidth / 2).coerceIn(margin, (width - margin - chipWidth).coerceAtLeast(margin))
+            val below = anchorBottom + margin
             val top = if (below + chipHeight <= height - margin) below
-                else (py - arm - margin - chipHeight).coerceAtLeast(margin)
+                else (anchorTop - margin - chipHeight).coerceAtLeast(margin)
             readoutRect.set(left, top, left + chipWidth, top + chipHeight)
             canvas.drawRoundRect(readoutRect, margin, margin, readoutPaint)
 
             val firstCenterY = top + padding + rowHeight / 2
             val baselineOffset = -(readoutTextPaint.ascent() + readoutTextPaint.descent()) / 2
             val centerX = readoutRect.centerX()
-            canvas.drawText(coordinates, centerX, firstCenterY + baselineOffset, readoutTextPaint)
-            if (hex != null) {
+            canvas.drawText(firstLine, centerX, firstCenterY + baselineOffset, readoutTextPaint)
+            if (secondLine != null) {
                 val colorCenterY = firstCenterY + rowHeight
                 if (sampledColor != null) {
-                    val swatchLeft = centerX - (hexWidth + swatchGap) / 2
+                    val swatchLeft = centerX - (secondLineWidth + swatchGap) / 2
                     val swatchTop = colorCenterY - swatchSize / 2
                     swatchPaint.color = sampledColor or Color.BLACK
                     canvas.drawRect(swatchLeft, swatchTop, swatchLeft + swatchSize, swatchTop + swatchSize, swatchPaint)
                     canvas.drawRect(swatchLeft, swatchTop, swatchLeft + swatchSize, swatchTop + swatchSize, swatchBorderPaint)
                 }
-                canvas.drawText(hex, centerX + swatchGap / 2, colorCenterY + baselineOffset, readoutTextPaint)
+                canvas.drawText(secondLine, centerX + swatchGap / 2, colorCenterY + baselineOffset, readoutTextPaint)
             }
         }
 
@@ -483,6 +482,21 @@ object PickerOverlay {
         }
 
         private fun drawSelection(canvas: Canvas) {
+            if (!isScreenshot) {
+                if (hasSelection) {
+                    drawSelectionFrame(canvas)
+                    val region = selectedRegion()
+                    drawReadout(
+                        canvas, region.exactCenterX() - location[0],
+                        (region.top - location[1]).toFloat(), (region.bottom - location[1]).toFloat(),
+                        "X ${region.left}  Y ${region.top}", "W ${region.width()}  H ${region.height()}"
+                    )
+                } else {
+                    drawReadout(canvas, width / 2f, height / 2f, height / 2f, "拖动框选范围")
+                }
+                return
+            }
+
             drawFrozenFrame(canvas)
             val btnW = 76f * density
             val btnH = 44f * density
@@ -492,26 +506,10 @@ object PickerOverlay {
             resetRect.set(margin * 2, height - margin - 58f * density, margin * 2 + btnW, height - margin - 14f * density)
             saveRect.set(resetRect.right + btnGap, resetRect.top, width - margin * 2, resetRect.bottom)
 
-            if (hasSelection) {
-                val left = min(selectionStartX, selectionEndX)
-                val top = min(selectionStartY, selectionEndY)
-                val right = max(selectionStartX, selectionEndX)
-                val bottom = max(selectionStartY, selectionEndY)
-                canvas.drawRect(0f, 0f, width.toFloat(), top, dimPaint)
-                canvas.drawRect(0f, bottom, width.toFloat(), height.toFloat(), dimPaint)
-                canvas.drawRect(0f, top, left, bottom, dimPaint)
-                canvas.drawRect(right, top, width.toFloat(), bottom, dimPaint)
-                canvas.drawRect(left, top, right, bottom, selectionFillPaint)
-                canvas.drawRect(left, top, right, bottom, crossPaint)
-            } else {
-                canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), dimPaint)
-            }
+            if (hasSelection) drawSelectionFrame(canvas)
+            else canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), dimPaint)
 
-            val captureText = when {
-                mode == Mode.REGION -> "生成代码"
-                isCapturing -> "截图中"
-                else -> "保存"
-            }
+            val captureText = if (isCapturing) "截图中" else "保存"
             canvas.drawRoundRect(RectF(margin, height - 142f * density, width - margin, height - margin), 16f * density, 16f * density, panelPaint)
             drawButton(canvas, saveRect, captureText, primary = true)
             drawButton(canvas, resetRect, "重选")
@@ -519,16 +517,24 @@ object PickerOverlay {
 
             val hint = when {
                 isCapturing -> "正在截取所选区域…"
-                hasSelection && mode == Mode.REGION -> selectedRegion().let {
-                    "范围 [${it.left}, ${it.top}, ${it.width()}, ${it.height()}]"
-                }
                 hasSelection -> "${selectionWidth()}×${selectionHeight()}，可重新拖动框选"
-                mode == Mode.REGION -> "按住并拖动选择范围，生成 [x, y, 宽度, 高度]"
                 else -> "按住并拖动，框选要保存的区域"
             }
             canvas.drawText(android.text.TextUtils.ellipsize(hint, android.text.TextPaint(subPaint),
                 (width - margin * 4).coerceAtLeast(1f), android.text.TextUtils.TruncateAt.END).toString(),
                 margin * 2, height - 113f * density, subPaint)
+        }
+
+        private fun drawSelectionFrame(canvas: Canvas) {
+            val left = min(selectionStartX, selectionEndX)
+            val top = min(selectionStartY, selectionEndY)
+            val right = max(selectionStartX, selectionEndX)
+            val bottom = max(selectionStartY, selectionEndY)
+            canvas.drawRect(0f, 0f, width.toFloat(), top, dimPaint)
+            canvas.drawRect(0f, bottom, width.toFloat(), height.toFloat(), dimPaint)
+            canvas.drawRect(0f, top, left, bottom, dimPaint)
+            canvas.drawRect(right, top, width.toFloat(), bottom, dimPaint)
+            canvas.drawRect(left, top, right, bottom, crossPaint)
         }
 
         private fun drawButton(canvas: Canvas, rect: RectF, label: String, primary: Boolean = false) {
@@ -588,7 +594,16 @@ object PickerOverlay {
             invalidate()
         }
 
-        /** 框选与按钮手势分开处理，重选/确认按钮的拖动不会意外创建新选区。 */
+        private fun startSelection(x: Float, y: Float) {
+            isSelecting = true
+            hasSelection = false
+            selectionStartX = x
+            selectionStartY = y
+            selectionEndX = x
+            selectionEndY = y
+        }
+
+        /** 轻点范围读数条复制，拖动则开始重新框选。 */
         private fun onSelectionTouchEvent(event: MotionEvent): Boolean {
             val x = event.x.coerceIn(0f, width.toFloat())
             val y = event.y.coerceIn(0f, height.toFloat())
@@ -596,7 +611,15 @@ object PickerOverlay {
                 MotionEvent.ACTION_DOWN -> {
                     consumedByButton = false
                     isSelecting = false
+                    pressedReadout = false
                     when {
+                        !isScreenshot -> {
+                            pressedReadout = hasSelection && readoutRect.contains(x, y)
+                            if (pressedReadout) {
+                                downX = x
+                                downY = y
+                            } else startSelection(x, y)
+                        }
                         cancelRect.contains(event.x, event.y) -> {
                             consumedByButton = true
                             PickerOverlay.hide()
@@ -605,12 +628,7 @@ object PickerOverlay {
                         saveRect.contains(event.x, event.y) -> {
                             consumedByButton = true
                             if (hasSelection) {
-                                if (mode == Mode.REGION) {
-                                    val region = selectedRegion()
-                                    onResult("var region = [${region.left}, ${region.top}, ${region.width()}, ${region.height()}];")
-                                } else {
-                                    captureSelection()
-                                }
+                                captureSelection()
                             } else {
                                 Toast.makeText(context, "请先拖动选择范围", Toast.LENGTH_SHORT).show()
                             }
@@ -620,32 +638,37 @@ object PickerOverlay {
                             hasSelection = false
                         }
                         y >= height - 142f * density -> consumedByButton = true
-                        else -> {
-                            isSelecting = true
-                            hasSelection = false
-                            selectionStartX = x
-                            selectionStartY = y
-                            selectionEndX = x
-                            selectionEndY = y
-                        }
+                        else -> startSelection(x, y)
                     }
                 }
                 MotionEvent.ACTION_MOVE, MotionEvent.ACTION_UP -> {
+                    if (pressedReadout && (abs(x - downX) > 6f * density || abs(y - downY) > 6f * density)) {
+                        pressedReadout = false
+                        startSelection(downX, downY)
+                    }
                     if (isSelecting && !consumedByButton && !isCapturing) {
                         selectionEndX = x
                         selectionEndY = y
-                        val minSize = if (mode == Mode.SCREENSHOT) 2 else 1
+                        val minSize = if (isScreenshot) 2 else 1
                         hasSelection = selectionWidth() >= minSize && selectionHeight() >= minSize
                     }
                     if (event.actionMasked == MotionEvent.ACTION_UP) {
+                        val copyRange = pressedReadout && hasSelection && readoutRect.contains(x, y)
                         isSelecting = false
                         consumedByButton = false
+                        pressedReadout = false
+                        if (copyRange) {
+                            val region = selectedRegion()
+                            onResult("var region = [${region.left}, ${region.top}, ${region.width()}, ${region.height()}];")
+                            return true
+                        }
                     }
                 }
                 MotionEvent.ACTION_CANCEL -> {
                     if (isSelecting) hasSelection = false
                     isSelecting = false
                     consumedByButton = false
+                    pressedReadout = false
                 }
             }
             invalidate()
