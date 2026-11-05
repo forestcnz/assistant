@@ -72,8 +72,7 @@ object FloatyManager {
     private const val BALL_SIZE_DP = 35
 
     private const val RUNNING_BAR_WIDTH_DP = 168
-    private const val RUNNING_BAR_MIN_HEIGHT_DP = 44
-    private const val RUNNING_NAME_MAX_CHARS = 4
+    private const val RUNNING_BAR_MIN_HEIGHT_DP = 29
 
     // 配色（悬浮窗沿用 App 的暖白/深绿灰主题，保证在其他应用之上也可读）
     private const val COLOR_BG = AppPalette.SURFACE
@@ -717,17 +716,14 @@ object FloatyManager {
 
     private fun renderRunningBar(context: Context, capsule: LinearLayout, task: String) {
         val d = context.resources.displayMetrics.density
-        val nameLength = minOf(RUNNING_NAME_MAX_CHARS, task.codePointCount(0, task.length))
-        val shortName = task.substring(0, task.offsetByCodePoints(0, nameLength))
-        val progress = runningProgress?.let { " · [$it]" }.orEmpty()
         capsule.apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             minimumHeight = (RUNNING_BAR_MIN_HEIGHT_DP * d).toInt()
             alpha = 1f
             elevation = 8 * d
-            background = roundedBackground(COLOR_BG, 15 * d, 0f, 0)
-            setPadding((8 * d).toInt(), (6 * d).toInt(), (8 * d).toInt(), (6 * d).toInt())
+            background = roundedBackground(COLOR_BG, 12 * d, 0f, 0)
+            setPadding((8 * d).toInt(), (2 * d).toInt(), (8 * d).toInt(), (2 * d).toInt())
             contentDescription = null
             addView(
                 View(context).apply {
@@ -738,12 +734,23 @@ object FloatyManager {
                     marginEnd = (6 * d).toInt()
                 }
             )
-            addView(
-                textView(context, shortName + progress, 13f, COLOR_TEXT).apply {
-                    typeface = Typeface.DEFAULT_BOLD
+            runningProgress?.let { progress ->
+                addView(textView(context, "[$progress]", 11f, COLOR_TEXT_DIM).apply {
                     isSingleLine = true
-                    ellipsize = TextUtils.TruncateAt.MIDDLE
-                    contentDescription = "正在运行 $task$progress"
+                    includeFontPadding = false
+                }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                    marginEnd = (4 * d).toInt()
+                })
+            }
+            addView(
+                textView(context, task, 13f, COLOR_TEXT).apply {
+                    typeface = Typeface.DEFAULT_BOLD
+                    includeFontPadding = false
+                    isSingleLine = true
+                    ellipsize = TextUtils.TruncateAt.MARQUEE
+                    marqueeRepeatLimit = -1
+                    isSelected = true
+                    contentDescription = "正在运行 $task"
                 },
                 LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             )
@@ -752,9 +759,10 @@ object FloatyManager {
                     gravity = Gravity.CENTER
                     typeface = Typeface.DEFAULT_BOLD
                     isSingleLine = true
-                    minimumHeight = (28 * d).toInt()
-                    setPadding((8 * d).toInt(), (4 * d).toInt(), (8 * d).toInt(), (4 * d).toInt())
-                    background = panelTouchBackground(roundedBackground(COLOR_STOP, 10 * d, 0f, 0))
+                    includeFontPadding = false
+                    minimumHeight = (24 * d).toInt()
+                    setPadding((8 * d).toInt(), (2 * d).toInt(), (8 * d).toInt(), (2 * d).toInt())
+                    background = panelTouchBackground(roundedBackground(COLOR_STOP, 8 * d, 0f, 0))
                     contentDescription = "停止任务"
                     isFocusable = true
                     setOnClickListener { onStopClicked?.invoke() }
