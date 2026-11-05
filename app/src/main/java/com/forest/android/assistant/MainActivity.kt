@@ -7,6 +7,7 @@ import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.material3.FilterChip
 import androidx.compose.foundation.background
@@ -19,6 +20,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -38,12 +40,14 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
@@ -73,6 +77,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
@@ -714,22 +720,25 @@ class MainActivity : ComponentActivity() {
                 dismissButton = { TextButton(onClick = { deletingAsset = null }) { Text("取消") } })
         }
         renameAsset?.let { info ->
-            RenameAssetDialog(
-                info = info,
-                onDismiss = { renameAsset = null },
-                onConfirm = { newName ->
-                    renameAsset = null
-                    val task = assetsTask
-                    if (task == null) return@RenameAssetDialog
-                    val preview = TaskManager.previewImageRename(this, task, info.file, newName)
-                    if (preview == null) {
-                        Toast.makeText(this, "重命名失败（名称非法、已存在或未修改）", Toast.LENGTH_SHORT).show()
-                    } else {
-                        // 先预览需要修改的脚本行，确认后再改文件
-                        renamePreview = preview
+            var name by remember(info.file) { mutableStateOf(info.file.name) }
+            if (renamePreview == null) {
+                RenameAssetDialog(
+                    info = info,
+                    name = name,
+                    onNameChange = { name = it },
+                    onDismiss = { renameAsset = null },
+                    onConfirm = { newName ->
+                        val task = assetsTask ?: return@RenameAssetDialog
+                        val preview = TaskManager.previewImageRename(this, task, info.file, newName)
+                        if (preview == null) {
+                            Toast.makeText(this, "重命名失败（名称非法、已存在或未修改）", Toast.LENGTH_SHORT).show()
+                        } else {
+                            // 确认前只预览，保留原输入以便返回修改。
+                            renamePreview = preview
+                        }
                     }
-                }
-            )
+                )
+            }
         }
 
         renamePreview?.let { preview ->
@@ -739,6 +748,7 @@ class MainActivity : ComponentActivity() {
                 onDismiss = { renamePreview = null },
                 onConfirm = {
                     renamePreview = null
+                    renameAsset = null
                     if (task == null) return@RenameRefPreviewDialog
                     val renamed = TaskManager.renameImageWithScript(preview)
                     if (renamed != null) {
@@ -1218,10 +1228,11 @@ class MainActivity : ComponentActivity() {
     @Composable
     private fun RenameAssetDialog(
         info: TaskManager.ImageInfo,
+        name: String,
+        onNameChange: (String) -> Unit,
         onDismiss: () -> Unit,
         onConfirm: (String) -> Unit
     ) {
-        var name by remember(info.file.absolutePath) { mutableStateOf(info.file.name) }
         AlertDialog(
             containerColor = MaterialTheme.colorScheme.surface,
             onDismissRequest = onDismiss,
@@ -1231,7 +1242,7 @@ class MainActivity : ComponentActivity() {
                     Text(info.dimensionText() + " · " + info.sizeText(), style = MaterialTheme.typography.bodySmall)
                     OutlinedTextField(
                         value = name,
-                        onValueChange = { name = it },
+                        onValueChange = onNameChange,
                         label = { Text("文件名") },
                         singleLine = true,
                         modifier = Modifier.padding(top = 8.dp)
@@ -1255,53 +1266,88 @@ class MainActivity : ComponentActivity() {
         onDismiss: () -> Unit,
         onConfirm: () -> Unit
     ) {
-        val plan = preview.plan
-        AlertDialog(
-            containerColor = MaterialTheme.colorScheme.surface,
-            onDismissRequest = onDismiss,
-            title = { Text("重命名为 ${preview.newName}") },
-            text = {
-                Column(Modifier.verticalScroll(rememberScrollState())) {
-                    if (plan == null || !plan.hasChanges) {
+        val plan = preview.plan?.takeIf { it.hasChanges }
+        val colors = MaterialTheme.colorScheme
+        val buttonShape = RoundedCornerShape(11.dp)
+        Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+            Surface(
+                modifier = Modifier.padding(16.dp).widthIn(max = 420.dp).fillMaxWidth(),
+                shape = RoundedCornerShape(22.dp),
+                color = colors.surface
+            ) {
+                Column {
+                    Column(
+                        Modifier.padding(start = 16.dp, top = 18.dp, end = 16.dp, bottom = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text("脚本引用确认", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                         Text(
-                            "脚本 task.js 中没有引用「${preview.file.name}」，只改文件名。",
-                            style = MaterialTheme.typography.bodySmall
+                            if (plan != null) "图片改名时一并更新 task.js" else "确认图片的新名称",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colors.onSurfaceVariant
                         )
-                    } else {
-                        Text(
-                            "脚本中有 ${plan.replacementCount} 处引用，涉及 ${plan.changedLineCount} 行（确认后一并修改）：",
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                        plan.changes.forEach { change ->
-                            Column(Modifier.padding(top = 10.dp)) {
-                                Text(
-                                    "第 ${change.lineNumber} 行" + if (change.replacements > 1) "（${change.replacements} 处）" else "",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.primary
+                    }
+                    Column(
+                        Modifier.fillMaxWidth().weight(1f, fill = false).verticalScroll(rememberScrollState())
+                            .padding(start = 16.dp, top = 8.dp, end = 16.dp, bottom = 14.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        if (plan == null) {
+                            Text(
+                                "脚本 task.js 中没有引用「${preview.file.name}」。确认后改名为「${preview.newName}」。",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = colors.onSurfaceVariant
+                            )
+                        } else {
+                            Text(
+                                "脚本中有 ${plan.replacementCount} 处引用，涉及 ${plan.changedLineCount} 行。确认后一并修改。",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = colors.onSurfaceVariant
+                            )
+                            Surface(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(13.dp),
+                                color = Color(AppPalette.INVERSE_SURFACE),
+                                contentColor = Color(AppPalette.INVERSE_ON_SURFACE)
+                            ) {
+                                val codeStyle = MaterialTheme.typography.bodySmall.copy(
+                                    fontFamily = FontFamily.Monospace, fontSize = 11.sp, lineHeight = 17.sp
                                 )
-                                Text(
-                                    "- " + change.before.trim(),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    fontFamily = FontFamily.Monospace,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Text(
-                                    "+ " + change.after.trim(),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    fontFamily = FontFamily.Monospace
-                                )
+                                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                    plan.changes.forEach { change ->
+                                        Column {
+                                            val count = if (change.replacements > 1) "（${change.replacements} 处）" else ""
+                                            Text("第 ${change.lineNumber} 行$count", style = codeStyle)
+                                            Text("- ${change.before.trim()}", style = codeStyle, color = Color(0xFFF1A9A0))
+                                            Text("+ ${change.after.trim()}", style = codeStyle, color = Color(0xFFA8DBC0))
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
+                    HorizontalDivider(color = colors.outlineVariant)
+                    FlowRow(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.End),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = onDismiss,
+                            shape = buttonShape,
+                            border = BorderStroke(1.dp, colors.outlineVariant),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = colors.onSurface),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
+                        ) { Text("返回") }
+                        Button(
+                            onClick = onConfirm,
+                            shape = buttonShape,
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
+                        ) { Text(if (plan != null) "改名并同步脚本" else "改名") }
+                    }
                 }
-            },
-            confirmButton = {
-                TextButton(onClick = onConfirm) {
-                    Text(if (plan != null && plan.hasChanges) "改名并同步脚本" else "改名")
-                }
-            },
-            dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
-        )
+            }
+        }
     }
 
     /** 三项权限纵向显示为状态卡，状态底色与文字同步反映授权情况。 */

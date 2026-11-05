@@ -7,14 +7,12 @@ import android.content.Intent
 import android.content.res.ColorStateList
 import android.graphics.BitmapFactory
 import android.graphics.PixelFormat
-import android.graphics.Rect
 import android.graphics.Typeface
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.RippleDrawable
 import android.net.Uri
 import android.os.Build
-import android.os.SystemClock
 import android.provider.Settings
 import android.text.TextUtils
 import android.util.Log
@@ -23,6 +21,7 @@ import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
+import android.view.WindowInsets
 import android.view.WindowManager
 import android.widget.ImageView
 import android.widget.LinearLayout
@@ -37,7 +36,7 @@ import com.forest.android.assistant.ui.AppPalette
  *
  * 控件有状态，就地变形而不是叠加多个窗口：
  * - 空闲态：肥宅雕 Logo 悬浮球，点击展开面板，拖动可移动并自动贴边（位置会记住）；
- * - 运行态：原矩形条显示任务名与「停止」按钮，单击即可停止；现在显示红色雕雕、头顶任务名，双击雕雕停止。
+ * - 运行态：横条显示任务名、队列进度和「停止」按钮。
  *
  * 贴边后空闲球半隐藏：约一半探出屏外，点击先弹出完整显示，再次点击才展开面板；
  * 半隐藏位置与贴边方向都会持久化，重启后保持贴边形态。
@@ -72,14 +71,9 @@ object FloatyManager {
     /** 空闲球尺寸（dp），与 ballView 保持一致 */
     private const val BALL_SIZE_DP = 35
 
-    /** 运行态红色雕雕与空闲球使用相同的显示尺寸；头顶任务名可独立伸展。 */
-    private const val RUNNING_BIRD_SIZE_DP = BALL_SIZE_DP
-    private const val RUNNING_LABEL_MAX_WIDTH_DP = 170
-    private const val RUNNING_LABEL_HEIGHT_DP = 30
-    private const val RUNNING_GAP_DP = 2
-
-    // 旧运行条尺寸：宽度约为上一版 213dp 的一半，现仅供布局历史说明。
-    // 旧版队列执行时的运行条宽度：适当加宽，保证「进度 + 任务名」可读。
+    private const val RUNNING_BAR_WIDTH_DP = 168
+    private const val RUNNING_BAR_MIN_HEIGHT_DP = 44
+    private const val RUNNING_NAME_MAX_CHARS = 4
 
     // 配色（悬浮窗沿用 App 的暖白/深绿灰主题，保证在其他应用之上也可读）
     private const val COLOR_BG = AppPalette.SURFACE
@@ -154,12 +148,6 @@ object FloatyManager {
     /** 统一的悬浮控件（胶囊） */
     private var capsuleView: LinearLayout? = null
     private var capsuleParams: WindowManager.LayoutParams? = null
-    /** 运行时仅雕雕本体响应拖动与双击，头顶名称只负责显示。 */
-    private var runningBirdView: ImageView? = null
-    private var runningBirdSide = DockSide.NONE
-    private var lastRunningTapAt = 0L
-    private var lastRunningTapX = 0f
-    private var lastRunningTapY = 0f
     private data class ScreenshotVisibility(val view: View, val visibility: Int, val flags: Int)
     private var screenshotVisibility: ScreenshotVisibility? = null
 
@@ -184,7 +172,7 @@ object FloatyManager {
     @Volatile
     private var runningProgress: String? = null
 
-    /** 点击[停止]时的回调（任务运行中）；运行态双击雕雕也会触发。 */
+    /** 点击停止按钮时的回调。 */
     @Volatile
     var onStopClicked: (() -> Unit)? = null
 
@@ -251,7 +239,7 @@ object FloatyManager {
         val wm = windowManager ?: return
         if (runningTask != null) {
             hideTaskPanel()
-            view.post { positionRunningBird(context) }
+            view.post { positionRunningBar(context) }
             return
         }
         val screen = realScreenSize(context)
@@ -333,34 +321,20 @@ object FloatyManager {
             y = posY
         )
 
-        // 空闲球与运行态雕雕均可拖动；只有雕雕本体接收运行时手势。
+        // 空闲球和运行横条都可拖动；停止按钮由子视图处理点击。
         var downX = 0f
         var downY = 0f
         var startX = 0
         var startY = 0
         var moved = false
         var runningOnDown = false
-        var ignoredRunningTouch = false
         // 用系统触摸阈值判定拖动：贴边球只剩半个圆可点，5px 的抖动太容易被当成拖动而重新贴边
         val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
-        val doubleTapSlop = ViewConfiguration.get(context).scaledDoubleTapSlop
         val slopSq = touchSlop * touchSlop
-        val doubleTapSlopSq = doubleTapSlop * doubleTapSlop
         capsule.setOnTouchListener { _, event ->
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
                     runningOnDown = runningTask != null
-                    ignoredRunningTouch = false
-                    if (runningOnDown) {
-                        val hit = Rect()
-                        runningBirdView?.getHitRect(hit)
-                        if (!hit.contains(event.x.toInt(), event.y.toInt())) {
-                            // 名称与提示是纯展示区域；消费触摸，避免无障碍 click 监听误接收单击。
-                            lastRunningTapAt = 0L
-                            ignoredRunningTouch = true
-                            return@setOnTouchListener true
-                        }
-                    }
                     downX = event.rawX
                     downY = event.rawY
                     startX = params.x
@@ -369,20 +343,17 @@ object FloatyManager {
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {
-                    if (ignoredRunningTouch) return@setOnTouchListener true
                     val dx = (event.rawX - downX).toInt()
                     val dy = (event.rawY - downY).toInt()
                     if (moved || dx * dx + dy * dy > slopSq) {
                         moved = true
                         if (runningOnDown) {
-                            // 运行态雕雕与球同为 TOP|START 重力坐标系，拖动时钳在真实屏幕内。
-                            lastRunningTapAt = 0L
                             val screenNow = realScreenSize(context)
-                            val birdW = runningBirdWidth(context, screenNow.x)
-                            val birdH = capsule.height.takeIf { it > 0 }
-                                ?: runningBirdHeight(context)
-                            params.x = FloatyGeometry.clampX(startX + dx, birdW, screenNow.x)
-                            params.y = FloatyGeometry.clampY(startY + dy, birdH, screenNow.y)
+                            val barW = runningBarWidth(context, screenNow.x)
+                            val barH = capsule.height.takeIf { it > 0 } ?: capsule.minimumHeight
+                            params.x = FloatyGeometry.clampX(startX + dx, barW, screenNow.x)
+                            val bottom = runningBarBottom(context, capsule, screenNow.y)
+                            params.y = FloatyGeometry.clampY(startY + dy, barH, bottom)
                         } else {
                             hideTaskPanel()
                             val screenNow = realScreenSize(context)
@@ -400,33 +371,9 @@ object FloatyManager {
                     true
                 }
                 MotionEvent.ACTION_UP -> {
-                    if (ignoredRunningTouch) {
-                        ignoredRunningTouch = false
-                        runningOnDown = false
-                        return@setOnTouchListener true
-                    }
                     when {
                         moved -> settleAfterDrag(context, wm, capsule, params)
-                        runningOnDown -> {
-                            val hit = Rect()
-                            runningBirdView?.getHitRect(hit)
-                            if (runningTask != null && hit.contains(event.x.toInt(), event.y.toInt())) {
-                                val now = SystemClock.uptimeMillis()
-                                val dx = event.rawX - lastRunningTapX
-                                val dy = event.rawY - lastRunningTapY
-                                if (lastRunningTapAt > 0 &&
-                                    now - lastRunningTapAt <= ViewConfiguration.getDoubleTapTimeout() &&
-                                    dx * dx + dy * dy <= doubleTapSlopSq
-                                ) {
-                                    lastRunningTapAt = 0L
-                                    onStopClicked?.invoke()
-                                } else {
-                                    lastRunningTapAt = now
-                                    lastRunningTapX = event.rawX
-                                    lastRunningTapY = event.rawY
-                                }
-                            }
-                        }
+                        runningOnDown || runningTask != null -> Unit
                         // 半隐藏贴边第一次点击：先完整弹出，下一次点击才展开面板
                         popOutIfDocked(context, wm, capsule, params) -> Unit
                         else -> toggleTaskPanel(context, wm)
@@ -437,8 +384,6 @@ object FloatyManager {
                 MotionEvent.ACTION_CANCEL -> {
                     // 手势被系统打断（来电/通知栏/多指）：收回到合法位置，避免悬浮球留在屏幕外找不回来
                     if (moved) settleAfterDrag(context, wm, capsule, params)
-                    lastRunningTapAt = 0L
-                    ignoredRunningTouch = false
                     moved = false
                     runningOnDown = false
                     true
@@ -475,8 +420,6 @@ object FloatyManager {
         }
         capsuleView = null
         capsuleParams = null
-        runningBirdView = null
-        lastRunningTapAt = 0L
         windowManager = null
         dockedSide = DockSide.NONE   // 下次显示时按持久化位置重新推断贴边形态
         if (stopKeepAlive) {
@@ -540,11 +483,11 @@ object FloatyManager {
         if (isEnabledByUser(context)) showLauncher(context)
     }
 
-    /** 切换到运行态：红色雕雕头顶显示任务名，双击雕雕停止任务；沿用空闲球的锚点。
+    /** 切换到运行横条，沿用空闲球的锚点。
      * @param progress 队列进度（如「2/3」），单任务运行传 null
      */
     fun setRunning(context: Context, taskName: String, progress: String? = null) {
-        // 面板触发的任务先保持胶囊脱离窗口，等红色雕雕与坐标就绪再显示。
+        // 从面板启动时，等运行横条及其位置就绪后再显示。
         startingFromPanel = false
         hideTaskPanel(restoreBall = false)
         if (capsuleView == null || capsuleView?.parent != null && capsuleView?.isAttachedToWindow != true) {
@@ -554,32 +497,20 @@ object FloatyManager {
             }
         }
         val wasRunning = runningTask != null
-        val oldWidth = if (wasRunning) runningBirdWidth(context, realScreenSize(context).x) else 0
         if (!wasRunning) {
             // 记下空闲球的锚点：运行态出现在同一位置，任务结束后再还原
             capsuleParams?.let { idlePosition = it.x to it.y }
             idleDockedSide = dockedSide
-            // 已显示的空闲球也先移除，避免换图后才移动到任务名上方。
+            // 先移除空闲球，避免横条先出现在旧位置再跳动。
             detachCapsuleForTransition()
         }
-        if (runningTask != taskName || runningProgress != progress) lastRunningTapAt = 0L
         runningTask = taskName
         runningProgress = progress
         dockedSide = DockSide.NONE
-        // 队列里切下一个任务时保留雕雕位置；名称宽度变化时避免图像跳动。
-        if (wasRunning) {
-            val delta = oldWidth - runningBirdWidth(context, realScreenSize(context).x)
-            capsuleParams?.let { params ->
-                params.x += when (runningBirdSide) {
-                    DockSide.RIGHT -> delta
-                    DockSide.NONE -> delta / 2
-                    DockSide.LEFT -> 0
-                }
-            }
-        }
+        // 横条宽度固定，队列切换任务时保留运行中的拖动位置。
         renderCapsule(context, reposition = !wasRunning)
         if (!wasRunning) {
-            positionRunningBird(context)
+            positionRunningBar(context)
             restoreCapsuleIfNeeded()
         }
         Log.i(TAG, "悬浮控件进入运行态: $taskName${progress?.let { "（$it）" } ?: ""}")
@@ -592,8 +523,6 @@ object FloatyManager {
         detachCapsuleForTransition()
         runningTask = null
         runningProgress = null
-        lastRunningTapAt = 0L
-        runningBirdSide = DockSide.NONE
         val savedPosition = idlePosition
         val savedSide = idleDockedSide
         val autoSnap = isAutoSnapEnabled(context)
@@ -620,31 +549,35 @@ object FloatyManager {
     /**
      * 按当前状态重建胶囊内容：
      * - 空闲：35dp 圆形悬浮球（品牌图标）；
-     * - 运行：原矩形条显示任务名和停止按钮；现为红色雕雕与顶部任务名。
+     * - 运行：显示任务名、进度与停止按钮的横条。
      * @param reposition 内容尺寸变化后是否重新定位（队列切任务时保持用户拖好的位置）
      */
     @SuppressLint("SetTextI18n")
     private fun renderCapsule(context: Context, reposition: Boolean = true) {
         val capsule = capsuleView ?: return
         capsule.removeAllViews()
-        runningBirdView = null
         val task = runningTask
         if (task == null) {
+            capsuleParams?.let { params ->
+                params.width = WindowManager.LayoutParams.WRAP_CONTENT
+                params.flags = params.flags or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
+            }
+            capsule.orientation = LinearLayout.VERTICAL
+            capsule.gravity = Gravity.CENTER_HORIZONTAL
+            capsule.minimumHeight = 0
+            capsule.elevation = 0f
             capsule.setPadding(0, 0, 0, 0)
             capsule.background = null
             capsule.alpha = 0.92f
             capsule.contentDescription = "雕雕悬浮球，点击展开任务面板"
-            capsule.setOnClickListener(null)
             capsule.addView(ballView(context))
         } else {
-            capsule.setPadding(0, 0, 0, 0)
-            capsule.background = null
-            capsule.alpha = 1f
-            capsule.contentDescription = "正在运行 $task，双击雕雕停止任务"
-            // 无障碍服务双击激活时发送一次 click；触屏双击仍由下方手势逻辑处理。
-            capsule.setOnClickListener { onStopClicked?.invoke() }
-            capsule.addView(runningBadge(context, task))
-            capsule.addView(runningBird(context))
+            capsuleParams?.let { params ->
+                params.width = runningBarWidth(context, realScreenSize(context).x)
+                // 只有空闲球需要半隐藏，运行横条由系统约束在可见区域内。
+                params.flags = params.flags and WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS.inv()
+            }
+            renderRunningBar(context, capsule, task)
         }
         capsuleView?.let { view ->
             if (view.isAttachedToWindow) {
@@ -658,7 +591,7 @@ object FloatyManager {
                 return@let
             }
             view.post {
-                if (runningTask != null) positionRunningBird(context) else keepInsideScreen(context)
+                if (runningTask != null) positionRunningBar(context) else keepInsideScreen(context)
             }
         }
     }
@@ -677,7 +610,8 @@ object FloatyManager {
         } else {
             FloatyGeometry.clampX(params.x, w, screen.x)
         }
-        val ny = FloatyGeometry.clampY(params.y, h, screen.y)
+        val bottom = if (runningTask != null) runningBarBottom(context, view, screen.y) else screen.y
+        val ny = FloatyGeometry.clampY(params.y, h, bottom)
         if (nx != params.x || ny != params.y) {
             params.x = nx
             params.y = ny
@@ -688,47 +622,28 @@ object FloatyManager {
         }
     }
 
-    /**
-     * 运行态定位：雕雕沿用空闲球的锚点，名称在头顶，贴边时整体留在屏内。
-     * - 球半隐藏在边缘时，红色雕雕靠同侧完整显示，保证双击区域可见；
-     * - y 沿用球的中心，并钳在真实屏幕内。
-     * 运行态位置不持久化：清空运行态后空闲球回到自己的记忆位置。
-     */
-    private fun positionRunningBird(context: Context) {
+    /** 运行横条以原悬浮球为锚点，靠边时仍完整显示。 */
+    private fun positionRunningBar(context: Context) {
         if (runningTask == null) return
         val view = capsuleView ?: return
         val params = capsuleParams ?: return
         val screen = realScreenSize(context)
-        val width = runningBirdWidth(context, screen.x)
+        val width = runningBarWidth(context, screen.x)
         val height = view.height.takeIf { view.isAttachedToWindow && it > 0 }
-            ?: runningBirdHeight(context)
+            ?: view.minimumHeight
         val anchor = idlePosition ?: (params.x to params.y)
         val ball = ballSize(context)
-        runningBirdSide = when {
-            idleDockedSide != DockSide.NONE -> idleDockedSide
-            anchor.first < width / 2 -> DockSide.LEFT
-            anchor.first > screen.x - ball - width / 2 -> DockSide.RIGHT
-            else -> DockSide.NONE
-        }
-        // 横向让雕雕贴近原来的球；靠边时任务名向屏幕内部延伸。
         params.gravity = Gravity.TOP or Gravity.START
-        params.x = when (runningBirdSide) {
-            DockSide.LEFT -> if (idleDockedSide == DockSide.LEFT) {
-                FloatyGeometry.visibleX(width, screen.x, DockSide.LEFT, snapMargin(context))
-            } else FloatyGeometry.clampX(anchor.first, width, screen.x)
-            DockSide.RIGHT -> if (idleDockedSide == DockSide.RIGHT) {
-                FloatyGeometry.visibleX(width, screen.x, DockSide.RIGHT, snapMargin(context))
-            } else FloatyGeometry.clampX(anchor.first + ball - width, width, screen.x)
+        params.width = width
+        params.x = when (idleDockedSide) {
+            DockSide.LEFT, DockSide.RIGHT ->
+                FloatyGeometry.visibleX(width, screen.x, idleDockedSide, snapMargin(context))
             DockSide.NONE -> FloatyGeometry.clampX(
                 anchor.first - (width - ball) / 2, width, screen.x
             )
         }
-        val labelHeight = (RUNNING_LABEL_HEIGHT_DP + RUNNING_GAP_DP) * context.resources.displayMetrics.density
-        params.y = FloatyGeometry.clampY(
-            anchor.second + (ball - runningBirdSize(context)) / 2 - labelHeight.toInt(),
-            height, screen.y
-        )
-        updateRunningBirdAlignment()
+        val bottom = runningBarBottom(context, view, screen.y)
+        params.y = FloatyGeometry.clampY(anchor.second + (ball - height) / 2, height, bottom)
         if (view.isAttachedToWindow) {
             try {
                 windowManager?.updateViewLayout(view, params)
@@ -747,51 +662,31 @@ object FloatyManager {
         }
     }
 
-    /** 运行时拖动换边后，让图像始终靠近对应屏幕边缘。 */
-    private fun updateRunningBirdAlignment() {
-        val image = runningBirdView ?: return
-        val lp = image.layoutParams as LinearLayout.LayoutParams
-        lp.gravity = birdGravity()
-        image.layoutParams = lp
-    }
-
-    private fun birdGravity(): Int = when (runningBirdSide) {
-        DockSide.LEFT -> Gravity.START
-        DockSide.RIGHT -> Gravity.END
-        DockSide.NONE -> Gravity.CENTER_HORIZONTAL
-    }
-
     /** 参与贴边计算的悬浮控件宽度：空闲用固定球宽（状态切换瞬间测量值可能是旧胶囊宽度） */
     private fun stagedViewW(context: Context): Int {
         if (runningTask == null) return ballSize(context)
-        return runningBirdWidth(context, realScreenSize(context).x)
+        return runningBarWidth(context, realScreenSize(context).x)
     }
 
-    /** 顶部任务名按实际文字收缩，长名称与队列进度按屏宽截断。 */
-    private fun runningBirdWidth(context: Context, screenW: Int): Int {
+    private fun runningBarWidth(context: Context, screenW: Int): Int {
         val d = context.resources.displayMetrics.density
-        val text = runningLabel(runningTask ?: "")
-        val paint = android.graphics.Paint().apply {
-            textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 12f, context.resources.displayMetrics)
-            typeface = android.graphics.Typeface.DEFAULT_BOLD
-        }
-        val max = (RUNNING_LABEL_MAX_WIDTH_DP * d).toInt()
-            .coerceAtMost((screenW - (12 * d).toInt()).coerceAtLeast(1))
-        return (paint.measureText(text).toInt() + (34 * d).toInt())
-            .coerceAtLeast(runningBirdSize(context))
-            .coerceAtMost(max)
+        return minOf((RUNNING_BAR_WIDTH_DP * d).toInt(), screenW - 2 * snapMargin(context)).coerceAtLeast(1)
     }
 
-    private fun runningBirdSize(context: Context): Int =
-        (RUNNING_BIRD_SIZE_DP * context.resources.displayMetrics.density).toInt()
-
-    private fun runningBirdHeight(context: Context): Int =
-        ((RUNNING_LABEL_HEIGHT_DP + RUNNING_GAP_DP + RUNNING_BIRD_SIZE_DP) *
-            context.resources.displayMetrics.density).toInt()
-
-    // 队列执行时在任务名前标注进度（如「2/3」），让用户知道还有几个任务待执行
-    private fun runningLabel(task: String): String =
-        runningProgress?.let { "[$it] $task" } ?: task
+    /** 横条底边预留导航栏和系统手势区，导航栏暂时隐藏时也保留这段空间。 */
+    @Suppress("DEPRECATION")
+    private fun runningBarBottom(context: Context, view: View, screenHeight: Int): Int {
+        val wm = context.getSystemService(WindowManager::class.java)
+        val bottomInset = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val types = WindowInsets.Type.navigationBars() or WindowInsets.Type.displayCutout() or
+                WindowInsets.Type.systemGestures()
+            wm.maximumWindowMetrics.windowInsets.getInsetsIgnoringVisibility(types).bottom
+        } else {
+            val available = android.graphics.Point().also { wm.defaultDisplay.getSize(it) }
+            maxOf(view.rootWindowInsets?.stableInsetBottom ?: 0, screenHeight - available.y)
+        }
+        return (screenHeight - bottomInset - snapMargin(context)).coerceAtLeast(0)
+    }
 
     /** 空闲球边长（px） */
     private fun ballSize(context: Context): Int =
@@ -820,47 +715,54 @@ object FloatyManager {
         }
     }
 
-    /** 任务名悬在红色雕雕头顶；队列进度仍显示在名称前，长名字省略尾部。 */
-    private fun runningBadge(context: Context, task: String): View {
+    private fun renderRunningBar(context: Context, capsule: LinearLayout, task: String) {
         val d = context.resources.displayMetrics.density
-        val width = runningBirdWidth(context, realScreenSize(context).x)
-        return LinearLayout(context).apply {
+        val nameLength = minOf(RUNNING_NAME_MAX_CHARS, task.codePointCount(0, task.length))
+        val shortName = task.substring(0, task.offsetByCodePoints(0, nameLength))
+        val progress = runningProgress?.let { " · [$it]" }.orEmpty()
+        capsule.apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            background = roundedBackground(AppPalette.SURFACE, 15 * d, 1 * d, AppPalette.OUTLINE_VARIANT)
-            setPadding((9 * d).toInt(), 0, (8 * d).toInt(), 0)
-            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            minimumHeight = (RUNNING_BAR_MIN_HEIGHT_DP * d).toInt()
+            alpha = 1f
+            elevation = 8 * d
+            background = roundedBackground(COLOR_BG, 15 * d, 0f, 0)
+            setPadding((8 * d).toInt(), (6 * d).toInt(), (8 * d).toInt(), (6 * d).toInt())
+            contentDescription = null
             addView(
-                View(context).apply { background = roundedBackground(COLOR_STOP, 4 * d, 0f, 0) },
-                LinearLayout.LayoutParams((7 * d).toInt(), (7 * d).toInt()).apply {
+                View(context).apply {
+                    background = roundedBackground(COLOR_RUNNING, 4 * d, 0f, 0)
+                    importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+                },
+                LinearLayout.LayoutParams((6 * d).toInt(), (6 * d).toInt()).apply {
                     marginEnd = (6 * d).toInt()
                 }
             )
             addView(
-                textView(context, runningLabel(task), 12f, COLOR_TEXT).apply {
-                    typeface = android.graphics.Typeface.DEFAULT_BOLD
-                    maxLines = 1
-                    ellipsize = android.text.TextUtils.TruncateAt.END
+                textView(context, shortName + progress, 13f, COLOR_TEXT).apply {
+                    typeface = Typeface.DEFAULT_BOLD
+                    isSingleLine = true
+                    ellipsize = TextUtils.TruncateAt.MIDDLE
+                    contentDescription = "正在运行 $task$progress"
                 },
                 LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             )
-            layoutParams = LinearLayout.LayoutParams(width, (RUNNING_LABEL_HEIGHT_DP * d).toInt())
-        }
-    }
-
-    /** 透明背景的红色雕雕，与空闲球同尺寸；手势命中区域与图像尺寸一致。 */
-    private fun runningBird(context: Context): ImageView {
-        val d = context.resources.displayMetrics.density
-        val size = runningBirdSize(context)
-        return ImageView(context).apply {
-            setImageResource(com.forest.android.assistant.R.drawable.ic_running_bird)
-            scaleType = ImageView.ScaleType.FIT_CENTER
-            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-            layoutParams = LinearLayout.LayoutParams(size, size).apply {
-                gravity = birdGravity()
-                topMargin = (RUNNING_GAP_DP * d).toInt()
-            }
-            runningBirdView = this
+            addView(
+                textView(context, "停止", 12f, COLOR_ON_PRIMARY).apply {
+                    gravity = Gravity.CENTER
+                    typeface = Typeface.DEFAULT_BOLD
+                    isSingleLine = true
+                    minimumHeight = (28 * d).toInt()
+                    setPadding((8 * d).toInt(), (4 * d).toInt(), (8 * d).toInt(), (4 * d).toInt())
+                    background = panelTouchBackground(roundedBackground(COLOR_STOP, 10 * d, 0f, 0))
+                    contentDescription = "停止任务"
+                    isFocusable = true
+                    setOnClickListener { onStopClicked?.invoke() }
+                },
+                LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                    marginStart = (6 * d).toInt()
+                }
+            )
         }
     }
 
@@ -902,10 +804,6 @@ object FloatyManager {
     private fun panelTouchBackground(background: Drawable): Drawable =
         RippleDrawable(ColorStateList.valueOf(0x1A1D3557), background, null)
 
-    /** 悬浮球上过长任务名截断（保证胶囊不占满屏幕） */
-    private fun ellipsize(name: String, max: Int): String =
-        if (name.length <= max) name else name.take(max) + "…"
-
     /**
      * 真实屏幕尺寸（宽、高）。
      * displayMetrics.heightPixels 在部分 ROM/模拟器（如实测 MuMu 报 2064，实际 1920）会虚报，
@@ -943,16 +841,12 @@ object FloatyManager {
         val viewH = view.height.takeIf { it > 0 } ?: viewW
         val autoSnap = isAutoSnapEnabled(context)
         if (runningTask != null) {
-            // 运行时雕雕本体与头顶任务名必须保持可见，所以贴边也完整显示。
+            // 运行横条贴边时完整显示，保证停止按钮可点击。
             val side = FloatyGeometry.sideByCenter(params.x, viewW, screen.x)
             params.x = if (autoSnap) {
                 FloatyGeometry.visibleX(viewW, screen.x, side, margin)
             } else {
                 FloatyGeometry.clampX(params.x, viewW, screen.x)
-            }
-            if (autoSnap) {
-                runningBirdSide = side
-                updateRunningBirdAlignment()
             }
         } else if (autoSnap) {
             val side = FloatyGeometry.sideByCenter(params.x, viewW, screen.x)
@@ -963,7 +857,8 @@ object FloatyManager {
             params.x = FloatyGeometry.clampX(params.x, viewW, screen.x)
         }
         // 垂直钳位：拖动松手后保证整个控件留在真实屏幕内（真实尺寸，displayMetrics 可能虚报）
-        params.y = FloatyGeometry.clampY(params.y, viewH, screen.y)
+        val bottom = if (runningTask != null) runningBarBottom(context, view, screen.y) else screen.y
+        params.y = FloatyGeometry.clampY(params.y, viewH, bottom)
         try {
             wm.updateViewLayout(view, params)
         } catch (_: Exception) {
@@ -972,7 +867,7 @@ object FloatyManager {
         Log.i(
             TAG,
             "拖动结束收位: (${params.x}, ${params.y}) 自动贴边=${if (autoSnap) dockedSide else "关"}" +
-                if (runningTask != null) "（运行态雕雕）" else ""
+                if (runningTask != null) "（运行横条）" else ""
         )
     }
 
