@@ -11,13 +11,17 @@ import android.graphics.Paint
 import android.graphics.Bitmap
 import android.graphics.PixelFormat
 import android.graphics.Rect
+import android.os.Build
 import android.os.SystemClock
 import android.graphics.RectF
 import android.util.Log
 import android.view.Gravity
+import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
+import android.window.OnBackInvokedCallback
+import android.window.OnBackInvokedDispatcher
 import java.io.File
 import android.widget.Toast
 import com.forest.android.assistant.core.image.ScreenCapture
@@ -166,16 +170,20 @@ object PickerOverlay {
         val view = PickerView(context, mode, frozenFrame) { code -> deliver(context, code) }
         // minSdk 29：悬浮窗类型固定为 TYPE_APPLICATION_OVERLAY
         val windowType = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+        // 取点和取色没有屏幕上的取消按钮，由获得焦点的拾取层处理系统返回。
+        val usesBackToCancel = mode == Mode.POINT || mode == Mode.COLOR
         val params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.MATCH_PARENT,
             windowType,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+            if (usesBackToCancel) WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM
+            else WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
             PixelFormat.TRANSLUCENT
         ).apply { gravity = Gravity.TOP or Gravity.START }
 
         return try {
             wm.addView(view, params)
+            if (usesBackToCancel) view.requestFocus()
             windowManager = wm
             pickerView = view
             Log.i(TAG, "拾取器已开启: $mode")
@@ -289,12 +297,10 @@ object PickerOverlay {
         private var downX = 0f
         private var downY = 0f
         private var moved = false
+        private var pressedReadout = false
 
-        /** 本次手势是否被右上角按钮消费（避免 UP 又当成取点确认） */
+        /** 框选手势是否已被按钮消费。 */
         private var consumedByButton = false
-
-        private var color = 0
-        private var hasColor = false
 
         private var selectionStartX = 0f
         private var selectionStartY = 0f
@@ -320,8 +326,23 @@ object PickerOverlay {
         /** 取消按钮区域（右上角） */
         private val cancelRect = RectF()
 
-        /** 当前模式标签区域（右上角，取消左侧） */
-        private val modeRect = RectF()
+        private val readoutRect = RectF()
+        private val readoutPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = 0xA6202E33.toInt()
+        }
+        private val readoutTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.WHITE
+            textSize = 12f * density
+            textAlign = Paint.Align.CENTER
+        }
+        private val swatchBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.WHITE
+            style = Paint.Style.STROKE
+            strokeWidth = density
+        }
+        private val backCallback = if (Build.VERSION.SDK_INT >= 33 && !isAreaMode) {
+            OnBackInvokedCallback { PickerOverlay.hide() }
+        } else null
 
         // 拾取按钮与信息卡片使用 APP 表面色；准星和暗化遮罩保持屏幕上的对比度。
         private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -332,10 +353,6 @@ object PickerOverlay {
         private val subPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             textSize = 11f * density
             color = AppPalette.ON_SURFACE_VARIANT
-        }
-        private val hintPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            textSize = 11f * density
-            color = Color.WHITE
         }
         private val panelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = AppPalette.SURFACE
@@ -359,15 +376,35 @@ object PickerOverlay {
         private val bitmapPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
 
         init {
+            isFocusableInTouchMode = !isAreaMode
             // 初始位置取屏幕中心
             post {
                 if (px == 0f && py == 0f) {
                     px = width / 2f
                     py = height / 2f
-                    if (mode == Mode.COLOR) sample()
                     invalidate()
                 }
             }
+        }
+
+        override fun onAttachedToWindow() {
+            super.onAttachedToWindow()
+            if (Build.VERSION.SDK_INT >= 33) backCallback?.let {
+                findOnBackInvokedDispatcher()?.registerOnBackInvokedCallback(OnBackInvokedDispatcher.PRIORITY_DEFAULT, it)
+            }
+        }
+
+        override fun onDetachedFromWindow() {
+            if (Build.VERSION.SDK_INT >= 33) backCallback?.let {
+                findOnBackInvokedDispatcher()?.unregisterOnBackInvokedCallback(it)
+            }
+            super.onDetachedFromWindow()
+        }
+
+        override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+            if (isAreaMode || event.keyCode != KeyEvent.KEYCODE_BACK) return super.dispatchKeyEvent(event)
+            if (event.action == KeyEvent.ACTION_UP && !event.isCanceled) PickerOverlay.hide()
+            return true
         }
 
         override fun onDraw(canvas: Canvas) {
@@ -388,41 +425,45 @@ object PickerOverlay {
             canvas.drawLine(px, py + gap, px, py + arm, crossPaint)
             canvas.drawCircle(px, py, 10f * density, crossPaint)
 
-            // 右上角显示当前模式和取消按钮
-            val btnW = 64f * density
-            val btnH = 44f * density
-            val btnGap = 8f * density
-            cancelRect.set(width - btnW - 16f * density, 16f * density, width - 16f * density, 16f * density + btnH)
-            modeRect.set(16f * density, 16f * density, 100f * density, 16f * density + btnH)
-            val modeLabel = if (mode == Mode.POINT) "取坐标" else "取色"
-            canvas.drawRoundRect(modeRect, 8f * density, 8f * density, panelPaint)
-            canvas.drawText(
-                modeLabel,
-                modeRect.centerX() - textPaint.measureText(modeLabel) / 2,
-                modeRect.centerY() + 5f * density,
-                textPaint
-            )
-            canvas.drawRoundRect(cancelRect, 8f * density, 8f * density, panelPaint)
-            canvas.drawText(
-                "取消",
-                cancelRect.centerX() - textPaint.measureText("取消") / 2,
-                cancelRect.centerY() + 5f * density,
-                textPaint
-            )
+            drawReadout(canvas, arm)
+        }
 
-            // 固定底部信息卡，避免提示文字跟随准星移出屏幕。
-            val margin = 16f * density
-            val panelTop = height - 142f * density
-            val panel = RectF(margin, panelTop, width - margin, height - margin)
-            canvas.drawRoundRect(panel, 16f * density, 16f * density, panelPaint)
-            canvas.drawText("X ${toScreenX(px)}   Y ${toScreenY(py)}", margin * 2, panelTop + 27f * density, textPaint)
-            if (mode == Mode.COLOR) {
-                val label = if (hasColor) "#%06X".format(color and 0xFFFFFF) else "取色中…"
-                canvas.drawText(label, width - margin * 2 - textPaint.measureText(label), panelTop + 27f * density, textPaint)
+        private fun drawReadout(canvas: Canvas, arm: Float) {
+            val x = toScreenX(px)
+            val y = toScreenY(py)
+            val coordinates = "X $x  Y $y"
+            val sampledColor = if (mode == Mode.COLOR) sampleColor(x, y) else null
+            val hex = if (mode == Mode.COLOR) sampledColor?.let { colorHex(it) } ?: "无可用颜色" else null
+            val margin = 6f * density
+            val padding = 4f * density
+            val rowHeight = 16f * density
+            val swatchSize = 12f * density
+            val swatchGap = if (sampledColor != null) swatchSize + 5f * density else 0f
+            val hexWidth = if (hex != null) readoutTextPaint.measureText(hex) else 0f
+            val chipWidth = max(readoutTextPaint.measureText(coordinates), hexWidth + swatchGap) + 16f * density
+            val chipHeight = (if (hex == null) rowHeight else 2 * rowHeight) + 2 * padding
+            val left = (px - chipWidth / 2).coerceIn(margin, (width - margin - chipWidth).coerceAtLeast(margin))
+            val below = py + arm + margin
+            val top = if (below + chipHeight <= height - margin) below
+                else (py - arm - margin - chipHeight).coerceAtLeast(margin)
+            readoutRect.set(left, top, left + chipWidth, top + chipHeight)
+            canvas.drawRoundRect(readoutRect, margin, margin, readoutPaint)
+
+            val firstCenterY = top + padding + rowHeight / 2
+            val baselineOffset = -(readoutTextPaint.ascent() + readoutTextPaint.descent()) / 2
+            val centerX = readoutRect.centerX()
+            canvas.drawText(coordinates, centerX, firstCenterY + baselineOffset, readoutTextPaint)
+            if (hex != null) {
+                val colorCenterY = firstCenterY + rowHeight
+                if (sampledColor != null) {
+                    val swatchLeft = centerX - (hexWidth + swatchGap) / 2
+                    val swatchTop = colorCenterY - swatchSize / 2
+                    swatchPaint.color = sampledColor or Color.BLACK
+                    canvas.drawRect(swatchLeft, swatchTop, swatchLeft + swatchSize, swatchTop + swatchSize, swatchPaint)
+                    canvas.drawRect(swatchLeft, swatchTop, swatchLeft + swatchSize, swatchTop + swatchSize, swatchBorderPaint)
+                }
+                canvas.drawText(hex, centerX + swatchGap / 2, colorCenterY + baselineOffset, readoutTextPaint)
             }
-            canvas.drawText("拖动调整位置，点击下方按钮复制结果。", margin * 2, panelTop + 52f * density, subPaint)
-            saveRect.set(margin * 2, panelTop + 66f * density, width - margin * 2, panelTop + 110f * density)
-            drawButton(canvas, saveRect, if (mode == Mode.POINT) "生成点击代码" else "复制颜色代码", primary = true)
         }
 
         /** 把冻结画面按窗口偏移画到画布上（取色与框选共用） */
@@ -518,54 +559,33 @@ object PickerOverlay {
         @SuppressLint("ClickableViewAccessibility")
         override fun onTouchEvent(event: MotionEvent): Boolean {
             if (isAreaMode) return onSelectionTouchEvent(event)
-            when (event.action) {
+            when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     downX = event.x
                     downY = event.y
                     moved = false
-                    consumedByButton = false
-                    if (cancelRect.contains(event.x, event.y)) {
-                        consumedByButton = true
-                        PickerOverlay.hide()
-                        return true
-                    }
-                    if (saveRect.contains(event.x, event.y)) {
-                        consumedByButton = true
-                        confirm()
-                        return true
-                    }
-                    if (modeRect.contains(event.x, event.y)) {
-                        consumedByButton = true
-                        return true
-                    }
-                    if (event.y >= height - 142f * density) {
-                        consumedByButton = true
-                        return true
-                    }
-                    return true
+                    pressedReadout = readoutRect.contains(event.x, event.y)
                 }
                 MotionEvent.ACTION_MOVE -> {
-                    if (consumedByButton) return true
                     if (abs(event.x - downX) > 6f * density || abs(event.y - downY) > 6f * density) {
                         moved = true
                     }
-                    px = event.x
-                    py = event.y
-                    if (mode == Mode.COLOR) sample()
-                    invalidate()
-                    return true
+                    if (moved) moveCrosshair(event.x, event.y)
                 }
                 MotionEvent.ACTION_UP -> {
-                    if (!moved && !consumedByButton) {
-                        px = event.x
-                        py = event.y
-                        confirm()
-                    }
-                    consumedByButton = false
-                    return true
+                    if (moved || !pressedReadout) moveCrosshair(event.x, event.y)
+                    if (!moved) confirm()
+                    pressedReadout = false
                 }
+                MotionEvent.ACTION_CANCEL -> pressedReadout = false
             }
-            return super.onTouchEvent(event)
+            return true
+        }
+
+        private fun moveCrosshair(x: Float, y: Float) {
+            px = x.coerceIn(0f, (width - 1).coerceAtLeast(0).toFloat())
+            py = y.coerceIn(0f, (height - 1).coerceAtLeast(0).toFloat())
+            invalidate()
         }
 
         /** 框选与按钮手势分开处理，重选/确认按钮的拖动不会意外创建新选区。 */
@@ -633,32 +653,29 @@ object PickerOverlay {
         }
 
         /** 取冻结画面里准星处的像素：本地读取，无截屏开销，移动时立即更新 */
-        private fun sample() {
-            val frame = frozenFrame ?: return
-            // 首次绘制前 location 可能还没初始化，这里现取一次窗口原点
-            getLocationOnScreen(location)
-            val x = toScreenX(px)
-            val y = toScreenY(py)
-            if (x < 0 || y < 0 || x >= frame.width || y >= frame.height) return
-            color = frame.getPixel(x, y)
-            hasColor = true
+        private fun sampleColor(x: Int, y: Int): Int? {
+            val frame = frozenFrame ?: return null
+            if (x !in 0 until frame.width || y !in 0 until frame.height) return null
+            return frame.getPixel(x, y)
         }
+
+        private fun colorHex(color: Int): String = "#%06X".format(color and 0xFFFFFF)
 
         /** 点击确认：生成代码（坐标为屏幕坐标，与 click/gesture API 一致） */
         private fun confirm() {
-            if (isAreaMode) return
+            getLocationOnScreen(location)
             val x = toScreenX(px)
             val y = toScreenY(py)
             when (mode) {
                 Mode.POINT -> onResult("click($x, $y);")
                 Mode.COLOR -> {
                     // 冻结画面本地取色：点击时立即有结果，无需异步等截屏
-                    sample()
-                    if (!hasColor) {
+                    val color = sampleColor(x, y)
+                    if (color == null) {
                         Toast.makeText(context, "取色失败，请重新打开取色工具", Toast.LENGTH_SHORT).show()
                         return
                     }
-                    val hex = "#%06x".format(color and 0xFFFFFF)
+                    val hex = colorHex(color)
                     onResult("images.findColor(captureScreen(), \"$hex\", { threshold: 16 });   // ($x, $y)")
                 }
 
