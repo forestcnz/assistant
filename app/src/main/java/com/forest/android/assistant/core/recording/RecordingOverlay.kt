@@ -2,7 +2,6 @@ package com.forest.android.assistant.core.recording
 
 import android.annotation.SuppressLint
 import android.content.Context
-import android.content.res.ColorStateList
 import android.graphics.PixelFormat
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -13,20 +12,14 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
 import android.view.WindowManager
-import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
-import com.forest.android.assistant.R
 import com.forest.android.assistant.ui.AppPalette
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
 /**
- * 录制悬浮窗（紧凑版）：
- * - 暖白单色卡片 + 圆角，不再做上下分色；
- * - 头部：logo、状态点 + 状态文字、提示行、右侧步数徽标，整条可拖动；
- * - 底部：带图标的「暂停/继续」和主按钮「完成」；
- * - 所有文字单行 + 固定尺寸，状态切换不会让窗口一跳一跳。
+ * 录制悬浮条：左侧显示状态与步数并支持拖动，右侧保留两个纯文字按钮。
  *
  * 交互约束：
  * - 触摸层始终在悬浮条之上（录制中），悬浮条窗口全程不重建，因此不会闪烁；
@@ -51,10 +44,8 @@ class RecordingOverlay(
 
     // —— 悬浮条与 APP 共用浅色表面，整张卡片只用一种底色 ——
     private val textColor = AppPalette.ON_SURFACE
-    private val subtle = AppPalette.ON_SURFACE_VARIANT
     private val primary = AppPalette.PRIMARY
     private val onPrimary = AppPalette.ON_PRIMARY
-    private val red = AppPalette.ERROR
 
     /** 圆角/胶囊纯色背景 */
     private fun solid(fill: Int, radiusDp: Int, strokeDp: Int = 0, stroke: Int = 0) =
@@ -64,82 +55,25 @@ class RecordingOverlay(
             if (strokeDp > 0) setStroke(dp(strokeDp), stroke)
         }
 
-    /** 圆形色块，用于状态点与步骤进度点 */
-    private fun oval(fill: Int) = GradientDrawable().apply {
-        shape = GradientDrawable.OVAL
-        setColor(fill)
-    }
-
-    // —— 头部：logo + 状态 + 提示 + 步数徽标 ——
-
-    private val logo = ImageView(context).apply {
-        setImageResource(R.drawable.ic_record_logo)
-        scaleType = ImageView.ScaleType.FIT_CENTER
-        contentDescription = "操作录制"
-    }
-
-    private val statusDot = View(context)
-
     private val stateText = TextView(context).apply {
         setTextColor(textColor)
-        textSize = 12f
+        textSize = 11f
         typeface = Typeface.DEFAULT_BOLD
-        isSingleLine = true
-    }
-
-    private val stateRow = LinearLayout(context).apply {
-        orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
-        addView(statusDot, LinearLayout.LayoutParams(dp(6), dp(6)).apply { rightMargin = dp(5) })
-        addView(stateText)
-    }
-
-    /** 单行提示：状态说明或上一步信息，超出省略，不改变窗口高度 */
-    private val hintText = TextView(context).apply {
-        setTextColor(subtle)
-        textSize = 9f
-        isSingleLine = true
+        minimumHeight = dp(28)
+        includeFontPadding = false
+        maxLines = 2
         ellipsize = TextUtils.TruncateAt.END
     }
-
-    /** 步数徽标：暖色胶囊 */
-    private val stepChip = TextView(context).apply {
-        setTextColor(AppPalette.ON_PRIMARY_CONTAINER)
-        textSize = 9f
-        typeface = Typeface.DEFAULT_BOLD
-        gravity = Gravity.CENTER
-        setPadding(dp(7), dp(3), dp(7), dp(3))
-        background = solid(AppPalette.PRIMARY_CONTAINER, 20, 1, AppPalette.OUTLINE_VARIANT)
-    }
-
-    private val header = LinearLayout(context).apply {
-        orientation = LinearLayout.HORIZONTAL
-        gravity = Gravity.CENTER_VERTICAL
-        // 标题区与内容区同底色，只靠间距和字号分层。
-        setPadding(dp(6), dp(8), dp(2), dp(8))
-        logo.visibility = View.GONE
-        addView(LinearLayout(context).apply {
-            orientation = LinearLayout.VERTICAL
-            addView(stateRow)
-            hintText.visibility = View.GONE
-        }, LinearLayout.LayoutParams(0, -2, 1f).apply {
-            leftMargin = dp(8)
-            rightMargin = dp(6)
-        })
-        stepChip.visibility = View.GONE
-    }
-
-    // —— 底部按钮：带图标的「暂停/继续」+ 橙色主按钮「完成」 ——
 
     private val toggleLabel = TextView(context).apply {
         gravity = Gravity.CENTER
         textSize = 11f
         typeface = Typeface.DEFAULT_BOLD
-        setTextColor(AppPalette.ON_SURFACE)
-        setPadding(dp(4), 0, dp(4), 0)
-        compoundDrawablePadding = dp(4)
-        compoundDrawableTintList = ColorStateList.valueOf(AppPalette.ON_SURFACE)
-        background = solid(AppPalette.SECONDARY_CONTAINER, 20, 1, AppPalette.OUTLINE_VARIANT)
+        setTextColor(textColor)
+        minimumHeight = dp(28)
+        includeFontPadding = false
+        background = solid(AppPalette.SECONDARY_CONTAINER, 9, 1, AppPalette.OUTLINE_VARIANT)
     }
 
     private val finishLabel = TextView(context).apply {
@@ -148,34 +82,33 @@ class RecordingOverlay(
         textSize = 11f
         typeface = Typeface.DEFAULT_BOLD
         setTextColor(onPrimary)
-        setPadding(dp(4), 0, dp(4), 0)
-        setCompoundDrawablesRelativeWithIntrinsicBounds(R.drawable.ic_check, 0, 0, 0)
-        compoundDrawablePadding = dp(4)
-        compoundDrawableTintList = ColorStateList.valueOf(onPrimary)
-        background = solid(primary, 20)
+        minimumHeight = dp(28)
+        includeFontPadding = false
+        background = solid(primary, 9)
     }
 
     private val actions = LinearLayout(context).apply {
         orientation = LinearLayout.HORIZONTAL
-        setPadding(dp(4), dp(6), dp(8), dp(6))
-        addView(toggleLabel, LinearLayout.LayoutParams(0, dp(34), 1f).apply { rightMargin = dp(6) })
-        addView(finishLabel, LinearLayout.LayoutParams(0, dp(34), 1.2f))
+        gravity = Gravity.CENTER_VERTICAL
+        addView(toggleLabel, LinearLayout.LayoutParams(dp(34), -2).apply { marginEnd = dp(3) })
+        addView(finishLabel, LinearLayout.LayoutParams(dp(34), -2))
     }
 
     private val panel = LinearLayout(context).apply {
-        orientation = LinearLayout.VERTICAL
-        // 单一暖白底色，避免上下两种颜色。
-        background = solid(AppPalette.SURFACE, 14, 1, AppPalette.OUTLINE_VARIANT)
+        background = solid(AppPalette.SURFACE, 11, 1, AppPalette.OUTLINE_VARIANT)
         clipToOutline = true
         elevation = dp(10).toFloat()
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
-        addView(header, LinearLayout.LayoutParams(0, -2, 1f))
-        addView(actions, LinearLayout.LayoutParams(dp(134), -2))
+        setPadding(dp(5), dp(3), dp(3), dp(3))
+        addView(stateText, LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(3) })
+        addView(actions, LinearLayout.LayoutParams(-2, -2))
     }
 
-    // 比原 200dp 更窄，减少对目标应用的遮挡。
-    private val panelParams = params(minOf(dp(300), context.resources.displayMetrics.widthPixels - dp(16)), WindowManager.LayoutParams.WRAP_CONTENT).apply {
+    private val panelParams = params(
+        minOf(dp(144), (context.resources.displayMetrics.widthPixels - dp(16)).coerceAtLeast(1)),
+        WindowManager.LayoutParams.WRAP_CONTENT
+    ).apply {
         gravity = Gravity.BOTTOM or Gravity.START
         x = dp(8)
         y = dp(12)
@@ -254,8 +187,7 @@ class RecordingOverlay(
         finishLabel.setOnClickListener { onFinish() }
         pressEffect(toggleLabel)
         pressEffect(finishLabel)
-        // 整条头部都可以拖动窗口（logo/状态/步数徽标都在里面）
-        attachDrag(header)
+        attachDrag(stateText)
         render(recording = false, count = 0, message = "")
     }
 
@@ -323,7 +255,6 @@ class RecordingOverlay(
         return when {
             inside(toggleLabel) -> PanelHit.TOGGLE
             inside(finishLabel) -> PanelHit.FINISH
-            inside(header) -> PanelHit.DRAG
             // 卡片留白也属于悬浮条，避免按钮周围的触摸被录成目标应用操作。
             inside(panel) -> PanelHit.DRAG
             else -> null
@@ -365,9 +296,8 @@ class RecordingOverlay(
      */
     fun beginExecuting() {
         setTouchLayerEnabled(false)
-        stateText.text = "执行中…"
-        statusDot.background = oval(primary)
-        hintText.text = "正在回放"
+        stateText.text = "执行中"
+        stateText.contentDescription = "正在执行录制操作"
         // 按钮暂时置灰，避免执行中误触
         actions.alpha = 0.55f
     }
@@ -384,35 +314,21 @@ class RecordingOverlay(
         }
     }
 
-    /** 统一渲染窗口内容；所有文字单行、位置固定，因此尺寸不随状态变化 */
+    /** 更新录制状态、步数和按钮文字。 */
     private fun render(recording: Boolean, count: Int, message: String) {
         val ready = count == 0
-        stateText.text = when {
+        val state = when {
             recording -> "录制中"
-            ready -> "准备就绪"
+            ready -> "就绪"
             else -> "已暂停"
         }
-        stateText.text = "${stateText.text} · $count 步"
-        statusDot.background = oval(when {
-            recording -> primary
-            ready -> primary
-            else -> subtle
-        })
-        stepChip.text = "$count 步"
-        hintText.text = message.ifBlank {
-            when {
-                recording -> "松手即执行"
-                ready -> "切到目标应用"
-                else -> "继续或完成"
-            }
-        }
+        stateText.text = "$state · ${count}步"
+        stateText.contentDescription = if (message.isBlank()) stateText.text else "${stateText.text}，$message"
         toggleLabel.text = when {
             recording -> "暂停"
             ready -> "开始"
             else -> "继续"
         }
-        toggleLabel.setCompoundDrawablesRelativeWithIntrinsicBounds(
-            if (recording) R.drawable.ic_pause else R.drawable.ic_play, 0, 0, 0)
         actions.alpha = 1f
     }
 

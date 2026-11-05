@@ -139,8 +139,8 @@ object RecordingSetupOverlay {
             setHintTextColor(SUBTLE)
             hint = "任务名称"
             gravity = Gravity.CENTER_VERTICAL
-            minimumHeight = dp(40)
-            setPadding(dp(10), dp(6), dp(10), dp(6))
+            minHeight = dp(32)
+            setPadding(dp(10), dp(3), dp(10), dp(3))
             background = fieldBackground()
         }
         content.addView(formRow("任务名称").apply {
@@ -148,7 +148,7 @@ object RecordingSetupOverlay {
         }, LinearLayout.LayoutParams(-1, -2))
 
         val modes = RadioGroup(app).apply {
-            orientation = RadioGroup.HORIZONTAL
+            orientation = RadioGroup.VERTICAL
         }
         // 两种模式：坐标模式额外导出找图备用素材；图片模式用于找图回放。
         // （纯坐标录制改为悬浮面板上的一键入口，不在本弹窗里选）
@@ -160,14 +160,14 @@ object RecordingSetupOverlay {
                 buttonTintList = ColorStateList.valueOf(AppPalette.PRIMARY)
                 id = View.generateViewId()
                 isChecked = checked
-                minimumHeight = dp(44)
-                setPadding(dp(6), dp(5), dp(6), dp(5))
+                minHeight = dp(36)
+                setPadding(dp(6), dp(3), dp(6), dp(3))
                 background = fieldBackground()
             }
         val coordinate = modeButton("记录坐标", checked = true)
         val image = modeButton("记录图片", checked = false)
-        modes.addView(coordinate, RadioGroup.LayoutParams(0, -2, 1f).apply { marginEnd = dp(6) })
-        modes.addView(image, RadioGroup.LayoutParams(0, -2, 1f))
+        modes.addView(coordinate, RadioGroup.LayoutParams(-1, -2))
+        modes.addView(image, RadioGroup.LayoutParams(-1, -2).apply { topMargin = dp(3) })
         content.addView(modes, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(6) })
         fun refreshModes() {
             listOf(coordinate, image).forEach { button ->
@@ -189,8 +189,8 @@ object RecordingSetupOverlay {
             setTextColor(TEXT)
             setHintTextColor(SUBTLE)
             gravity = Gravity.CENTER_VERTICAL
-            minimumHeight = dp(40)
-            setPadding(dp(8), dp(5), dp(8), dp(5))
+            minHeight = dp(32)
+            setPadding(dp(8), dp(3), dp(8), dp(3))
             background = fieldBackground()
         }
 

@@ -1060,7 +1060,7 @@ object FloatyManager {
     /**
      * 展开/收起面板（每次展开重新读取任务列表与运行状态）。
      * 布局：深绿灰标题栏 + 暖白内容区，自上而下 = 头部（Logo + 任务列表 + 数量 + 收起） /
-     * 单列任务列表 / 固定底栏（执行或停止按钮、快捷工具入口）。
+     * 单列任务列表 / 固定底栏（快捷工具、执行或停止分别占一行）。
      * 任务格子支持多选：点选顺序即队列执行顺序（再次点选取消），主按钮按该顺序依次执行；
      * 长按某个任务可立即单独运行它。
      * 面板按内容高度在屏幕正中显示；任务较多时列表滚动，工具入口与底栏固定。
@@ -1173,6 +1173,8 @@ object FloatyManager {
         // 多选状态：列表顺序 = 队列执行顺序（点选先后决定先后）
         val selected = mutableListOf<String>()
         val cellHolders = LinkedHashMap<String, TaskCellViews>()
+        val actionHeight = (34 * d).toInt()
+        val actionRadius = 10 * d
 
         // 主按钮：未选任务时置灰；选中后按点选顺序执行整个队列
         val runSelectedButton = textView(context, "请先选择任务", 14f, COLOR_ON_PRIMARY).apply {
@@ -1180,9 +1182,9 @@ object FloatyManager {
             typeface = Typeface.DEFAULT_BOLD
             isSingleLine = true
             ellipsize = TextUtils.TruncateAt.END
-            background = panelTouchBackground(roundedBackground(COLOR_PRIMARY, 14 * d, 0f, 0))
-            minimumHeight = (48 * d).toInt()
-            setPadding((10 * d).toInt(), (6 * d).toInt(), (10 * d).toInt(), (6 * d).toInt())
+            background = panelTouchBackground(roundedBackground(COLOR_PRIMARY, actionRadius, 0f, 0))
+            minimumHeight = actionHeight
+            setPadding((10 * d).toInt(), (3 * d).toInt(), (10 * d).toInt(), (3 * d).toInt())
             alpha = 0.4f
             isEnabled = false
             isClickable = true
@@ -1219,7 +1221,7 @@ object FloatyManager {
             runSelectedButton.alpha = 1f
             runSelectedButton.setTextColor(if (runSelectedButton.isEnabled) COLOR_ON_PRIMARY else COLOR_TEXT_DIM)
             runSelectedButton.background = panelTouchBackground(roundedBackground(
-                if (runSelectedButton.isEnabled) COLOR_PRIMARY else AppPalette.SURFACE_CONTAINER, 14 * d, 0f, 0))
+                if (runSelectedButton.isEnabled) COLOR_PRIMARY else AppPalette.SURFACE_CONTAINER, actionRadius, 0f, 0))
             runSelectedButton.text = when {
                 tasks.isEmpty() -> "暂无可执行的任务"
                 selected.isEmpty() -> "请先选择任务"
@@ -1281,16 +1283,15 @@ object FloatyManager {
         }
         refreshSelection()
 
-        // 执行或停止按钮与快捷工具共用固定底栏。
+        // 快捷工具与执行按钮各占一行，滚动任务列表时始终可见。
         val footer = LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
+            orientation = LinearLayout.VERTICAL
             setPadding(contentInset, (4 * d).toInt(), contentInset, (5 * d).toInt())
         }
         footer.addView(
             runSelectedButton,
             LinearLayout.LayoutParams(
-                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
             )
         )
 
@@ -1345,15 +1346,34 @@ object FloatyManager {
         }
         toolsArea.addView(tools)
 
-        val toolsEntry = textView(context, "快捷工具", 13f, COLOR_TEXT).apply {
-            gravity = Gravity.CENTER
-            typeface = Typeface.DEFAULT_BOLD
-            minimumHeight = (48 * d).toInt()
-            setPadding((8 * d).toInt(), (4 * d).toInt(), (8 * d).toInt(), (4 * d).toInt())
-            background = panelTouchBackground(roundedBackground(AppPalette.SURFACE_CONTAINER_LOW, 14 * d, d, AppPalette.OUTLINE_VARIANT))
+        val toolsEntry = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            minimumHeight = (36 * d).toInt()
+            val inset = (8 * d).toInt()
+            setPadding(inset, (4 * d).toInt(), inset, (4 * d).toInt())
+            background = panelTouchBackground(roundedBackground(AppPalette.SURFACE_CONTAINER_LOW, 10 * d, d, AppPalette.OUTLINE_VARIANT))
             contentDescription = "打开快捷工具"
             isClickable = true
             isFocusable = true
+            addView(ImageView(context).apply {
+                setImageResource(R.drawable.ic_tool_point)
+                setColorFilter(COLOR_PRIMARY_TEXT)
+                scaleType = ImageView.ScaleType.CENTER_INSIDE
+                background = roundedBackground(COLOR_PRIMARY_CONTAINER, 8 * d, 0f, 0)
+                val iconInset = (5 * d).toInt()
+                setPadding(iconInset, iconInset, iconInset, iconInset)
+                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            }, LinearLayout.LayoutParams((26 * d).toInt(), (26 * d).toInt()).apply { marginEnd = inset })
+            addView(textView(context, "快捷工具", 13f, COLOR_TEXT).apply {
+                typeface = Typeface.DEFAULT_BOLD
+                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            addView(ImageView(context).apply {
+                setImageResource(R.drawable.ic_arrow)
+                setColorFilter(COLOR_TEXT_DIM)
+                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            }, LinearLayout.LayoutParams((14 * d).toInt(), (14 * d).toInt()))
         }
 
         // 运行中：提供停止入口（与胶囊上的停止键等价）
@@ -1364,11 +1384,11 @@ object FloatyManager {
             }
             stopRow.addView(
                 textView(context, "■ 停止当前任务", 14f, COLOR_ON_PRIMARY).apply {
-                    background = panelTouchBackground(roundedBackground(COLOR_STOP, 14 * d, 0f, 0))
+                    background = panelTouchBackground(roundedBackground(COLOR_STOP, actionRadius, 0f, 0))
                     gravity = Gravity.CENTER
                     typeface = Typeface.DEFAULT_BOLD
-                    minimumHeight = (48 * d).toInt()
-                    setPadding(0, (6 * d).toInt(), 0, (6 * d).toInt())
+                    minimumHeight = actionHeight
+                    setPadding(0, (3 * d).toInt(), 0, (3 * d).toInt())
                     isClickable = true
                     isFocusable = true
                     setOnClickListener {
@@ -1382,10 +1402,14 @@ object FloatyManager {
                     LinearLayout.LayoutParams.WRAP_CONTENT
                 )
             )
-            footer.addView(stopRow, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            footer.addView(stopRow, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+            ))
         }
-        footer.addView(toolsEntry, LinearLayout.LayoutParams((84 * d).toInt(), LinearLayout.LayoutParams.WRAP_CONTENT).apply {
-            marginStart = (6 * d).toInt()
+        footer.addView(toolsEntry, 0, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+        ).apply {
+            bottomMargin = (4 * d).toInt()
         })
         val footerDivider = divider(context)
         val measureWidth = View.MeasureSpec.makeMeasureSpec(panelW, View.MeasureSpec.EXACTLY)
@@ -1544,7 +1568,7 @@ object FloatyManager {
     /**
      * 单列任务行包含勾选序号、任务名（最多两行）和运行中标记。
      * 点选 = 加入/移出执行队列（序号 = 执行顺序），长按 = 立即单独运行。
-     * 保留 48dp 的最小触摸高度，长名称可撑开行高。
+     * 任务行最小高度为 38dp，长名称可撑开行高。
      */
     private fun buildTaskCell(
         context: Context,
@@ -1556,8 +1580,8 @@ object FloatyManager {
         val cell = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            minimumHeight = (48 * d).toInt()
-            setPadding((10 * d).toInt(), (6 * d).toInt(), (10 * d).toInt(), (6 * d).toInt())
+            minimumHeight = (38 * d).toInt()
+            setPadding((10 * d).toInt(), (3 * d).toInt(), (10 * d).toInt(), (3 * d).toInt())
             isClickable = true
             isFocusable = true
             setOnClickListener { onToggle() }
