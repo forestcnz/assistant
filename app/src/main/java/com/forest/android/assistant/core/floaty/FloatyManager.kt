@@ -1190,7 +1190,9 @@ object FloatyManager {
                     })
                 }
                 if (names.size == 1) {
-                    row.addView(View(context), LinearLayout.LayoutParams(0, 0, 1f).apply { marginStart = columnGap })
+                    row.addView(View(context), LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f).apply {
+                        marginStart = columnGap
+                    })
                 }
                 list.addView(row, LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
