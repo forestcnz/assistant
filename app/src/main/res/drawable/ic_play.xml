@@ -1,0 +1,6 @@
+<!-- 播放图标用于既有的开始/继续按钮，不增加操作入口。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="18dp" android:height="18dp"
+    android:viewportWidth="24" android:viewportHeight="24">
+    <path android:fillColor="#FFFFFFFF" android:pathData="M8,5 L19,12 L8,19 Z" />
+</vector>

@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light">
+  <title>雕雕助手 · 局域网编辑</title>
+  <link rel="icon" type="image/png" href="/app-icon.png">
+  <link rel="apple-touch-icon" href="/app-icon.png">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="app-header">
+      <div class="brand">
+        <img class="brand-mark" src="/app-icon.png" alt="雕雕助手">
+        <div>
+          <strong>雕雕助手</strong>
+          <small>局域网编辑器</small>
+        </div>
+      </div>
+      <div class="server-state" id="server-state">
+        <span class="state-dot"></span>
+        <span>正在连接</span>
+      </div>
+    </header>
+
+    <main class="app-main">
+      <aside class="task-rail" id="task-rail">
+        <div class="rail-head">
+          <div>
+            <p class="eyebrow">TASKS</p>
+            <h1>任务空间</h1>
+          </div>
+          <button class="icon-button" id="create-task" title="新建任务">＋</button>
+        </div>
+        <label class="search">
+          <span>⌕</span>
+          <input id="task-search" type="search" placeholder="搜索任务">
+        </label>
+        <div class="task-list" id="task-list"></div>
+      </aside>
+
+      <section class="editor-shell">
+        <div class="empty-editor" id="empty-editor">
+          <div class="empty-symbol">↗</div>
+          <h2>选择任务开始编辑</h2>
+          <p>可从左侧切换脚本任务或可视化流程任务。</p>
+          <button class="secondary-button mobile-tasks empty-tasks" id="empty-tasks">查看任务列表</button>
+          <button class="primary-button" id="empty-create">新建任务</button>
+        </div>
+
+        <div class="editor" id="editor" hidden>
+          <header class="editor-header">
+            <div class="editor-title">
+              <button class="mobile-tasks icon-button" id="open-tasks" title="任务列表">☰</button>
+              <div>
+                <p class="eyebrow">雕雕助手 / 编辑任务</p>
+                <h2 id="current-task-name">—</h2>
+              </div>
+            </div>
+            <div class="editor-actions">
+              <span class="save-state" id="save-state">已保存</span>
+              <button class="secondary-button" id="preview-code">代码预览</button>
+              <button class="primary-button" id="save-task">保存</button>
+            </div>
+          </header>
+
+          <nav class="tabs" aria-label="任务功能">
+            <button class="tab active" data-mode="script">脚本编辑</button>
+            <button class="tab" data-mode="flow">流程编辑</button>
+            <button class="tab" data-mode="assets">素材管理</button>
+            <button class="tab" id="task-settings">任务设置</button>
+            <span class="tab-spacer"></span>
+            <span class="meta" id="task-meta"></span>
+          </nav>
+
+          <div class="editor-content" id="editor-content"></div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <div class="modal-layer" id="modal-layer" hidden></div>
+  <input id="image-file-input" type="file" accept="image/*" hidden>
+  <input id="asset-file-input" type="file" accept="image/*" multiple hidden>
+  <script src="/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,177 @@
+package com.forest.android.assistant.core.recording
+
+import org.junit.Assert.*
+import org.junit.Test
+
+class RecordingScriptTest {
+    @Test fun imageModeCommentsCoordinatesAndRestrictsMatchingRegion() {
+        val point = RecordedPoint(890, 1590)
+        val region = RecordedCrop.around(point, 600, 900, 1600)
+        assertEquals(RecordedCrop(300, 1000, 600, 600), region)
+        val script = RecordingScript.generate(900, 1600, listOf(RecordedOperation(
+            RecordedOperation.Kind.CLICK, listOf(point), 40,
+            image = "images/step_001.png", crop = RecordedCrop.around(point, 100, 900, 1600),
+            searchRegion = region
+        )), RecordingMode.IMAGE)
+        assertTrue(script.contains("// if (!click(890, 1590, 40))"))
+        assertTrue(script.contains("var region1 = [300, 1000, 600, 600];"))
+        assertTrue(script.contains("threshold: 0.9, region: region1"))
+        assertFalse(script.contains("/*"))
+        assertTrue(script.contains("point1.x + (40), point1.y + (40)"))
+    }
+
+    @Test fun coordinateModeKeepsImageLookupCommentedAndRegionBounded() {
+        val script = RecordingScript.generate(360, 640, listOf(RecordedOperation(
+            RecordedOperation.Kind.CLICK, listOf(RecordedPoint(20, 30)), 50,
+            image = "images/step_001.png", crop = RecordedCrop(0, 0, 100, 100)
+        )))
+        assertTrue(script.contains("\nif (!click(20, 30, 50))"))
+        assertTrue(script.contains("var region1 = [0, 0, 360, 600];"))
+        assertTrue(script.indexOf("var region1") < script.indexOf("/*"))
+        assertTrue(script.indexOf("/*") < script.indexOf("images.findImage"))
+    }
+
+    @Test fun customRectangularPageRangeIsUsedForImageMatching() {
+        val point = RecordedPoint(890, 1590)
+        val script = RecordingScript.generate(900, 1600, listOf(RecordedOperation(
+            RecordedOperation.Kind.CLICK, listOf(point), 40,
+            image = "images/step_001.png", crop = RecordedCrop.around(point, 100, 900, 1600)
+        )), RecordingMode.IMAGE, searchRegionWidth = 800, searchRegionHeight = 350)
+
+        assertTrue(script.contains("var region1 = [100, 1250, 800, 350];"))
+        assertTrue(script.contains("800×350 页面范围"))
+        assertTrue(script.contains("threshold: 0.9, region: region1"))
+        assertFalse(script.contains("600×600"))
+        assertFalse(script.contains("/*"))
+    }
+
+    @Test fun customPageRangeClampsToScreenWithoutChangingTheOtherDimension() {
+        val step = RecordedOperation(RecordedOperation.Kind.SWIPE,
+            listOf(RecordedPoint(200, 300), RecordedPoint(200, 100)), 400)
+        val script = RecordingScript.generate(360, 640, listOf(step),
+            searchRegionWidth = 1200, searchRegionHeight = 400)
+
+        assertTrue(script.contains("var region1 = [0, 100, 360, 400];"))
+        assertTrue(script.contains("360×400 页面范围"))
+        assertTrue(script.contains("swipe(200, 300, 200, 100, 400)"))
+        val fullScreenScript = RecordingScript.generate(360, 640, listOf(step),
+            searchRegionWidth = 1200, searchRegionHeight = 900)
+        assertTrue(fullScreenScript.contains("var region1 = [0, 0, 360, 640];"))
+        assertTrue(fullScreenScript.contains("360×640 页面范围"))
+    }
+
+    @Test fun recordedPageRangeTakesPrecedenceOverConfiguredDimensions() {
+        val step = RecordedOperation(RecordedOperation.Kind.CLICK, listOf(RecordedPoint(240, 550)), 40,
+            searchRegion = RecordedCrop(80, 200, 320, 700))
+        val script = RecordingScript.generate(900, 1600, listOf(step),
+            searchRegionWidth = 800, searchRegionHeight = 350)
+
+        assertTrue(script.contains("var region1 = [80, 200, 320, 700];"))
+        assertTrue(script.contains("320×700 页面范围"))
+        // 不再保存页面范围大图，脚本里也不应出现参考图注释
+        assertFalse(script.contains("页面范围截图"))
+    }
+
+    @Test fun pureCoordinateModeKeepsScriptCoordinateOnly() {
+        // 纯坐标模式：只输出坐标操作，不带页面范围变量与找图备用段落
+        val script = RecordingScript.generate(900, 1600, listOf(RecordedOperation(
+            RecordedOperation.Kind.CLICK, listOf(RecordedPoint(890, 1590)), 40
+        )), RecordingMode.COORDINATE_ONLY)
+
+        assertTrue(script.contains("// 回放方式：纯坐标"))
+        assertTrue(script.contains("if (!click(890, 1590, 40)) console.error"))
+        assertFalse(script.contains("var region1"))
+        assertFalse(script.contains("findImage"))
+        assertFalse(script.contains("throw"))
+    }
+
+    @Test fun edgeCropKeepsSizeAndOriginalTapOffset() {
+        val point = RecordedPoint(2, 1598)
+        val crop = RecordedCrop.around(point, 100, 900, 1600)
+        assertEquals(RecordedCrop(0, 1500, 100, 100), crop)
+        val script = RecordingScript.generate(900, 1600, listOf(RecordedOperation(
+            RecordedOperation.Kind.CLICK, listOf(point), 80,
+            image = "images/step_001.png", crop = crop)))
+        assertTrue(script.contains("click(2, 1598, 80)"))
+        assertTrue(script.contains("point1.x + (-48), point1.y + (48)"))
+        assertTrue(script.indexOf("/*") < script.indexOf("images.findImage"))
+        assertTrue(script.contains("images.release(template1)"))
+    }
+
+    @Test fun cropFitsScreensSmallerThanRequestedSize() {
+        assertEquals(RecordedCrop(0, 0, 60, 80), RecordedCrop.around(RecordedPoint(0, 0), 100, 60, 80))
+    }
+
+    @Test fun rectangularCropKeepsBothDimensionsAndTapOffsetAtScreenEdge() {
+        val point = RecordedPoint(5, 1595)
+        val crop = RecordedCrop.around(point, 500, 200, 900, 1600)
+        assertEquals(RecordedCrop(0, 1400, 500, 200), crop)
+        assertEquals(RecordedCrop(0, 0, 60, 80),
+            RecordedCrop.around(RecordedPoint(0, 0), 500, 200, 60, 80))
+
+        val script = RecordingScript.generate(900, 1600, listOf(RecordedOperation(
+            RecordedOperation.Kind.CLICK, listOf(point), 80,
+            image = "images/step_001.png", crop = crop
+        )), RecordingMode.IMAGE)
+        assertTrue(script.contains("point1.x + (-245), point1.y + (95)"))
+    }
+
+    @Test fun returningSwipeIsNotMistakenForClick() {
+        val points = listOf(RecordedPoint(10, 10), RecordedPoint(200, 200), RecordedPoint(10, 10))
+        assertEquals(RecordedOperation.Kind.SWIPE, RecordedOperation.classify(points, 400, 8, 500))
+        val script = RecordingScript.generate(900, 1600, listOf(RecordedOperation(RecordedOperation.Kind.SWIPE, points, 400)))
+        assertTrue(script.contains("gesture(400, [10, 10], [200, 200], [10, 10])"))
+        assertTrue(script.contains("var region1 = [0, 0, 600, 600];"))
+        assertFalse(script.contains("findImage"))
+    }
+
+    @Test fun stationaryLongPressKeepsDuration() {
+        assertEquals(RecordedOperation.Kind.LONG_PRESS,
+            RecordedOperation.classify(listOf(RecordedPoint(10, 10), RecordedPoint(12, 11)), 900, 8, 500))
+        assertEquals(RecordedOperation.Kind.CLICK,
+            RecordedOperation.classify(listOf(RecordedPoint(10, 10)), 100, 8, 500))
+    }
+
+    @Test fun replayWaitsAfterCompletionWithoutAddingStartIntervalAgain() {
+        val steps = listOf(
+            RecordedOperation(RecordedOperation.Kind.CLICK, listOf(RecordedPoint(10, 20)), 100),
+            RecordedOperation(RecordedOperation.Kind.SWIPE, listOf(RecordedPoint(1, 2), RecordedPoint(3, 4)),
+                650, delayMs = 1200, intervalMs = 1300)
+        )
+        val script = RecordingScript.generate(900, 1600, steps)
+        assertEquals(2, Regex("sleep\\(").findAll(script).count())
+        assertTrue(script.indexOf("sleep(500);") < script.indexOf("click(10, 20, 100)"))
+        assertTrue(script.contains("sleep(1200);"))
+        assertFalse(script.contains("sleep(1300)"))
+        assertTrue(script.contains("swipe(1, 2, 3, 4, 650)"))
+        // 回放失败只记录错误日志，生成脚本中不应出现 throw
+        assertFalse(script.contains("throw new"))
+        assertTrue(script.contains("console.error(\"步骤 1 执行失败\")"))
+    }
+
+    @Test fun imageModeLogsErrorsInsteadOfThrowing() {
+        // 图片模式的各类失败都改为错误日志，且不再出现 throw new
+        val point = RecordedPoint(890, 1590)
+        val script = RecordingScript.generate(900, 1600, listOf(RecordedOperation(
+            RecordedOperation.Kind.CLICK, listOf(point), 40,
+            image = "images/step_001.png", crop = RecordedCrop.around(point, 100, 900, 1600)
+        )), RecordingMode.IMAGE)
+        assertFalse(script.contains("throw"))
+        assertTrue(script.contains("console.error(\"截屏授权失败\")"))
+        assertTrue(script.contains("console.error(\"步骤 1 读取图片失败\")"))
+        assertTrue(script.contains("console.error(\"步骤 1 未找到图片\")"))
+        assertTrue(script.contains("console.error(\"步骤 1 点击失败\")"))
+        // 找图与点击仍需限制在步骤记录的页面范围内
+        assertTrue(script.contains("threshold: 0.9, region: region1"))
+    }
+
+    @Test fun coordinateFallbackBlockAlsoAvoidsThrow() {
+        // 坐标模式下被注释的找图备用段同样不能残留 throw new
+        val script = RecordingScript.generate(360, 640, listOf(RecordedOperation(
+            RecordedOperation.Kind.CLICK, listOf(RecordedPoint(20, 30)), 50,
+            image = "images/step_001.png", crop = RecordedCrop(0, 0, 100, 100)
+        )))
+        assertFalse(script.contains("throw"))
+        assertTrue(script.contains("console.error(\"步骤 1 未找到图片\")"))
+    }
+}
