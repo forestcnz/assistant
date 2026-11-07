@@ -249,12 +249,18 @@ function __flowMain() {
     }
 
     private fun condition(node: JSONObject, templates: MutableSet<String>): String {
-        val first = conditionPart(node.optString("conditionKind", "image"), node.optString("conditionValue"), templates)
+        val first = conditionPart(
+            node.optString("conditionKind", "image"), node.optString("conditionValue"),
+            node.optDouble("conditionThreshold", 0.9), templates
+        )
         return when (node.optString("combine", "single")) {
             "single" -> first
             "not" -> "!($first)"
             "all", "any" -> {
-                val second = conditionPart(node.optString("secondKind", "text"), node.optString("secondValue"), templates)
+                val second = conditionPart(
+                    node.optString("secondKind", "text"), node.optString("secondValue"),
+                    node.optDouble("secondThreshold", 0.9), templates
+                )
                 val operator = if (node.optString("combine") == "all") "&&" else "||"
                 "($first $operator $second)"
             }
@@ -262,10 +268,13 @@ function __flowMain() {
         }
     }
 
-    private fun conditionPart(kind: String, value: String, templates: MutableSet<String>): String {
+    private fun conditionPart(kind: String, value: String, threshold: Double, templates: MutableSet<String>): String {
         require(value.isNotBlank()) { "检测内容不能为空" }
         return when (kind) {
-            "image" -> "!!__flowImage(${quoted(imagePath(value).also { templates.add(it) })}, 0, 300, {})"
+            "image" -> {
+                require(threshold.isFinite() && threshold in 0.0..1.0) { "找图阈值不合法" }
+                "!!__flowImage(${quoted(imagePath(value).also { templates.add(it) })}, 0, 300, { threshold: $threshold })"
+            }
             "text" -> "!!__flowText(${quoted(value)}, { timeoutMs: 100, intervalMs: 50 })"
             else -> error("未知检测方式")
         }

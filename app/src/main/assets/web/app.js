@@ -726,7 +726,7 @@
     if (node.type === "condition") fields += conditionFields(p);
     if (node.type === "image") {
       fields += assetField(p.asset || "");
-      fields += numberField("匹配阈值 %", "thresholdPercent", Math.round((p.threshold ?? 0.9) * 100));
+      fields += thresholdField("匹配阈值 %", "threshold", p.threshold);
     }
     if (node.type === "text") {
       fields += textField("查找文字", "text", p.text || "");
@@ -759,8 +759,12 @@
     return `<label class="field"><span>${label}</span><input class="input" data-prop="${key}" value="${esc(value)}"></label>`;
   }
 
-  function numberField(label, key, value) {
-    return `<label class="field"><span>${label}</span><input class="input" type="number" min="0" data-prop="${key}" data-number="true" value="${esc(value)}"></label>`;
+  function numberField(label, key, value, max = null) {
+    return `<label class="field"><span>${label}</span><input class="input" type="number" min="0"${max == null ? "" : ` max="${max}"`} data-prop="${key}" data-number="true" value="${esc(value)}"></label>`;
+  }
+
+  function thresholdField(label, key, value) {
+    return numberField(label, `${key}Percent`, Math.round((value ?? 0.9) * 100), 100);
   }
 
   function fieldPair(first, second) {
@@ -784,11 +788,17 @@
     html += firstKind === "image"
       ? assetField(p.conditionValue, "conditionValue", combined ? "第一项图片" : "条件图片")
       : textField("识别文字", "conditionValue", p.conditionValue || "");
+    if (firstKind === "image") {
+      html += thresholdField(combined ? "第一项匹配阈值 %" : "匹配阈值 %", "conditionThreshold", p.conditionThreshold);
+    }
     if (combined) {
       html += choiceField("第二项", "secondKind", [["image", "图片"], ["text", "文字"]], secondKind);
       html += secondKind === "image"
         ? assetField(p.secondValue, "secondValue", "第二项图片")
         : textField("第二项文字", "secondValue", p.secondValue || "");
+      if (secondKind === "image") {
+        html += thresholdField("第二项匹配阈值 %", "secondThreshold", p.secondThreshold);
+      }
     }
     return html;
   }
@@ -1435,8 +1445,8 @@
   function updateNodeProperty(key, value, rerender = true) {
     const found = findNode(selectedId);
     if (!found) return;
-    if (key === "thresholdPercent") {
-      key = "threshold";
+    if (["thresholdPercent", "conditionThresholdPercent", "secondThresholdPercent"].includes(key)) {
+      key = key.slice(0, -"Percent".length);
       value = Math.max(0, Math.min(100, Number(value) || 0)) / 100;
     }
     setNodeProperty(found.node, key, value);
