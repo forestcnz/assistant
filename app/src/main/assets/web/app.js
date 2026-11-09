@@ -95,7 +95,6 @@
   let exportingTasks = false;
   let canvasPanKey = false;
   let drag = null;
-  let suppressAddClick = false;
   let pendingImageNode = null;
   let toastTimer = null;
   let nextNodeId = 0;
@@ -678,13 +677,9 @@
   }
 
   function nodeTitle(node) {
-    if (node.type !== "repeat") return node.title;
-    const p = nodeProperties(node);
-    const modeValue = p.mode || "count";
-    if (modeValue === "while") return "当条件成立时";
-    if (modeValue === "until") return "重复直到满足";
-    if (modeValue === "forever") return "持续循环";
-    return `重复 ${p.count || 1} 次`;
+    const key = node.type === "repeat" ? `repeat:${nodeProperties(node).mode || "count"}` : node.type;
+    const moduleName = catalogFlat.find(def => def[0] === key)?.[1] || node.type;
+    return `${moduleName} - ${node.title || moduleName}`;
   }
 
   function nodeSummary(node) {
@@ -849,8 +844,8 @@
           <h3 class="panel-title">模块库</h3>
           <p class="panel-sub">插入到 ${targetLabel(insertTarget)}</p>
           ${renderLibraryViewTabs()}
-          ${libraryView === "templates" ? renderTemplateCards(false) : `${renderCategoryTabs()}<div class="library-grid">${renderLibraryCards(category, false)}</div>`}
-          <p class="panel-sub" style="margin-top:10px">拖到流程插入线，或点击添加；步骤可拖动左侧把手排序。</p>
+          ${libraryView === "templates" ? renderTemplateCards() : `${renderCategoryTabs()}<div class="library-grid">${renderLibraryCards(category)}</div>`}
+          <p class="panel-sub" style="margin-top:10px">拖到流程插入线添加；步骤可拖动左侧把手排序。</p>
         </aside>
         <section class="flow-canvas" tabindex="0" aria-label="流程画布">
           <div class="canvas-stage">
@@ -1087,16 +1082,16 @@
     ).join("")}</div>`;
   }
 
-  function renderLibraryCards(categoryKey, modal) {
+  function renderLibraryCards(categoryKey) {
     return catalog[categoryKey].map(def => {
       const index = catalogFlat.findIndex(item => item === def);
       const [rawType] = def[0].split(":");
       return `<div class="library-card" data-add-def="${index}">
-        <button class="library-card-button" type="button" title="${esc(def[2])}">
+        <div class="library-card-button" title="${esc(def[2])}">
           <span class="symbol ${rawType}">${nodeSymbol(rawType)}</span>
           <strong>${esc(def[1])}</strong><small>${esc(def[2])}</small>
-        </button>
-        ${modal ? "" : '<span class="library-drag" data-library-drag title="拖动模块" aria-hidden="true">⠿</span>'}
+        </div>
+        <span class="library-drag" data-library-drag title="拖动模块" aria-label="拖入 ${esc(def[1])}">⠿</span>
       </div>`;
     }).join("");
   }
@@ -1347,7 +1342,8 @@
       </div>
       <div class="modal-body">
         ${renderLibraryViewTabs()}
-        <div class="library-modal-grid${libraryView === "templates" ? " template-modal-grid" : ""}" style="margin-top:12px">${libraryView === "templates" ? renderTemplateCards(true) : `${renderCategoryTabs()}${renderLibraryCards(category, true)}`}</div>
+        <div class="library-modal-grid${libraryView === "templates" ? " template-modal-grid" : ""}" style="margin-top:12px">${libraryView === "templates" ? renderTemplateCards() : `${renderCategoryTabs()}${renderLibraryCards(category)}`}</div>
+        <p class="panel-sub" style="margin-top:12px">按住卡片右侧把手，拖到画布中的插入位置。</p>
       </div>`);
   }
 
@@ -1445,15 +1441,15 @@
     return `<div class="segmented library-view-tabs"><button data-library-view="modules" class="${libraryView === "modules" ? "active" : ""}">基础模块</button><button data-library-view="templates" class="${libraryView === "templates" ? "active" : ""}">常用模板</button></div>`;
   }
 
-  function renderTemplateCards(modal) {
+  function renderTemplateCards() {
     if (templatesError) return `<div class="inspector-empty">${esc(templatesError)}<button class="secondary-button" data-refresh-templates>重试</button></div>`;
-    if (!templates.length) return '<p class="template-empty">把常用步骤保存为模板，下次可直接点击或拖拽使用。选中步骤后，也可在右侧点「保存为模板」。</p>';
+    if (!templates.length) return '<p class="template-empty">把常用步骤保存为模板，下次可拖拽使用。选中步骤后，也可在右侧点「保存为模板」。</p>';
     return `<div class="template-cards">${templates.map(entry => `
-      <div class="library-card template-card" data-template-card="${esc(entry.id)}">
-        <button class="library-card-button" data-insert-template="${esc(entry.id)}" ${entry.nodeCount ? "" : "disabled"}>
+      <div class="library-card template-card" data-template-card="${esc(entry.id)}" ${entry.nodeCount ? "" : 'aria-disabled="true"'}>
+        <div class="library-card-button">
           <strong>${esc(entry.name)}</strong><small>${esc(entry.description || (entry.nodeCount ? `${entry.nodeCount} 个模块` : "空模板，请在模板管理中编辑"))}</small>
-        </button>
-        ${modal ? "" : `<span class="library-drag" data-template-drag="${esc(entry.id)}" title="拖入流程" aria-label="拖入 ${esc(entry.name)}">⠿</span>`}
+        </div>
+        ${entry.nodeCount ? `<span class="library-drag" data-template-drag="${esc(entry.id)}" title="拖入流程" aria-label="拖入 ${esc(entry.name)}">⠿</span>` : ""}
       </div>`).join("")}</div>`;
   }
 
@@ -1596,19 +1592,20 @@
         method: "POST", headers: current.templateId ? { "If-Match": String(current.revision) } : {},
         body: JSON.stringify({ targetTask: current.templateId ? undefined : current.name, targetTemplate: current.templateId })
       });
-      const node = { id: uid(), type: "sequence", title: entry.name, enabled: true, props: {}, children: result.document.nodes.map(deepCopyWithIds) };
+      const nodes = result.document.nodes.map(deepCopyWithIds);
+      if (!nodes.length) return toast("模板中没有可插入的步骤");
       const list = listAt(target.parentId, target.slot);
       if (!list) throw new Error("插入位置已变化，请重试");
       pushFlowUndoSnapshot();
-      list.splice(Math.min(target.index, list.length), 0, node);
+      list.splice(Math.min(target.index, list.length), 0, ...nodes);
       if (target.parentId) expanded.add(target.parentId);
-      expanded.add(node.id);
-      selectedId = node.id;
+      nodes.forEach(node => expanded.add(node.id));
+      selectedId = nodes[0].id;
       assets = null;
       setDirty(true);
       closeModal();
       renderFlowEditor();
-      revealCanvasNode(node.id);
+      revealCanvasNode(nodes[0].id);
       toast(`已插入模板「${entry.name}」`);
     });
   }
@@ -2409,11 +2406,6 @@
       if (entry) templateModal(current?.templateId === entry.id ? { ...entry, revision: current.revision } : entry);
       return;
     }
-    const templateInsert = target.closest("[data-insert-template]");
-    if (templateInsert) {
-      if (suppressAddClick) { suppressAddClick = false; return; }
-      return insertTemplate(templateInsert.dataset.insertTemplate);
-    }
     const groupButton = target.closest("[data-group-id]");
     if (groupButton) {
       if (drag) return;
@@ -2498,15 +2490,6 @@
         renderFlowEditor();
       }
       return;
-    }
-    const addButton = target.closest("[data-add-def]");
-    if (addButton) {
-      if (target.closest("[data-library-drag]")) return;
-      if (suppressAddClick) {
-        suppressAddClick = false;
-        return;
-      }
-      return addModule(Number(addButton.dataset.addDef));
     }
     const canvasButton = target.closest("[data-canvas-action]");
     if (canvasButton) return canvasAction(canvasButton.closest(".flow-canvas"), canvasButton.dataset.canvasAction);
@@ -2630,15 +2613,16 @@
   document.addEventListener("pointerdown", event => {
     if (busy || drag || !event.isPrimary || event.button !== 0) return;
     const templateCard = event.target.closest("[data-template-card]");
-    if (templateCard && !templateCard.closest(".library-modal-grid")) {
+    if (templateCard) {
       if (event.target.closest("[data-edit-template],[data-template-settings]")) return;
       const handle = event.target.closest("[data-template-drag]");
       if (!handle && event.pointerType !== "mouse") return;
       const entry = templates.find(item => item.id === templateCard.dataset.templateCard);
       if (!entry?.nodeCount) return;
       drag = { kind: "template", id: entry.id, label: entry.name, pointerId: event.pointerId,
-        startX: event.clientX, startY: event.clientY, active: false, target: null };
-      (handle || event.target.closest("[data-insert-template]") || templateCard).setPointerCapture?.(event.pointerId);
+        startX: event.clientX, startY: event.clientY, active: false, target: null,
+        fromModal: Boolean(templateCard.closest(".library-modal-grid")) };
+      (handle || templateCard).setPointerCapture?.(event.pointerId);
       if (handle) event.preventDefault();
       return;
     }
@@ -2680,7 +2664,7 @@
     }
 
     const libraryCard = event.target.closest("[data-add-def]");
-    if (!libraryCard || libraryCard.closest(".library-modal-grid")) return;
+    if (!libraryCard) return;
     const libraryHandle = event.target.closest("[data-library-drag]");
     if (!libraryHandle && event.pointerType !== "mouse") return;
     drag = {
@@ -2690,7 +2674,8 @@
       startX: event.clientX,
       startY: event.clientY,
       target: null,
-      active: false
+      active: false,
+      fromModal: Boolean(libraryCard.closest(".library-modal-grid"))
     };
     (libraryHandle || libraryCard).setPointerCapture?.(event.pointerId);
     if (libraryHandle) {
@@ -2703,6 +2688,10 @@
     if (!drag.active) {
       if (Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 6) return;
       drag.active = true;
+      if (drag.fromModal) {
+        document.documentElement.setPointerCapture(event.pointerId);
+        dom.modal.hidden = true;
+      }
       const label = ["node", "template"].includes(drag.kind) ? drag.label
         : ["task", "group-task"].includes(drag.kind) ? drag.name
         : catalogFlat[drag.defIndex]?.[1] || "添加模块";
@@ -2876,10 +2865,6 @@
       }
       return;
     }
-    if (["library", "template"].includes(state.kind)) {
-      suppressAddClick = true;
-      setTimeout(() => { suppressAddClick = false; }, 0);
-    }
     if (!state.target && ["library", "template"].includes(state.kind)) {
       const dropPoint = document.elementFromPoint(event.clientX, event.clientY);
       if (dropPoint?.closest(".flow-canvas") && !dropPoint.closest("[data-canvas-controls]")) {
@@ -2890,6 +2875,7 @@
         };
       }
     }
+    if (state.fromModal) dom.modal.hidden = false;
     if (!state.target) return;
     if (state.kind === "node") {
       if (moveNode(state.id, state.target)) renderFlowEditor();
@@ -2904,6 +2890,7 @@
     if (drag?.pointerId !== event.pointerId) return;
     if (drag.panFrame) cancelAnimationFrame(drag.panFrame);
     drag.ghost?.remove();
+    if (drag.fromModal) dom.modal.hidden = false;
     drag = null;
     document.body.classList.remove("dragging-module");
     clearDropHighlights();

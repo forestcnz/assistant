@@ -245,6 +245,8 @@ h1 { margin-top: 3px; font-size: 22px; font-weight: 600; }
 .library-view-tabs { margin-top: 12px; }
 .library-view-tabs + .segmented { margin-top: 8px; }
 .template-cards { display: flex; flex-direction: column; gap: 9px; }
+.library-card { cursor: grab; user-select: none; }
+.template-card[aria-disabled="true"] { cursor: default; opacity: .5; }
 .template-card .library-card-button { min-height: 66px; padding-right: 28px; }
 .template-card .library-card-button strong, .template-card .library-card-button small { max-width: 100%; overflow-wrap: anywhere; }
 .template-card-actions { display: flex; border-top: 1px solid var(--line); }
