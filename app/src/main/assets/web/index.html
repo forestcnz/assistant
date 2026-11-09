@@ -22,6 +22,7 @@
       <nav class="workspace-nav" id="workspace-nav" aria-label="管理页面">
         <a href="#tasks" data-page="tasks" aria-current="page">任务管理</a>
         <a href="#groups" data-page="groups">分组管理</a>
+        <a href="#templates" data-page="templates">模板管理</a>
       </nav>
       <div class="server-state" id="server-state">
         <span class="state-dot"></span>
@@ -45,7 +46,7 @@
         <div class="task-list" id="task-list"></div>
       </aside>
 
-      <section class="editor-shell">
+      <section class="editor-shell" id="task-editor-host">
         <div class="empty-editor" id="empty-editor">
           <div class="empty-symbol">↗</div>
           <h2>选择任务开始编辑</h2>
@@ -59,12 +60,13 @@
             <div class="editor-title">
               <button class="mobile-tasks icon-button" id="open-tasks" title="任务列表">☰</button>
               <div>
-                <p class="eyebrow">雕雕助手 / 编辑任务</p>
+                <p class="eyebrow" id="editor-context">雕雕助手 / 编辑任务</p>
                 <h2 id="current-task-name">—</h2>
               </div>
             </div>
             <div class="editor-actions">
               <span class="save-state" id="save-state">已保存</span>
+              <button class="secondary-button" id="exit-template" hidden>结束编辑</button>
               <button class="secondary-button" id="preview-code">代码预览</button>
               <button class="primary-button" id="save-task">保存</button>
             </div>
@@ -94,6 +96,16 @@
         </aside>
         <section class="group-detail" id="group-detail" aria-label="分组详情"></section>
       </div>
+    </main>
+    <main class="templates-page" id="templates-page" hidden>
+      <aside class="template-rail" id="template-rail" aria-label="模板列表">
+        <div class="rail-head"><div><p class="eyebrow">TEMPLATES</p><h1>模板空间</h1></div><button class="icon-button" data-new-template title="新建模板" aria-label="新建模板">＋</button></div>
+        <label class="search"><span>⌕</span><input type="search" id="template-search" placeholder="搜索模板"></label>
+        <div class="template-list" id="template-list"></div>
+      </aside>
+      <section class="editor-shell" id="template-editor-host">
+        <div class="empty-editor" id="empty-template-editor"><div class="empty-symbol">▤</div><h2>选择模板开始编辑</h2><p>先创建模板名称，再从左侧选择、编排并保存。</p><button class="secondary-button mobile-tasks empty-tasks" data-open-templates>查看模板列表</button><button class="primary-button" data-new-template>新建模板</button></div>
+      </section>
     </main>
   </div>
 

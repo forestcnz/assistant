@@ -4,6 +4,13 @@
     search: document.getElementById("task-search"),
     tasksPage: document.getElementById("tasks-page"),
     groupsPage: document.getElementById("groups-page"),
+    templatesPage: document.getElementById("templates-page"),
+    templateRail: document.getElementById("template-rail"),
+    templateList: document.getElementById("template-list"),
+    templateSearch: document.getElementById("template-search"),
+    templateEmpty: document.getElementById("empty-template-editor"),
+    templateEditorHost: document.getElementById("template-editor-host"),
+    taskEditorHost: document.getElementById("task-editor-host"),
     workspaceNav: document.getElementById("workspace-nav"),
     groupList: document.getElementById("groups-list"),
     groupSearch: document.getElementById("group-search"),
@@ -15,6 +22,8 @@
     editor: document.getElementById("editor"),
     content: document.getElementById("editor-content"),
     taskName: document.getElementById("current-task-name"),
+    editorContext: document.getElementById("editor-context"),
+    exitTemplate: document.getElementById("exit-template"),
     saveState: document.getElementById("save-state"),
     meta: document.getElementById("task-meta"),
     modal: document.getElementById("modal-layer"),
@@ -70,6 +79,10 @@
   let flow = null;
   let selectedId = null;
   let category = "common";
+  let libraryView = "modules";
+  let templates = [];
+  let templatesError = "";
+  let templateReturnState = null;
   let insertTarget = { parentId: null, slot: "children", index: Number.MAX_SAFE_INTEGER };
   const expanded = new Set();
   const canvasView = { x: 0, y: 32, zoom: 1 };
@@ -78,6 +91,7 @@
   let suppressAddClick = false;
   let pendingImageNode = null;
   let toastTimer = null;
+  let nextNodeId = 0;
 
   function esc(value) {
     return String(value ?? "").replace(/[&<>"']/g, c => ({
@@ -86,7 +100,7 @@
   }
 
   function uid() {
-    return `node-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+    return `node-${Date.now().toString(36)}-${(++nextNodeId).toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
   }
 
   function toast(message, error = false) {
@@ -98,6 +112,10 @@
 
   async function api(path, options = {}) {
     const headers = new Headers(options.headers || {});
+    if (current?.templateId && options.method && options.method !== "GET" &&
+        path.startsWith(`/api/flow-templates/${encodeURIComponent(current.templateId)}/`) && !headers.has("If-Match")) {
+      headers.set("If-Match", String(current.revision));
+    }
     if (options.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json; charset=UTF-8");
     const response = await fetch(path, { ...options, headers });
     const text = await response.text();
@@ -107,6 +125,10 @@
       const error = new Error(data.error || `请求失败 (${response.status})`);
       error.status = response.status;
       throw error;
+    }
+    const revision = response.headers.get("X-Template-Revision");
+    if (revision && current?.templateId && path.startsWith(`/api/flow-templates/${encodeURIComponent(current.templateId)}/`)) {
+      current.revision = Number(revision);
     }
     return data;
   }
@@ -128,21 +150,22 @@
     return !dirtyModes.size || confirm("当前修改尚未保存，确定离开吗？");
   }
 
-  function taskPath(name = current.name) {
-    return `/api/tasks/${encodeURIComponent(name)}`;
+  function taskPath(name) {
+    if (name === undefined && current?.templateId) return `/api/flow-templates/${encodeURIComponent(current.templateId)}`;
+    return `/api/tasks/${encodeURIComponent(name ?? current.name)}`;
   }
 
   async function perform(action) {
     if (busy) return;
     busy = true;
-    dom.editor.inert = dom.taskRail.inert = dom.empty.inert = dom.modal.inert = dom.groupsPage.inert = dom.workspaceNav.inert = true;
+    dom.editor.inert = dom.taskRail.inert = dom.empty.inert = dom.modal.inert = dom.groupsPage.inert = dom.templatesPage.inert = dom.workspaceNav.inert = true;
     try {
       await action();
     } catch (error) {
       toast(error.message, true);
     } finally {
       busy = false;
-      dom.editor.inert = dom.taskRail.inert = dom.empty.inert = dom.modal.inert = dom.groupsPage.inert = dom.workspaceNav.inert = false;
+      dom.editor.inert = dom.taskRail.inert = dom.empty.inert = dom.modal.inert = dom.groupsPage.inert = dom.templatesPage.inert = dom.workspaceNav.inert = false;
     }
   }
 
@@ -151,9 +174,11 @@
       const data = await api("/api/tasks");
       tasks = data.tasks || [];
       groups = data.groups || [];
+      if (data.templates) templates = data.templates;
       if (!groups.some(group => group.id === activeGroupId)) activeGroupId = groups[0]?.id || "";
       renderTaskList();
       renderGroupsPage();
+      renderTemplateList();
       dom.serverState.classList.add("online");
       dom.serverState.innerHTML = '<span class="state-dot"></span><span>局域网已连接</span>';
     } catch (error) {
@@ -247,15 +272,25 @@
   }
 
   function showPage() {
-    const page = location.hash === "#groups" ? "groups" : "tasks";
+    const page = location.hash === "#groups" ? "groups" : location.hash === "#templates" ? "templates" : "tasks";
+    if (page !== "templates" && current?.templateId) {
+      if (!confirmDiscard()) {
+        history.replaceState(null, "", "#templates");
+        return;
+      }
+      restoreTaskEditor();
+    }
     dom.tasksPage.hidden = page !== "tasks";
     dom.groupsPage.hidden = page !== "groups";
+    dom.templatesPage.hidden = page !== "templates";
     dom.workspaceNav.querySelectorAll("[data-page]").forEach(link => {
       if (link.dataset.page === page) link.setAttribute("aria-current", "page");
       else link.removeAttribute("aria-current");
     });
     dom.taskRail.classList.remove("open");
+    dom.templateRail.classList.remove("open");
     if (page === "groups") renderGroupsPage();
+    if (page === "templates") renderTemplateList();
   }
 
   function groupModal(group = null) {
@@ -371,6 +406,10 @@
 
   async function openTask(name) {
     if (busy) return;
+    if (templateReturnState) {
+      if (!confirmDiscard()) return;
+      restoreTaskEditor();
+    }
     if (current?.name === name) return dom.taskRail.classList.remove("open");
     if (!confirmDiscard()) return;
     await perform(async () => {
@@ -401,13 +440,18 @@
 
   function renderEditor() {
     dom.taskName.textContent = current.name;
+    dom.editorContext.textContent = current.templateId ? "雕雕助手 / 编辑常用模板" : "雕雕助手 / 编辑任务";
+    dom.exitTemplate.hidden = !current.templateId;
+    dom.saveButton.textContent = current.templateId ? "保存模板" : "保存";
+    document.getElementById("task-settings").textContent = current.templateId ? "模板设置" : "任务设置";
     const loop = current.loopMode === "duration" ? `${current.durationSec} 秒`
       : current.loopMode === "untilStopped" ? "直到手动停止" : `${current.globalCount} 次`;
-    dom.meta.textContent = `${current.type === "flow" ? "可视化流程" : "JavaScript"} · ${loop}`;
+    dom.meta.textContent = current.templateId ? "共享模板 · 独立保存" : `${current.type === "flow" ? "可视化流程" : "JavaScript"} · ${loop}`;
     dom.saveButton.hidden = dom.previewButton.hidden = mode === "assets";
     updateSaveState();
-    document.querySelectorAll(".tab").forEach(tab => {
-      tab.hidden = tab.dataset.mode === "flow" && current?.type !== "flow";
+    dom.editor.querySelectorAll(".tab").forEach(tab => {
+      tab.hidden = (tab.dataset.mode === "flow" && current?.type !== "flow") ||
+        (current.templateId && tab.dataset.mode === "script");
       tab.classList.toggle("active", tab.dataset.mode === mode);
     });
     if (mode === "script") renderScriptEditor();
@@ -658,8 +702,8 @@
         <aside class="flow-library">
           <h3 class="panel-title">模块库</h3>
           <p class="panel-sub">插入到 ${targetLabel(insertTarget)}</p>
-          ${renderCategoryTabs()}
-          <div class="library-grid">${renderLibraryCards(category, false)}</div>
+          ${renderLibraryViewTabs()}
+          ${libraryView === "templates" ? renderTemplateCards(false) : `${renderCategoryTabs()}<div class="library-grid">${renderLibraryCards(category, false)}</div>`}
           <p class="panel-sub" style="margin-top:10px">拖到流程插入线，或点击添加；步骤可拖动左侧把手排序。</p>
         </aside>
         <section class="flow-canvas" tabindex="0" aria-label="流程画布">
@@ -946,6 +990,7 @@
         <button data-move="1" ${found.index >= found.list.length - 1 ? "disabled" : ""}>下移</button>
         <button data-duplicate>复制</button>
         <button class="danger" data-delete>删除</button>
+        <button class="save-template-action" data-save-selection-template>保存为模板</button>
       </div>`;
   }
 
@@ -1027,8 +1072,8 @@
         <button class="modal-close" data-close-modal>×</button>
       </div>
       <div class="modal-body">
-        ${renderCategoryTabs()}
-        <div class="library-modal-grid" style="margin-top:12px">${renderLibraryCards(category, true)}</div>
+        ${renderLibraryViewTabs()}
+        <div class="library-modal-grid${libraryView === "templates" ? " template-modal-grid" : ""}" style="margin-top:12px">${libraryView === "templates" ? renderTemplateCards(true) : `${renderCategoryTabs()}${renderLibraryCards(category, true)}`}</div>
       </div>`);
   }
 
@@ -1088,6 +1133,191 @@
     };
   }
 
+  async function loadTemplates() {
+    try {
+      const result = await api("/api/flow-templates");
+      templates = result.templates || [];
+      templatesError = "";
+      renderTemplateList();
+    } catch (error) {
+      templatesError = error.message;
+      throw error;
+    }
+  }
+
+  function renderTemplateList() {
+    const query = dom.templateSearch.value.trim().toLowerCase();
+    const filtered = templates.filter(entry => entry.name.toLowerCase().includes(query) || entry.description.toLowerCase().includes(query));
+    dom.templateList.innerHTML = filtered.length ? filtered.map(entry => `
+      <button class="task-item${current?.templateId === entry.id ? " active" : ""}" data-manage-template="${esc(entry.id)}"><span class="task-line"><span class="task-name">${esc(entry.name)}</span></span><span class="template-desc">${esc(entry.description || (entry.nodeCount ? `${entry.nodeCount} 个模块` : "空模板，点击编辑"))}</span></button>`).join("")
+      : `<div class="inspector-empty">${query ? "没有匹配的模板" : "暂无模板，点击＋创建"}</div>`;
+  }
+
+  function renderLibraryViewTabs() {
+    return `<div class="segmented library-view-tabs"><button data-library-view="modules" class="${libraryView === "modules" ? "active" : ""}">基础模块</button><button data-library-view="templates" class="${libraryView === "templates" ? "active" : ""}">常用模板</button></div>`;
+  }
+
+  function renderTemplateCards(modal) {
+    if (templatesError) return `<div class="inspector-empty">${esc(templatesError)}<button class="secondary-button" data-refresh-templates>重试</button></div>`;
+    if (!templates.length) return '<p class="template-empty">把常用步骤保存为模板，下次可直接点击或拖拽使用。选中步骤后，也可在右侧点「保存为模板」。</p>';
+    return `<div class="template-cards">${templates.map(entry => `
+      <div class="library-card template-card" data-template-card="${esc(entry.id)}">
+        <button class="library-card-button" data-insert-template="${esc(entry.id)}" ${entry.nodeCount ? "" : "disabled"}>
+          <strong>${esc(entry.name)}</strong><small>${esc(entry.description || (entry.nodeCount ? `${entry.nodeCount} 个模块` : "空模板，请在模板管理中编辑"))}</small>
+        </button>
+        ${modal ? "" : `<span class="library-drag" data-template-drag="${esc(entry.id)}" title="拖入流程" aria-label="拖入 ${esc(entry.name)}">⠿</span>`}
+      </div>`).join("")}</div>`;
+  }
+
+  function refreshLibraryView() {
+    renderTemplateList();
+    if (location.hash === "#templates") {
+      if (current?.templateId && mode === "flow") renderFlowEditor();
+      return;
+    }
+    if (!dom.modal.hidden && dom.modal.querySelector(".library-modal-grid")) openLibrary(insertTarget);
+    else if (mode === "flow") renderFlowEditor();
+  }
+
+  function templateModal(entry = null, nodes = null) {
+    const snapshot = nodes ? JSON.parse(JSON.stringify(nodes)) : [];
+    const suggested = snapshot.length === 1 ? nodeTitle(snapshot[0]) : snapshot.length ? current.name : "";
+    showModal(`<div class="modal-head"><div><h3>${entry ? "模板设置" : snapshot.length ? "保存为模板" : "新建模板"}</h3><p>${entry ? esc(entry.name) : "模板保存在手机端，所有任务均可使用"}</p></div><button class="modal-close" data-close-modal aria-label="关闭">×</button></div>
+      <form id="template-form"><div class="modal-body settings-body">
+        <label class="field"><span>模板名称</span><input class="input" name="name" required maxlength="50" value="${esc(entry?.name || suggested)}" placeholder="例如：关闭弹窗后返回"></label>
+        ${entry || snapshot.length ? `<label class="field"><span>说明</span><textarea class="input" name="description" rows="3" maxlength="1000" placeholder="描述这个模板的用途">${esc(entry?.description || "")}</textarea></label>` : ""}
+      </div><div class="modal-actions settings-actions">
+        ${entry ? '<button class="secondary-button danger" type="button" id="delete-template">删除模板</button>' : ""}
+        <button class="secondary-button" type="button" data-close-modal>取消</button><button class="primary-button" type="submit">${entry ? "保存设置" : snapshot.length ? "保存模板" : "创建"}</button>
+      </div></form>`);
+    const form = dom.modal.querySelector("form");
+    form.onsubmit = event => {
+      event.preventDefault();
+      const name = form.elements.namedItem("name").value.trim();
+      if (!name) return toast("请输入模板名称", true);
+      const description = form.elements.namedItem("description")?.value.trim() || "";
+      perform(async () => {
+        const result = await api(entry ? `/api/flow-templates/${encodeURIComponent(entry.id)}` : "/api/flow-templates", {
+          method: entry ? "PUT" : "POST", headers: entry ? { "If-Match": String(entry.revision) } : {},
+          body: JSON.stringify({ name, description, ...(entry ? {} : {
+            source: JSON.stringify({ schemaVersion: 1, nodes: snapshot }),
+            sourceTask: current?.templateId ? undefined : current?.name,
+            sourceTemplate: current?.templateId
+          }) })
+        });
+        closeModal();
+        await loadTemplates();
+        if (location.hash !== "#templates") libraryView = "templates";
+        if (entry && current?.templateId === entry.id) {
+          Object.assign(current, { name, description, revision: result.template.revision });
+          renderEditor();
+        } else refreshLibraryView();
+        toast(entry ? "模板设置已保存" : snapshot.length ? "模板已保存" : "模板已创建，点击编辑开始编排");
+      });
+    };
+    if (entry) form.querySelector("#delete-template").onclick = () => {
+      if (!confirm(`删除模板「${entry.name}」？已插入任务中的步骤会保留。`)) return;
+      perform(async () => {
+        await api(`/api/flow-templates/${encodeURIComponent(entry.id)}`, { method: "DELETE", headers: { "If-Match": String(entry.revision) } });
+        closeModal();
+        await loadTemplates();
+        if (current?.templateId === entry.id) restoreTaskEditor();
+        else refreshLibraryView();
+        toast("模板已删除");
+      });
+    };
+    form.elements.namedItem("name").focus();
+  }
+
+  async function activateTemplateEditor(id) {
+    const document = await api(`/api/flow-templates/${encodeURIComponent(id)}`);
+    const nextFlow = JSON.parse(document.source);
+    if (!templateReturnState) templateReturnState = {
+      current, flow, mode, assets, assetsError, assetView, imageHistory, historyError, assetRevision,
+      selectedId, insertTarget: { ...insertTarget }, expanded: [...expanded], canvasView: { ...canvasView }, dirtyModes: [...dirtyModes]
+    };
+    current = document;
+    flow = nextFlow;
+    mode = "flow";
+    assets = imageHistory = null;
+    assetsError = historyError = "";
+    assetView = "current";
+    assetRevision = 0;
+    selectedId = null;
+    insertTarget = { parentId: null, slot: "children", index: Number.MAX_SAFE_INTEGER };
+    expanded.clear();
+    nextFlow.nodes.forEach(node => expanded.add(node.id));
+    dirtyModes.clear();
+    Object.assign(canvasView, { x: 0, y: 32, zoom: 1 });
+    libraryView = "modules";
+    closeModal();
+    dom.templateEditorHost.appendChild(dom.editor);
+    dom.editor.hidden = false;
+    dom.templateEmpty.hidden = true;
+    dom.templateRail.classList.remove("open");
+    if (location.hash !== "#templates") location.hash = "templates";
+    renderEditor();
+    renderTemplateList();
+  }
+
+  function restoreTaskEditor() {
+    const state = templateReturnState;
+    if (!state) return;
+    templateReturnState = null;
+    current = state.current;
+    flow = state.flow;
+    mode = state.mode;
+    assets = state.assets;
+    assetsError = state.assetsError;
+    assetView = state.assetView;
+    imageHistory = state.imageHistory;
+    historyError = state.historyError;
+    assetRevision = state.assetRevision;
+    selectedId = state.selectedId;
+    insertTarget = state.insertTarget;
+    dirtyModes.clear();
+    state.dirtyModes.forEach(value => dirtyModes.add(value));
+    expanded.clear();
+    state.expanded.forEach(value => expanded.add(value));
+    Object.assign(canvasView, state.canvasView);
+    libraryView = "templates";
+    pendingImageNode = null;
+    dom.taskEditorHost.appendChild(dom.editor);
+    dom.templateEmpty.hidden = false;
+    dom.editor.hidden = !current;
+    dom.empty.hidden = Boolean(current);
+    if (current) renderEditor();
+    else dom.content.innerHTML = "";
+    renderTaskList();
+    renderTemplateList();
+  }
+
+  async function insertTemplate(id, targetOverride = null) {
+    const entry = templates.find(item => item.id === id);
+    if (!entry || !entry.nodeCount || !flow || mode !== "flow") return;
+    const target = { ...(targetOverride || insertTarget) };
+    if (!listAt(target.parentId, target.slot)) return;
+    await perform(async () => {
+      const result = await api(`/api/flow-templates/${encodeURIComponent(id)}/insert`, {
+        method: "POST", headers: current.templateId ? { "If-Match": String(current.revision) } : {},
+        body: JSON.stringify({ targetTask: current.templateId ? undefined : current.name, targetTemplate: current.templateId })
+      });
+      const node = { id: uid(), type: "sequence", title: entry.name, enabled: true, props: {}, children: result.document.nodes.map(deepCopyWithIds) };
+      const list = listAt(target.parentId, target.slot);
+      if (!list) throw new Error("插入位置已变化，请重试");
+      list.splice(Math.min(target.index, list.length), 0, node);
+      if (target.parentId) expanded.add(target.parentId);
+      expanded.add(node.id);
+      selectedId = node.id;
+      assets = null;
+      setDirty(true);
+      closeModal();
+      renderFlowEditor();
+      revealCanvasNode(node.id);
+      toast(`已插入模板「${entry.name}」`);
+    });
+  }
+
   async function saveCurrent() {
     if (!current || !dirtyModes.has(mode)) return;
     if (mode === "script" && dirtyModes.has("flow") &&
@@ -1110,6 +1340,7 @@
           method: "PUT",
           body: JSON.stringify(flow)
         });
+        if (result.template) current.revision = result.template.revision;
         current.source = JSON.stringify(flow);
         current.scriptSource = result.scriptSource;
         if (!dirtyModes.has("script")) current.editorSource = null;
@@ -1126,7 +1357,7 @@
   async function showCodePreview() {
     try {
       if (mode === "flow" && flow) {
-        const result = await api(`/api/tasks/${encodeURIComponent(current.name)}/validate`, {
+        const result = await api(`${taskPath()}/validate`, {
           method: "POST",
           body: JSON.stringify(flow)
         });
@@ -1135,7 +1366,7 @@
       } else if (current.type === "flow" && mode === "script") {
         showCodeModal(current.editorSource ?? current.scriptSource ?? current.source);
       } else if (current.type === "flow") {
-        const result = await api(`/api/tasks/${encodeURIComponent(current.name)}/validate`, {
+        const result = await api(`${taskPath()}/validate`, {
           method: "POST",
           body: JSON.stringify(flow)
         });
@@ -1748,11 +1979,63 @@
     const pageLink = event.target.closest("[data-page]");
     if (pageLink) {
       event.preventDefault();
-      if (!busy && !drag) location.hash = pageLink.dataset.page;
+      if (!busy && !drag) {
+        if (pageLink.dataset.page !== "templates" && current?.templateId) {
+          if (!confirmDiscard()) return;
+          restoreTaskEditor();
+        }
+        location.hash = pageLink.dataset.page;
+      }
       return;
     }
     if (busy) return;
     const target = event.target;
+    if (target.closest("[data-open-templates]")) return dom.templateRail.classList.toggle("open");
+    const managedTemplate = target.closest("[data-manage-template]");
+    if (managedTemplate) {
+      if (current?.templateId === managedTemplate.dataset.manageTemplate) return dom.templateRail.classList.remove("open");
+      if (current?.templateId && !confirmDiscard()) return;
+      return perform(() => activateTemplateEditor(managedTemplate.dataset.manageTemplate));
+    }
+    const libraryTab = target.closest("[data-library-view]");
+    if (libraryTab) {
+      libraryView = libraryTab.dataset.libraryView;
+      if (libraryView === "templates") return perform(async () => {
+        try { await loadTemplates(); } finally { refreshLibraryView(); }
+      });
+      return refreshLibraryView();
+    }
+    if (target.closest("[data-refresh-templates]")) return perform(async () => {
+      try { await loadTemplates(); } finally { refreshLibraryView(); }
+    });
+    if (target.closest("#exit-template")) {
+      if (confirmDiscard()) restoreTaskEditor();
+      return;
+    }
+    if (target.closest("[data-new-template]")) {
+      return templateModal();
+    }
+    if (target.closest("[data-save-selection-template]")) {
+      const found = findNode(selectedId);
+      if (found) templateModal(null, [found.node]);
+      return;
+    }
+    const editTemplate = target.closest("[data-edit-template]");
+    if (editTemplate) {
+      if (current?.templateId && !confirmDiscard()) return;
+      return perform(() => activateTemplateEditor(editTemplate.dataset.editTemplate));
+    }
+    const templateSettings = target.closest("[data-template-settings]");
+    if (templateSettings) {
+      const entry = templates.find(item => item.id === templateSettings.dataset.templateSettings);
+      if (entry) templateModal(current?.templateId === entry.id ? { ...entry, revision: current.revision } : entry);
+      return;
+    }
+    const templateInsert = target.closest("[data-insert-template]");
+    if (templateInsert) {
+      if (suppressAddClick) { suppressAddClick = false; return; }
+      return insertTemplate(templateInsert.dataset.insertTemplate);
+    }
     const groupButton = target.closest("[data-group-id]");
     if (groupButton) {
       if (drag) return;
@@ -1789,11 +2072,13 @@
     if (target.closest("#edit-group,[data-manage-group]")) return groupModal(groups.find(group => group.id === activeGroupId));
     if (target.closest("#refresh-groups")) return perform(loadTasks);
     if (target.closest("#open-tasks") || target.closest("#empty-tasks")) {
-      dom.taskRail.classList.toggle("open");
+      (current?.templateId ? dom.templateRail : dom.taskRail).classList.toggle("open");
       return;
     }
     if (target.closest("#save-task")) return saveCurrent();
-    if (target.closest("#task-settings")) return taskSettingsModal();
+    if (target.closest("#task-settings")) return current.templateId
+      ? templateModal({ id: current.templateId, name: current.name, description: current.description, revision: current.revision })
+      : taskSettingsModal();
     const assetTab = target.closest("[data-asset-view]");
     if (assetTab) {
       assetView = assetTab.dataset.assetView;
@@ -1920,6 +2205,7 @@
   document.addEventListener("input", event => {
     if (event.target === dom.search) renderTaskList();
     if (event.target === dom.groupSearch) renderGroupsPage();
+    if (event.target === dom.templateSearch) renderTemplateList();
     if (event.target.id === "group-task-search") {
       groupTaskQuery = event.target.value;
       renderGroupTaskSources();
@@ -1946,6 +2232,19 @@
 
   document.addEventListener("pointerdown", event => {
     if (busy || drag || !event.isPrimary || event.button !== 0) return;
+    const templateCard = event.target.closest("[data-template-card]");
+    if (templateCard && !templateCard.closest(".library-modal-grid")) {
+      if (event.target.closest("[data-edit-template],[data-template-settings]")) return;
+      const handle = event.target.closest("[data-template-drag]");
+      if (!handle && event.pointerType !== "mouse") return;
+      const entry = templates.find(item => item.id === templateCard.dataset.templateCard);
+      if (!entry?.nodeCount) return;
+      drag = { kind: "template", id: entry.id, label: entry.name, pointerId: event.pointerId,
+        startX: event.clientX, startY: event.clientY, active: false, target: null };
+      (handle || event.target.closest("[data-insert-template]") || templateCard).setPointerCapture?.(event.pointerId);
+      if (handle) event.preventDefault();
+      return;
+    }
     const sourceHandle = event.target.closest("[data-group-task-drag]");
     const sourceCard = event.target.closest("[data-group-task-source]");
     if (sourceHandle || (sourceCard && event.pointerType === "mouse" && !event.target.closest("button"))) {
@@ -2007,7 +2306,7 @@
     if (!drag.active) {
       if (Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 6) return;
       drag.active = true;
-      const label = drag.kind === "node" ? drag.label
+      const label = ["node", "template"].includes(drag.kind) ? drag.label
         : ["task", "group-task"].includes(drag.kind) ? drag.name
         : catalogFlat[drag.defIndex]?.[1] || "添加模块";
       createDragGhost(label, event);
@@ -2102,7 +2401,7 @@
     }
 
     drag.target = null;
-    if (drag.kind !== "library" || !pointTarget) return;
+    if (!["library", "template"].includes(drag.kind) || !pointTarget) return;
     const flowList = pointTarget.closest("[data-flow-list]");
     const container = pointTarget.closest(
       '.flow-node[data-type="sequence"], .flow-node[data-type="repeat"], .flow-node[data-type="condition"]'
@@ -2163,11 +2462,11 @@
       }
       return;
     }
-    if (state.kind === "library") {
+    if (["library", "template"].includes(state.kind)) {
       suppressAddClick = true;
       setTimeout(() => { suppressAddClick = false; }, 0);
     }
-    if (!state.target && state.kind === "library") {
+    if (!state.target && ["library", "template"].includes(state.kind)) {
       const dropPoint = document.elementFromPoint(event.clientX, event.clientY);
       if (dropPoint?.closest(".flow-canvas") && !dropPoint.closest("[data-canvas-controls]")) {
         state.target = {
@@ -2180,6 +2479,8 @@
     if (!state.target) return;
     if (state.kind === "node") {
       if (moveNode(state.id, state.target)) renderFlowEditor();
+    } else if (state.kind === "template") {
+      insertTemplate(state.id, state.target);
     } else {
       addModule(state.defIndex, state.target);
     }
@@ -2217,7 +2518,7 @@
   }
 
   window.addEventListener("beforeunload", event => {
-    if (!dirtyModes.size) return;
+    if (!dirtyModes.size && !templateReturnState?.dirtyModes.length) return;
     event.preventDefault();
     event.returnValue = "";
   });
@@ -2225,6 +2526,7 @@
   window.addEventListener("hashchange", () => {
     showPage();
     if (location.hash === "#groups" && !busy) perform(loadTasks);
+    if (location.hash === "#templates" && !busy) perform(loadTemplates);
   });
   showPage();
   loadTasks();

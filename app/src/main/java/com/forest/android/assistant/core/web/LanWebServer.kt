@@ -5,6 +5,8 @@ import android.graphics.Bitmap
 import android.util.AtomicFile
 import com.forest.android.assistant.core.engine.ScriptRunner
 import com.forest.android.assistant.core.flow.FlowCompiler
+import com.forest.android.assistant.core.flow.FlowTemplates
+import com.forest.android.assistant.core.flow.FlowTemplateContent
 import com.forest.android.assistant.core.image.AssetCropper
 import com.forest.android.assistant.core.image.CropRegion
 import com.forest.android.assistant.core.task.ImageHistory
@@ -112,6 +114,7 @@ private class EditorHttpServer(
         return when {
             segments == listOf("api", "tasks") -> tasks(session)
             segments[1] == "task-groups" && segments.size <= 3 -> groupRoute(session, segments.getOrNull(2))
+            segments[1] == "flow-templates" -> templateRoute(session, segments.getOrNull(2), segments.drop(3))
             segments.size >= 3 && segments[1] == "tasks" -> taskRoute(
                 session,
                 segments[2],
@@ -140,7 +143,8 @@ private class EditorHttpServer(
                 )
             }
             json(Response.Status.OK, JSONObject().put("tasks", items)
-                .put("groups", JSONArray(TaskGroups.list(context).map(TaskGroups::toJson))))
+                .put("groups", JSONArray(TaskGroups.list(context).map(TaskGroups::toJson)))
+                .put("templates", JSONArray(FlowTemplates.list(context).map(FlowTemplates::toJson))))
         }
         Method.POST -> {
             requireIdle()
@@ -194,12 +198,85 @@ private class EditorHttpServer(
     }
 
     @Synchronized
+    private fun templateRoute(session: IHTTPSession, id: String?, rest: List<String>): Response = try {
+        when {
+            id == null && session.method == Method.GET -> json(Response.Status.OK,
+                JSONObject().put("templates", JSONArray(FlowTemplates.list(context).map(FlowTemplates::toJson))))
+            id == null && session.method == Method.POST -> {
+                val request = jsonBody(session)
+                val info = FlowTemplates.create(context, request.getString("name"), request.optString("description"),
+                    request.optString("source", FlowCompiler.initialDocument()),
+                    request.optString("sourceTask").takeIf(String::isNotBlank),
+                    request.optString("sourceTemplate").takeIf(String::isNotBlank))
+                json(Response.Status.CREATED, JSONObject().put("template", FlowTemplates.toJson(info)))
+            }
+            id != null -> {
+                val info = FlowTemplates.get(context, id)
+                val resource = FlowTemplates.resourceName(id)
+                when {
+                    rest.isEmpty() && session.method == Method.GET -> taskDocument(resource, info)
+                    rest.isEmpty() && session.method == Method.PUT -> {
+                        val request = jsonBody(session)
+                        val updated = FlowTemplates.update(context, id, templateRevision(session),
+                            request.getString("name"), request.optString("description"))
+                        json(Response.Status.OK, JSONObject().put("template", FlowTemplates.toJson(updated)))
+                    }
+                    rest.isEmpty() && session.method == Method.DELETE -> {
+                        FlowTemplates.delete(context, id, templateRevision(session))
+                        json(Response.Status.OK, JSONObject().put("ok", true))
+                    }
+                    rest == listOf("flow") && session.method == Method.PUT -> {
+                        val updated = FlowTemplates.save(context, id, templateRevision(session), requestSource(session))
+                        json(Response.Status.OK, JSONObject().put("ok", true).put("template", FlowTemplates.toJson(updated))
+                            .put("scriptSource", TaskManager.scriptFile(context, resource).readText()))
+                    }
+                    rest == listOf("validate") && session.method == Method.POST -> {
+                        val document = FlowTemplateContent.parse(requestSource(session))
+                        json(Response.Status.OK, JSONObject().put("ok", true).put("code", FlowTemplateContent.preview(document)))
+                    }
+                    rest == listOf("insert") && session.method == Method.POST -> {
+                        val request = jsonBody(session)
+                        val targetTemplate = request.optString("targetTemplate").takeIf(String::isNotBlank)
+                        if (targetTemplate != null) FlowTemplates.checked(context, targetTemplate, templateRevision(session))
+                        val document = FlowTemplates.insert(context, id,
+                            request.optString("targetTask").takeIf(String::isNotBlank), targetTemplate)
+                        json(Response.Status.OK, JSONObject().put("document", document))
+                    }
+                    rest.firstOrNull() in listOf("images", "image-history") -> {
+                        val mutation = session.method != Method.GET && rest.lastOrNull() != "rename-preview"
+                        if (mutation) FlowTemplates.checked(context, id, templateRevision(session))
+                        val response = taskRoute(session, resource, rest, templateResource = true)
+                        if (mutation && response.status.requestStatus in 200..299) {
+                            response.addHeader("X-Template-Revision", FlowTemplates.touch(context, id).revision.toString())
+                        }
+                        response
+                    }
+                    else -> methodNotAllowed()
+                }
+            }
+            else -> methodNotAllowed()
+        }
+    } catch (error: ConcurrentModificationException) {
+        json(Response.Status.CONFLICT, JSONObject().put("error", error.message))
+    } catch (error: NoSuchElementException) {
+        json(Response.Status.NOT_FOUND, JSONObject().put("error", error.message))
+    } catch (error: IllegalArgumentException) {
+        json(Response.Status.BAD_REQUEST, JSONObject().put("error", error.message))
+    } catch (error: org.json.JSONException) {
+        json(Response.Status.BAD_REQUEST, JSONObject().put("error", "模板数据不合法"))
+    }
+
+    private fun templateRevision(session: IHTTPSession): Long =
+        session.headers["if-match"]?.toLongOrNull() ?: throw IllegalArgumentException("缺少模板版本，请重新打开模板")
+
+    @Synchronized
     private fun taskRoute(
         session: IHTTPSession,
         taskName: String,
-        rest: List<String>
+        rest: List<String>,
+        templateResource: Boolean = false
     ): Response {
-        if (TaskManager.listTasks(context).none { it.name == taskName }) {
+        if (!templateResource && TaskManager.listTasks(context).none { it.name == taskName }) {
             return json(Response.Status.NOT_FOUND, JSONObject().put("error", "任务不存在"))
         }
         return when {
@@ -239,7 +316,7 @@ private class EditorHttpServer(
         }
     }
 
-    private fun taskDocument(taskName: String): Response {
+    private fun taskDocument(taskName: String, template: FlowTemplates.Info? = null): Response {
         val flowFile = FlowCompiler.sourceFile(context, taskName)
         val draftFile = FlowCompiler.draftFile(context, taskName)
         val visual = flowFile.isFile
@@ -250,9 +327,12 @@ private class EditorHttpServer(
         }
         val source = sourceFile.readText()
         val editableScript = if (visual) TaskManager.scriptFile(context, taskName).readText() else source
+        val settings = taskSettings(taskName)
+        if (template != null) settings.put("name", template.name).put("description", template.description)
+            .put("templateId", template.id).put("revision", template.revision)
         return json(
             Response.Status.OK,
-            taskSettings(taskName)
+            settings
                 .put("type", if (visual) "flow" else "script")
                 .put("source", source)
                 .put("scriptSource", editableScript)
