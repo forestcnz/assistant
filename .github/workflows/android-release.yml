@@ -27,6 +27,13 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      - name: Set up speed runtime build tools
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: tooling/speed-runtime/package-lock.json
+
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
         with:

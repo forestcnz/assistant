@@ -9,6 +9,15 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
+
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
 
     <!-- 脚本运行期保活前台服务（specialUse） -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
@@ -32,6 +41,14 @@
         </activity>
 
         <!-- 模板截取工具：截屏框选生成找图素材 -->
+        <activity android:name=".AppSpeedActivity" android:exported="false" android:launchMode="singleTop" />
+        <receiver android:name=".core.speed.SpeedInstallReceiver" android:exported="false" />
+        <service android:name=".core.speed.SpeedOverlayService" android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="user_initiated_app_speed_controls" />
+        </service>
+
         <activity
             android:name=".TemplateCaptureActivity"
             android:exported="false" />

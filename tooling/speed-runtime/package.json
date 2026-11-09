@@ -1,0 +1,15 @@
+{
+  "name": "assistant-speed-runtime",
+  "private": true,
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node --test clock.test.mjs"
+  },
+  "dependencies": {
+    "buffer": "6.0.3",
+    "frida-java-bridge": "7.0.13"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.12"
+  }
+}

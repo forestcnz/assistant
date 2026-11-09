@@ -15,3 +15,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "assistant"
 include(":app")
+include(":speed-runtime")

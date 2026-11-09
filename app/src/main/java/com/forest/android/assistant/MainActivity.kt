@@ -1530,6 +1530,10 @@ class MainActivity : ComponentActivity() {
                 }
                 SectionLabel("快捷入口")
                 WorkCard(Modifier.fillMaxWidth()) {
+                    ToolRow("应用变速", "选择应用，生成免 Root 变速安装包", R.drawable.ic_clock) {
+                        startActivity(Intent(this@MainActivity, AppSpeedActivity::class.java))
+                    }
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                     ToolRow("打开悬浮任务面板", "查看任务队列及快捷工具", R.drawable.ic_nav_tasks) { openFloatingTasks() }
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                     ToolRow(

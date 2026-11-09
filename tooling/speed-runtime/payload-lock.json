@@ -1,0 +1,21 @@
+{
+  "version": "17.26.2",
+  "assets": {
+    "armeabi-v7a": {
+      "name": "frida-gadget-17.26.2-android-arm.so.xz",
+      "sha256": "5965978cd4a885755c574669b39c9b317bccf20eaa5f168ae4efc9ae025e12e1"
+    },
+    "arm64-v8a": {
+      "name": "frida-gadget-17.26.2-android-arm64.so.xz",
+      "sha256": "6d0dc39860042b4ba7d6b585bac9d2f1576dad97273cc6a48285705a9ddb99ec"
+    },
+    "x86": {
+      "name": "frida-gadget-17.26.2-android-x86.so.xz",
+      "sha256": "3fb66d067a869a9b0832c520899693e6342be2058745d38e5a5df1757c15605c"
+    },
+    "x86_64": {
+      "name": "frida-gadget-17.26.2-android-x86_64.so.xz",
+      "sha256": "e9d766c582bac38a47a695c7932ef9675fc019b5ab309802eeffed925f1fd321"
+    }
+  }
+}

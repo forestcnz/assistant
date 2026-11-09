@@ -65,9 +65,49 @@ android {
     buildFeatures {
         compose = true
     }
+
+    sourceSets.getByName("main").assets.directories.add(layout.buildDirectory.dir("generated/speedAssets").get().asFile.absolutePath)
+}
+
+// Payload code is built independently so its DEX can be embedded in a selected APK.
+// Network artifacts are pinned by SHA-256 in tooling/speed-runtime/payload-lock.json.
+val speedTooling = rootProject.file("tooling/speed-runtime")
+val speedAssets = layout.buildDirectory.dir("generated/speedAssets")
+val installSpeedTools = tasks.register<Exec>("installSpeedTools") {
+    workingDir(speedTooling)
+    commandLine(if (System.getProperty("os.name").startsWith("Windows")) "npm.cmd" else "npm", "ci", "--no-audit", "--no-fund")
+    inputs.files(speedTooling.resolve("package.json"), speedTooling.resolve("package-lock.json"))
+    outputs.dir(speedTooling.resolve("node_modules"))
+}
+val prepareSpeedPayload = tasks.register<Exec>("prepareSpeedPayload") {
+    dependsOn(":speed-runtime:assembleDebug", installSpeedTools)
+    val runtimeApk = rootProject.file("speed-runtime/build/outputs/apk/debug/speed-runtime-debug.apk")
+    inputs.file(runtimeApk)
+    inputs.files(speedTooling.resolve("prepare.py"), speedTooling.resolve("payload-lock.json"), speedTooling.resolve("THIRD_PARTY_NOTICES.md"))
+    inputs.files(speedTooling.resolve("FRIDA-COPYING.txt"), speedTooling.resolve("LGPL-2.0.txt"), speedTooling.resolve("package-lock.json"))
+    outputs.dir(speedAssets.map { it.dir("speed-runtime/gadget") })
+    outputs.file(speedAssets.map { it.file("speed-runtime/runtime.dex") })
+    outputs.file(speedAssets.map { it.file("speed-runtime/THIRD_PARTY_NOTICES.md") })
+    outputs.dir(speedAssets.map { it.dir("speed-runtime/licenses") })
+    val python = providers.environmentVariable("SPEED_PYTHON").orElse(if (System.getProperty("os.name").startsWith("Windows")) "py" else "python3")
+    commandLine(python.get(), speedTooling.resolve("prepare.py"), speedAssets.get().asFile, runtimeApk, rootProject.file("build/speed-downloads"))
+}
+val bundleSpeedHook = tasks.register<Exec>("bundleSpeedHook") {
+    dependsOn(installSpeedTools)
+    workingDir(speedTooling)
+    inputs.files(speedTooling.resolve("hook.js"), speedTooling.resolve("clock.mjs"), speedTooling.resolve("build.mjs"), speedTooling.resolve("package-lock.json"))
+    outputs.file(speedAssets.map { it.file("speed-runtime/hook.js") })
+    commandLine("node", speedTooling.resolve("build.mjs"), speedAssets.get().file("speed-runtime/hook.js").asFile)
+}
+tasks.named("preBuild") { dependsOn(prepareSpeedPayload, bundleSpeedHook) }
+tasks.withType<Test>().configureEach {
+    dependsOn(":speed-runtime:assembleDebug")
+    systemProperty("speed.fixture.apk", rootProject.file("speed-runtime/build/outputs/apk/debug/speed-runtime-debug.apk"))
+    systemProperty("speed.android.sdk", providers.environmentVariable("ANDROID_HOME").orElse(providers.environmentVariable("ANDROID_SDK_ROOT")).orElse("").get())
 }
 
 dependencies {
+    implementation("com.android.tools.build:apksig:9.4.1")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")
     // Compose BOM 统一管理 Compose 版本
