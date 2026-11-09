@@ -1,6 +1,7 @@
 (() => {
   const dom = {
     taskList: document.getElementById("task-list"),
+    exportAll: document.getElementById("export-all-tasks"),
     search: document.getElementById("task-search"),
     tasksPage: document.getElementById("tasks-page"),
     groupsPage: document.getElementById("groups-page"),
@@ -90,6 +91,8 @@
   let insertTarget = { parentId: null, slot: "children", index: Number.MAX_SAFE_INTEGER };
   const expanded = new Set();
   const canvasView = { x: 0, y: 32, zoom: 1 };
+  const groupCanvasViews = new Map();
+  let exportingTasks = false;
   let canvasPanKey = false;
   let drag = null;
   let suppressAddClick = false;
@@ -97,6 +100,7 @@
   let toastTimer = null;
   let nextNodeId = 0;
   let flowUndoStack = [];
+  let flowRedoStack = [];
   let flowBaseline = "";
 
   function esc(value) {
@@ -158,6 +162,7 @@
 
   function resetFlowHistory() {
     flowUndoStack = [];
+    flowRedoStack = [];
     flowBaseline = serializedFlow();
   }
 
@@ -170,31 +175,51 @@
       (target.isContentEditable || Boolean(target.closest("input, textarea, select, [contenteditable='true']")));
   }
 
-  function pushFlowUndoSnapshot() {
-    if (!flow) return;
-    const snapshot = serializedFlow();
-    if (flowUndoStack.at(-1)?.flow === snapshot) return;
-    flowUndoStack.push({
-      flow: snapshot,
+  function captureFlowSnapshot() {
+    return {
+      flow: serializedFlow(),
       selectedId,
       insertTarget: { ...insertTarget },
       expanded: [...expanded]
-    });
+    };
+  }
+
+  function pushFlowUndoSnapshot() {
+    if (!flow) return;
+    flowRedoStack = [];
+    const snapshot = captureFlowSnapshot();
+    if (flowUndoStack.at(-1)?.flow === snapshot.flow) return;
+    flowUndoStack.push(snapshot);
     if (flowUndoStack.length > 100) flowUndoStack.shift();
   }
 
-  function undoFlowEdit() {
-    const snapshot = flowUndoStack.pop();
-    if (!snapshot) return false;
+  function restoreFlowSnapshot(snapshot) {
     flow = JSON.parse(snapshot.flow);
     selectedId = snapshot.selectedId;
-    insertTarget = snapshot.insertTarget;
+    insertTarget = { ...snapshot.insertTarget };
     expanded.clear();
     snapshot.expanded.forEach(id => expanded.add(id));
     pendingImageNode = null;
     setDirty(serializedFlow() !== flowBaseline);
     renderFlowEditor();
+  }
+
+  function undoFlowEdit() {
+    const snapshot = flowUndoStack.pop();
+    if (!snapshot) return false;
+    flowRedoStack.push(captureFlowSnapshot());
+    restoreFlowSnapshot(snapshot);
     toast("已撤销上一步");
+    return true;
+  }
+
+  function redoFlowEdit() {
+    const snapshot = flowRedoStack.pop();
+    if (!snapshot) return false;
+    flowUndoStack.push(captureFlowSnapshot());
+    if (flowUndoStack.length > 100) flowUndoStack.shift();
+    restoreFlowSnapshot(snapshot);
+    toast("已重做上一步");
     return true;
   }
 
@@ -249,6 +274,7 @@
   });
 
   function renderTaskList() {
+    dom.exportAll.disabled = exportingTasks || !tasks.length;
     descriptionObserver.disconnect();
     const query = dom.search.value.trim().toLowerCase();
     const filtered = tasks.filter(task =>
@@ -292,21 +318,64 @@
       <div class="group-detail-head"><div><p class="eyebrow">雕雕助手 / 编辑分组</p><h2>${esc(group.name)}</h2></div>
         <button class="secondary-button" id="refresh-groups">刷新</button></div>
       <nav class="tabs" aria-label="分组功能"><span class="tab active">组内任务</span><button class="tab" id="edit-group">分组设置</button><span class="tab-spacer"></span><span class="meta">${members.length} 个任务 · 自动保存</span></nav>
-      <div class="group-editor-body"><section class="group-order-pane" aria-label="组内执行顺序">
-      <p class="group-order-hint">拖入任务即可加入分组，拖动把手可调整执行顺序。</p>
+      <div class="group-editor-body"><section class="flow-canvas group-canvas" data-group-canvas="${esc(group.id)}" tabindex="0" aria-label="组内任务画布">
+      <div class="canvas-stage">
+      <div class="boundary"><span class="boundary-dot"></span><span>开始</span><span class="boundary-line"></span><span>从上到下执行</span></div>
       <div class="group-members" id="group-members">${members.length ? members.map((task, index) => `
         <div class="task-entry" data-task-entry="${esc(task.name)}">
           <button class="task-sort-handle" data-task-drag="${esc(task.name)}" title="拖动排序，也可用 ↑ / ↓ 移动" aria-label="调整 ${esc(task.name)} 的顺序"><span>${index + 1}</span><span aria-hidden="true">⠿</span></button>
           <div class="group-member-info"><p class="group-member-name">${esc(task.name)}</p>${task.description ? `<p class="group-member-desc">${esc(task.description)}</p>` : ""}</div>
           <button class="icon-button group-remove" data-remove-group-task="${esc(task.name)}" title="移出当前分组" aria-label="将 ${esc(task.name)} 移出当前分组">×</button>
-        </div>`).join("") : '<div class="group-empty"><div class="empty-symbol">＋</div><h2>拖拽任务到这里</h2><p>从任务列表拖入任务，或点击任务旁的＋加入当前分组。</p></div>'}</div></section>
+        </div>`).join("") : '<div class="group-empty"><div class="empty-symbol">＋</div><h2>拖拽任务到这里</h2><p>从任务列表拖入任务，或点击任务旁的＋加入当前分组。</p></div>'}</div>
+      <div class="boundary end"><span class="boundary-dot"></span><span>分组完成</span><span class="boundary-line"></span></div></div>
+      <div class="canvas-hint" aria-hidden="true">拖动空白平移 · Ctrl / ⌘ + 滚轮缩放</div>
+      <div class="canvas-controls" data-canvas-controls role="group" aria-label="分组画布操作">
+        <button data-canvas-action="out" title="缩小" aria-label="缩小">−</button><span class="canvas-zoom">100%</span>
+        <button data-canvas-action="in" title="放大" aria-label="放大">＋</button>
+        <button data-canvas-action="fit" title="适应画布">适应</button><button data-canvas-action="reset" title="回到分组起点并恢复 100%">起点</button>
+      </div></section>
         <aside class="group-task-library" aria-label="可添加的任务"><h3 class="panel-title">任务列表</h3><p class="panel-sub">拖入执行顺序或左侧分组。同一任务可加入多个分组。</p>
           <label class="search"><span>⌕</span><input id="group-task-search" type="search" placeholder="搜索任务" value="${esc(groupTaskQuery)}"></label>
           <div class="group-task-sources" id="group-task-sources"></div>
         </aside></div>`;
     dom.groupMembers = document.getElementById("group-members");
     dom.groupSources = document.getElementById("group-task-sources");
+    const canvas = dom.groupDetail.querySelector(".group-canvas");
+    bindCanvas(canvas);
+    applyCanvasView(canvas);
     renderGroupTaskSources();
+  }
+
+  async function exportAllTasks() {
+    if (exportingTasks || !tasks.length) return;
+    exportingTasks = true;
+    dom.exportAll.disabled = true;
+    dom.exportAll.textContent = "正在导出…";
+    try {
+      const response = await fetch("/api/task-bundle");
+      if (!response.ok) {
+        const result = await response.json();
+        throw new Error(result.error || "导出失败");
+      }
+      const blob = await response.blob();
+      const encoded = response.headers.get("Content-Disposition")?.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+      const filename = encoded ? decodeURIComponent(encoded) : "全部任务.zip";
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+      toast("已导出手机端保存的全部任务与分组");
+    } catch (error) {
+      toast(error.message || "导出失败", true);
+    } finally {
+      exportingTasks = false;
+      dom.exportAll.textContent = "全部导出";
+      dom.exportAll.disabled = !tasks.length;
+    }
   }
 
   function renderGroupTaskSources() {
@@ -440,14 +509,15 @@
           body: JSON.stringify({ name: group.name, taskNames })
         });
         groups = groups.map(item => item.id === result.group.id ? result.group : item);
-        const sameGroup = activeGroupId === group.id;
-        const scrollTop = sameGroup ? dom.groupMembers?.scrollTop || 0 : 0;
         const sourceScrollTop = dom.groupSources?.scrollTop || 0;
         activeGroupId = group.id;
         renderGroupsPage();
-        dom.groupMembers.scrollTop = scrollTop;
         dom.groupSources.scrollTop = sourceScrollTop;
-        if (focusName) [...dom.groupMembers.querySelectorAll("[data-task-drag]")].find(handle => handle.dataset.taskDrag === focusName)?.focus({ preventScroll: true });
+        if (focusName) {
+          const handle = [...dom.groupMembers.querySelectorAll("[data-task-drag]")].find(handle => handle.dataset.taskDrag === focusName);
+          handle?.focus({ preventScroll: true });
+          if (handle) revealCanvasElement(handle.closest(".group-canvas"), handle.closest(".task-entry"));
+        }
         toast(message);
       } catch (error) {
         await loadTasks();
@@ -797,7 +867,8 @@
           <div class="canvas-hint" aria-hidden="true">拖动空白平移 · Ctrl / ⌘ + 滚轮缩放</div>
           <div class="canvas-controls" data-canvas-controls role="group" aria-label="画布操作">
             <button class="canvas-mobile-add" data-open-library>＋ 模块</button>
-            <button data-canvas-action="undo" title="撤销上一步（Ctrl / ⌘ + Z）" aria-label="撤销上一步" ${flowUndoStack.length ? "" : "disabled"}>↶ 撤销</button>
+            <button data-canvas-action="undo" title="撤销上一步（Ctrl / ⌘ + Z）" aria-label="撤销上一步" ${flowUndoStack.length ? "" : "disabled"}>↶<span class="history-label"> 撤销</span></button>
+            <button data-canvas-action="redo" title="重做上一步（Ctrl + Y 或 Ctrl / ⌘ + Shift + Z）" aria-label="重做上一步" ${flowRedoStack.length ? "" : "disabled"}>↷<span class="history-label"> 重做</span></button>
             <button data-canvas-action="out" title="缩小" aria-label="缩小">−</button>
             <span class="canvas-zoom">100%</span>
             <button data-canvas-action="in" title="放大" aria-label="放大">＋</button>
@@ -816,8 +887,15 @@
   const minCanvasZoom = 0.08;
   const maxCanvasZoom = 2;
 
+  function viewForCanvas(canvas) {
+    const id = canvas.dataset.groupCanvas;
+    if (!id) return canvasView;
+    if (!groupCanvasViews.has(id)) groupCanvasViews.set(id, { x: 0, y: 32, zoom: 1 });
+    return groupCanvasViews.get(id);
+  }
+
   function applyCanvasView(canvas) {
-    const { x, y, zoom } = canvasView;
+    const { x, y, zoom } = viewForCanvas(canvas);
     canvas.style.setProperty("--canvas-x", `${x}px`);
     canvas.style.setProperty("--canvas-y", `${y}px`);
     canvas.style.setProperty("--canvas-zoom", zoom);
@@ -828,20 +906,25 @@
   }
 
   function moveCanvas(canvas, dx, dy, factor = 1, anchorX, anchorY) {
+    const view = viewForCanvas(canvas);
     const bounds = canvas.getBoundingClientRect();
     const pivotX = (anchorX ?? bounds.left + bounds.width / 2) - bounds.left - bounds.width / 2;
     const pivotY = (anchorY ?? bounds.top + bounds.height / 2) - bounds.top;
-    const zoom = Math.max(minCanvasZoom, Math.min(maxCanvasZoom, canvasView.zoom * factor));
-    const ratio = zoom / canvasView.zoom;
-    canvasView.x = pivotX - (pivotX - canvasView.x) * ratio + dx;
-    canvasView.y = pivotY - (pivotY - canvasView.y) * ratio + dy;
-    canvasView.zoom = zoom;
+    const zoom = Math.max(minCanvasZoom, Math.min(maxCanvasZoom, view.zoom * factor));
+    const ratio = zoom / view.zoom;
+    view.x = pivotX - (pivotX - view.x) * ratio + dx;
+    view.y = pivotY - (pivotY - view.y) * ratio + dy;
+    view.zoom = zoom;
     applyCanvasView(canvas);
   }
 
   function canvasAction(canvas, action) {
     if (action === "undo") {
       undoFlowEdit();
+      return;
+    }
+    if (action === "redo") {
+      redoFlowEdit();
       return;
     }
     if (action === "in" || action === "out") {
@@ -851,9 +934,9 @@
     if (action === "fit") {
       const stage = canvas.querySelector(".canvas-stage");
       const zoom = Math.min(1, (canvas.clientWidth - 24) / stage.offsetWidth, (canvas.clientHeight - 96) / stage.offsetHeight);
-      Object.assign(canvasView, { x: 0, y: 22, zoom: Math.max(minCanvasZoom, zoom) });
+      Object.assign(viewForCanvas(canvas), { x: 0, y: 22, zoom: Math.max(minCanvasZoom, zoom) });
     } else {
-      Object.assign(canvasView, { x: 0, y: 32, zoom: 1 });
+      Object.assign(viewForCanvas(canvas), { x: 0, y: 32, zoom: 1 });
     }
     applyCanvasView(canvas);
   }
@@ -861,6 +944,10 @@
   function revealCanvasNode(id) {
     const canvas = dom.content.querySelector(".flow-canvas");
     const row = canvas?.querySelector(`[data-node="${CSS.escape(id)}"] > .flow-row`);
+    revealCanvasElement(canvas, row);
+  }
+
+  function revealCanvasElement(canvas, row) {
     if (!row) return;
     const bounds = canvas.getBoundingClientRect();
     const node = row.getBoundingClientRect();
@@ -885,7 +972,10 @@
       } else {
         const sideways = event.shiftKey && !event.deltaX;
         moveCanvas(canvas, -(sideways ? event.deltaY : event.deltaX) * unit, sideways ? 0 : -event.deltaY * unit);
-        if (drag?.active && drag.point) updateModuleDrop(drag.point.x, drag.point.y);
+        if (drag?.active && drag.point) {
+          if (["task", "group-task"].includes(drag.kind)) updateTaskDrop(drag.point.x, drag.point.y);
+          else updateModuleDrop(drag.point.x, drag.point.y);
+        }
       }
     }, { passive: false });
 
@@ -894,7 +984,7 @@
       const touch = event.pointerType === "touch";
       const forced = !touch && (canvasPanKey || event.button === 1);
       if (event.button !== 0 && event.button !== 1) return;
-      if (!forced && event.target.closest(touch ? "[data-drag]" : "button,[data-drop],[data-drag]")) return;
+      if (!forced && event.target.closest(touch ? "[data-drag],[data-task-drag]" : "button,[data-drop],[data-drag],.task-entry")) return;
       if (pointers.size && (!touch || pointers.size >= 2)) return;
       if (!pointers.size) {
         moved = false;
@@ -965,7 +1055,7 @@
   }
 
   document.addEventListener("keydown", event => {
-    if (event.code !== "Space" || mode !== "flow" || busy || !dom.modal.hidden ||
+    if (event.code !== "Space" || (mode !== "flow" && dom.groupsPage.hidden) || busy || !dom.modal.hidden ||
         (event.target !== document.body && !event.target.matches?.(".flow-canvas"))) return;
     canvasPanKey = true;
     event.preventDefault();
@@ -976,10 +1066,13 @@
   window.addEventListener("blur", () => { canvasPanKey = false; });
 
   document.addEventListener("keydown", event => {
-    if ((event.ctrlKey || event.metaKey) && !event.shiftKey && event.key.toLowerCase() === "z" &&
-        mode === "flow" && flowUndoStack.length && !busy && dom.modal.hidden &&
-        !isTextEditingTarget(event.target)) {
-      if (undoFlowEdit()) event.preventDefault();
+    if (!dom.groupsPage.hidden) return;
+    if ((event.ctrlKey || event.metaKey) && !event.altKey && mode === "flow" &&
+        !busy && !drag && dom.modal.hidden && !isTextEditingTarget(event.target) &&
+        ["z", "y"].includes(event.key.toLowerCase())) {
+      event.preventDefault();
+      if (event.key.toLowerCase() === "y" || event.shiftKey) redoFlowEdit();
+      else undoFlowEdit();
       return;
     }
     if ((event.key !== "Delete" && event.key !== "Backspace") || mode !== "flow" ||
@@ -2305,6 +2398,7 @@
     }
 
     if (target.closest("#create-task") || target.closest("#empty-create")) return createTaskModal();
+    if (target.closest("#export-all-tasks")) return exportAllTasks();
     if (target.closest("#create-group,[data-create-group]")) return groupModal();
     if (target.closest("#edit-group,[data-manage-group]")) return groupModal(groups.find(group => group.id === activeGroupId));
     if (target.closest("#refresh-groups")) return perform(loadTasks);
@@ -2369,7 +2463,7 @@
     const canvasButton = target.closest("[data-canvas-action]");
     if (canvasButton) return canvasAction(canvasButton.closest(".flow-canvas"), canvasButton.dataset.canvasAction);
     if (target.closest("[data-open-library]")) return openLibrary(insertTarget);
-    if (target.matches(".flow-canvas") && selectedId) {
+    if (target.matches(".flow-canvas:not(.group-canvas)") && selectedId) {
       selectedId = null;
       renderFlowEditor();
       return;
@@ -2590,10 +2684,11 @@
       drag.target = { groupId: groupCard.dataset.groupId, name: null, after: true };
       return;
     }
-    if (!dom.groupMembers?.contains(hit)) return;
+    const canvas = dom.groupMembers?.closest(".group-canvas");
+    if (!canvas?.contains(hit) || hit.closest("[data-canvas-controls]")) return;
     const row = hit?.closest("[data-task-entry]");
     if (!row) {
-      dom.groupMembers.classList.add("drop-target");
+      canvas.classList.add("drop-target");
       const group = groups.find(item => item.id === activeGroupId);
       drag.target = { groupId: activeGroupId, name: group?.taskNames.at(-1) || null, after: true };
       return;
@@ -2609,7 +2704,23 @@
     if (!drag || !["task", "group-task"].includes(drag.kind)) return;
     drag.panFrame = null;
     const { x, y } = drag.point;
-    const container = [dom.groupMembers, dom.groupList].find(element => {
+    const canvas = dom.groupMembers?.closest(".group-canvas");
+    if (canvas) {
+      const bounds = canvas.getBoundingClientRect();
+      if (x >= bounds.left && x <= bounds.right && y >= bounds.top && y <= bounds.bottom) {
+        const edge = Math.min(48, bounds.width / 4, bounds.height / 4);
+        const speed = (start, end) => edge <= 0 ? 0 : Math.max(0, 1 - end / edge) * 10 - Math.max(0, 1 - start / edge) * 10;
+        const dx = speed(x - bounds.left, bounds.right - x);
+        const dy = speed(y - bounds.top, bounds.bottom - y);
+        if (dx || dy) {
+          moveCanvas(canvas, -dx, -dy);
+          updateTaskDrop(x, y);
+          drag.panFrame = requestAnimationFrame(scrollWhileTaskDragging);
+        }
+        return;
+      }
+    }
+    const container = [dom.groupList, dom.groupSources].find(element => {
       if (!element) return false;
       const bounds = element.getBoundingClientRect();
       return x >= bounds.left && x <= bounds.right && y >= bounds.top && y <= bounds.bottom;
@@ -2753,6 +2864,7 @@
   function clearGroupDropHighlights() {
     dom.groupMembers?.querySelectorAll(".drop-before,.drop-after").forEach(row => row.classList.remove("drop-before", "drop-after"));
     dom.groupMembers?.classList.remove("drop-target");
+    dom.groupDetail.querySelector(".group-canvas")?.classList.remove("drop-target");
     dom.groupList.querySelectorAll(".group-drop-target").forEach(row => row.classList.remove("group-drop-target"));
   }
 

@@ -2012,6 +2012,8 @@ class MainActivity : ComponentActivity() {
     ) {
         var name by rememberSaveable { mutableStateOf("") }
         var scaffold by rememberSaveable { mutableStateOf(TaskManager.Scaffold.BLANK) }
+        // APP 只创建脚本任务；兼容旧版保存过的 VISUAL 选中状态。
+        val selectedScaffold = scaffold.takeUnless { it == TaskManager.Scaffold.VISUAL } ?: TaskManager.Scaffold.BLANK
         val trimmed = name.trim()
         val nameError = when {
             trimmed.length > 50 -> "名称最多 50 个字符"
@@ -2039,17 +2041,17 @@ class MainActivity : ComponentActivity() {
                         style = MaterialTheme.typography.titleSmall,
                         modifier = Modifier.padding(top = 10.dp, bottom = 2.dp)
                     )
-                    TaskManager.Scaffold.entries.forEach { option ->
+                    TaskManager.Scaffold.entries.filterNot { it == TaskManager.Scaffold.VISUAL }.forEach { option ->
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(12.dp))
-                                .background(if (scaffold == option) MaterialTheme.colorScheme.primaryContainer else Color.Transparent)
+                                .background(if (selectedScaffold == option) MaterialTheme.colorScheme.primaryContainer else Color.Transparent)
                                 .clickable { scaffold = option }
                                 .padding(end = 12.dp, top = 6.dp, bottom = 6.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            RadioButton(selected = scaffold == option, onClick = { scaffold = option })
+                            RadioButton(selected = selectedScaffold == option, onClick = { scaffold = option })
                             Column(Modifier.weight(1f)) {
                                 Text(option.label, style = MaterialTheme.typography.titleSmall)
                                 Text(option.desc, style = MaterialTheme.typography.bodySmall,
@@ -2060,7 +2062,7 @@ class MainActivity : ComponentActivity() {
                 }
             },
             confirmButton = {
-                Button(onClick = { onConfirm(trimmed, scaffold) }, shape = MaterialTheme.shapes.small, enabled = trimmed.isNotBlank() && nameError == null) {
+                Button(onClick = { onConfirm(trimmed, selectedScaffold) }, shape = MaterialTheme.shapes.small, enabled = trimmed.isNotBlank() && nameError == null) {
                     Text("创建任务")
                 }
             },

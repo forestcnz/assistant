@@ -13,6 +13,7 @@ import com.forest.android.assistant.core.task.ImageHistory
 import com.forest.android.assistant.core.task.TaskLoop
 import com.forest.android.assistant.core.task.TaskManager
 import com.forest.android.assistant.core.task.TaskGroups
+import com.forest.android.assistant.core.task.TaskZip
 import fi.iki.elonen.NanoHTTPD
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -23,6 +24,7 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileInputStream
 import java.net.NetworkInterface
+import java.net.URLEncoder
 import java.util.Base64
 
 data class LanWebState(
@@ -112,6 +114,7 @@ private class EditorHttpServer(
         }
 
         return when {
+            segments == listOf("api", "task-bundle") -> exportTaskBundle(session)
             segments == listOf("api", "tasks") -> tasks(session)
             segments[1] == "task-groups" && segments.size <= 3 -> groupRoute(session, segments.getOrNull(2))
             segments[1] == "flow-templates" -> templateRoute(session, segments.getOrNull(2), segments.drop(3))
@@ -121,6 +124,22 @@ private class EditorHttpServer(
                 segments.drop(3)
             )
             else -> json(Response.Status.NOT_FOUND, JSONObject().put("error", "接口不存在"))
+        }
+    }
+
+    private fun exportTaskBundle(session: IHTTPSession): Response {
+        if (session.method != Method.GET) return methodNotAllowed()
+        // 与 APP 的“导出全部”共用打包逻辑；锁住任务目录及分组引用，避免重命名/删除混入备份。
+        val result = synchronized(TaskManager) {
+            if (TaskManager.listTasks(context).isEmpty()) {
+                return json(Response.Status.BAD_REQUEST, JSONObject().put("error", "暂无可导出的任务"))
+            }
+            TaskZip.exportAll(context)
+        } ?: return json(Response.Status.INTERNAL_ERROR, JSONObject().put("error", "导出全部任务失败，请重试"))
+        val filename = URLEncoder.encode(result.file.name, "UTF-8").replace("+", "%20")
+        return newFixedLengthResponse(Response.Status.OK, "application/zip", FileInputStream(result.file), result.sizeBytes).apply {
+            addHeader("Content-Disposition", "attachment; filename=\"tasks.zip\"; filename*=UTF-8''$filename")
+            addHeader("Cache-Control", "no-store")
         }
     }
 
