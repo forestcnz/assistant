@@ -19,13 +19,17 @@
           <small>局域网编辑器</small>
         </div>
       </div>
+      <nav class="workspace-nav" id="workspace-nav" aria-label="管理页面">
+        <a href="#tasks" data-page="tasks" aria-current="page">任务管理</a>
+        <a href="#groups" data-page="groups">分组管理</a>
+      </nav>
       <div class="server-state" id="server-state">
         <span class="state-dot"></span>
         <span>正在连接</span>
       </div>
     </header>
 
-    <main class="app-main">
+    <main class="app-main" id="tasks-page">
       <aside class="task-rail" id="task-rail">
         <div class="rail-head">
           <div>
@@ -78,6 +82,18 @@
           <div class="editor-content" id="editor-content"></div>
         </div>
       </section>
+    </main>
+
+    <main class="groups-page" id="groups-page" hidden>
+      <div class="group-workspace">
+        <aside class="groups-sidebar" aria-label="分组列表">
+          <div class="rail-head"><div><p class="eyebrow">GROUPS</p><h1>分组空间</h1></div>
+            <button class="icon-button" id="create-group" title="新建分组" aria-label="新建分组">＋</button></div>
+          <label class="search"><span>⌕</span><input id="group-search" type="search" placeholder="搜索分组"></label>
+          <div class="groups-list" id="groups-list"></div>
+        </aside>
+        <section class="group-detail" id="group-detail" aria-label="分组详情"></section>
+      </div>
     </main>
   </div>
 

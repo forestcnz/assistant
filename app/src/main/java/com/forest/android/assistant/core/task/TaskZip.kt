@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
 import android.util.Log
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.text.SimpleDateFormat
@@ -23,7 +24,7 @@ object TaskZip {
     private const val MAX_UNPACKED_BYTES = 2L * 1024 * 1024 * 1024
 
     data class Result(val file: File, val sizeBytes: Long)
-    data class ImportResult(val imported: List<String>, val skipped: List<String>)
+    data class ImportResult(val imported: List<String>, val skipped: List<String>, val importedGroups: List<String> = emptyList())
 
     fun exportDir(context: Context): File =
         File(context.getExternalFilesDir(null) ?: context.filesDir, "zip").apply { mkdirs() }
@@ -39,11 +40,18 @@ object TaskZip {
 
     /** 将全部任务写入同一个 ZIP，目录结构为 tasks/<任务名>/...。 */
     fun exportAll(context: Context): Result? {
-        val names = TaskManager.listTasks(context).map { it.name }
+        val (names, groups) = synchronized(TaskManager) {
+            TaskManager.listTasks(context).map { it.name } to TaskGroups.list(context)
+        }
         if (names.isEmpty()) return null
         val stamp = SimpleDateFormat("yyyyMMdd-HHmmss-SSS", Locale.US).format(Date())
         val out = File(exportDir(context), "全部任务-$stamp.zip")
         return writeZip(out) { zip ->
+            val manifest = JSONObject().put("format", BUNDLE_FORMAT).put("version", 1)
+                .put("tasks", JSONArray(names)).put("groups", JSONArray(groups.map(TaskGroups::toJson)))
+            zip.putNextEntry(ZipEntry(BUNDLE_ENTRY))
+            zip.write((manifest.toString(2) + "\n").toByteArray(Charsets.UTF_8))
+            zip.closeEntry()
             names.forEach { name ->
                 check(validName(name)) { "任务名不合法：$name" }
                 val dir = TaskManager.taskDir(context, name)
@@ -81,8 +89,9 @@ object TaskZip {
             check(temp.mkdirs()) { "无法创建导入临时目录" }
             extract(context, uri, temp)
             val bundle = File(temp, BUNDLE_ENTRY)
+            var archivedGroups = emptyList<TaskGroup>()
             val candidates = if (bundle.isFile) {
-                // 向后兼容上一版导出的合集包。
+                // groups 为可选字段，兼容旧合集包；先校验清单，再安装任务。
                 check(bundle.length() <= 1_000_000) { "任务合集清单过大" }
                 val json = JSONObject(bundle.readText())
                 check(json.optString("format") == BUNDLE_FORMAT && json.optInt("version") == 1) {
@@ -92,6 +101,7 @@ object TaskZip {
                 check(array.length() > 0) { "任务合集为空" }
                 val names = (0 until array.length()).map { array.getString(it) }
                 check(names.distinct().size == names.size && names.all(::validName)) { "任务合集包含非法或重复任务名" }
+                if (json.has("groups")) archivedGroups = TaskGroups.parseBackup(json.getJSONArray("groups"), names.toSet())
                 names.map { name -> name to File(temp, "tasks/$name") }
             } else if (!File(temp, "task.js").isFile && File(temp, "tasks").isDirectory) {
                 val tasksDir = File(temp, "tasks")
@@ -125,8 +135,18 @@ object TaskZip {
                     }
                 }
             }
-            Log.i(TAG, "导入任务 ${imported.size} 个，跳过 ${skipped.size} 个")
-            return ImportResult(imported, skipped)
+            val restoredGroups = if (archivedGroups.isNotEmpty()) {
+                try {
+                    val plan = TaskGroups.restore(context, archivedGroups)
+                    skipped.addAll(plan.skipped)
+                    plan.restored
+                } catch (error: Exception) {
+                    skipped += "分组恢复失败：${error.message}；任务导入结果已保留，可重新导入以恢复分组"
+                    emptyList()
+                }
+            } else emptyList()
+            Log.i(TAG, "导入任务 ${imported.size} 个，恢复分组 ${restoredGroups.size} 个，跳过 ${skipped.size} 项")
+            return ImportResult(imported, skipped, restoredGroups)
         } finally {
             temp.deleteRecursively()
         }

@@ -305,12 +305,16 @@ class MainActivity : ComponentActivity() {
                     tasks = TaskManager.listTasks(this@MainActivity)
                     taskMetadataVersion++
                     report.imported.forEach { ScriptRunner.appendLog("已导入任务: $it") }
+                    report.importedGroups.forEach { ScriptRunner.appendLog("已恢复分组: $it") }
                     report.skipped.forEach { ScriptRunner.appendLog("导入跳过: $it", 'W') }
                     val message = buildString {
                         append("成功导入 ${report.imported.size} 个任务")
                         if (report.imported.isNotEmpty()) append("：${report.imported.joinToString("、")}")
+                        if (report.importedGroups.isNotEmpty()) {
+                            append("\n\n恢复 ${report.importedGroups.size} 个分组：${report.importedGroups.joinToString("、")}")
+                        }
                         if (report.skipped.isNotEmpty()) {
-                            append("\n\n跳过 ${report.skipped.size} 个：\n")
+                            append("\n\n跳过或未恢复 ${report.skipped.size} 项：\n")
                             append(report.skipped.joinToString("\n"))
                         }
                     }
@@ -586,7 +590,7 @@ class MainActivity : ComponentActivity() {
                         showTransferDialog = false
                         importZipLauncher.launch(arrayOf("application/zip", "application/octet-stream", "*/*"))
                     }
-                    DesignRow("导出全部任务", "保存脚本、素材和配置", R.drawable.ic_export,
+                    DesignRow("导出全部任务", "保存脚本、素材、配置和分组顺序", R.drawable.ic_export,
                         enabled = tasks.isNotEmpty() && !taskTransferBusy) { showTransferDialog = false; exportAllTasks() }
                     Text("导入与保存位置由系统文件选择器提供。", style = MaterialTheme.typography.bodySmall)
                 }
@@ -1439,7 +1443,7 @@ class MainActivity : ComponentActivity() {
                             importZipLauncher.launch(arrayOf("application/zip", "application/octet-stream", "*/*"))
                         }
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                        DesignRow("导出全部", "备份任务、素材和配置", R.drawable.ic_export,
+                        DesignRow("导出全部", "备份任务、素材、配置和分组顺序", R.drawable.ic_export,
                             enabled = tasks.isNotEmpty() && !taskTransferBusy) { exportAllTasks() }
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                         DesignRow("清空全部任务", "删除所有任务及运行记录", R.drawable.ic_clear_tasks,

@@ -121,6 +121,9 @@ object ScriptRunner {
         FloatyManager.taskProvider = {
             appContext?.let { TaskManager.listTasks(it).map { t -> t.name } } ?: emptyList()
         }
+        FloatyManager.taskGroupProvider = {
+            appContext?.let { com.forest.android.assistant.core.task.TaskGroups.list(it) } ?: emptyList()
+        }
         // 手势降级到 Root input 兜底时写运行日志
         GestureClient.onFallback = { msg -> addLog('W', msg) }
         // 坐标拾取/取色结果 → 写运行日志（代码已复制到剪贴板）

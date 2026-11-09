@@ -2,6 +2,14 @@
   const dom = {
     taskList: document.getElementById("task-list"),
     search: document.getElementById("task-search"),
+    tasksPage: document.getElementById("tasks-page"),
+    groupsPage: document.getElementById("groups-page"),
+    workspaceNav: document.getElementById("workspace-nav"),
+    groupList: document.getElementById("groups-list"),
+    groupSearch: document.getElementById("group-search"),
+    groupDetail: document.getElementById("group-detail"),
+    groupMembers: null,
+    groupSources: null,
     taskRail: document.getElementById("task-rail"),
     empty: document.getElementById("empty-editor"),
     editor: document.getElementById("editor"),
@@ -46,6 +54,9 @@
   const categoryNames = { common: "常用动作", control: "流程控制", screen: "屏幕识别" };
 
   let tasks = [];
+  let groups = [];
+  let activeGroupId = "";
+  let groupTaskQuery = "";
   let current = null;
   let mode = "script";
   const dirtyModes = new Set();
@@ -92,7 +103,11 @@
     const text = await response.text();
     let data = null;
     try { data = text ? JSON.parse(text) : {}; } catch { data = { source: text }; }
-    if (!response.ok) throw new Error(data.error || `请求失败 (${response.status})`);
+    if (!response.ok) {
+      const error = new Error(data.error || `请求失败 (${response.status})`);
+      error.status = response.status;
+      throw error;
+    }
     return data;
   }
 
@@ -120,14 +135,14 @@
   async function perform(action) {
     if (busy) return;
     busy = true;
-    dom.editor.inert = dom.taskRail.inert = dom.empty.inert = dom.modal.inert = true;
+    dom.editor.inert = dom.taskRail.inert = dom.empty.inert = dom.modal.inert = dom.groupsPage.inert = dom.workspaceNav.inert = true;
     try {
       await action();
     } catch (error) {
       toast(error.message, true);
     } finally {
       busy = false;
-      dom.editor.inert = dom.taskRail.inert = dom.empty.inert = dom.modal.inert = false;
+      dom.editor.inert = dom.taskRail.inert = dom.empty.inert = dom.modal.inert = dom.groupsPage.inert = dom.workspaceNav.inert = false;
     }
   }
 
@@ -135,7 +150,10 @@
     try {
       const data = await api("/api/tasks");
       tasks = data.tasks || [];
+      groups = data.groups || [];
+      if (!groups.some(group => group.id === activeGroupId)) activeGroupId = groups[0]?.id || "";
       renderTaskList();
+      renderGroupsPage();
       dom.serverState.classList.add("online");
       dom.serverState.innerHTML = '<span class="state-dot"></span><span>局域网已连接</span>';
     } catch (error) {
@@ -160,7 +178,7 @@
       !query || task.name.toLowerCase().includes(query) || (task.description || "").toLowerCase().includes(query)
     );
     if (!filtered.length) {
-      dom.taskList.innerHTML = '<div class="inspector-empty">没有匹配的任务</div>';
+      dom.taskList.innerHTML = `<div class="inspector-empty">${query ? "没有匹配的任务" : "暂无任务"}</div>`;
       return;
     }
     dom.taskList.innerHTML = filtered.map(task => `
@@ -173,6 +191,182 @@
       </button>
     `).join("");
     dom.taskList.querySelectorAll(".task-desc").forEach(desc => descriptionObserver.observe(desc));
+  }
+
+  function renderGroupsPage() {
+    const group = groups.find(item => item.id === activeGroupId);
+    const query = dom.groupSearch.value.trim().toLowerCase();
+    const filtered = groups.filter(item => item.name.toLowerCase().includes(query));
+    dom.groupList.innerHTML = filtered.length ? filtered.map(item => `
+      <button class="group-item${item.id === activeGroupId ? " active" : ""}" data-group-id="${esc(item.id)}" ${item.id === activeGroupId ? 'aria-current="true"' : ""}>
+        <span class="group-item-name">${esc(item.name)}</span><span class="group-item-count">${item.taskNames.length} 个任务</span>
+      </button>`).join("") : `<p class="panel-sub">${query ? "没有匹配的分组" : "还没有分组"}</p>`;
+    dom.groupMembers = null;
+    dom.groupSources = null;
+    if (!group) {
+      dom.groupDetail.innerHTML = `<div class="group-empty"><div class="empty-symbol">☷</div>
+        <h2>创建第一个任务分组</h2><p>将需要一起执行的任务加入分组，设置顺序后即可在悬浮窗中选择执行。</p>
+        <button class="primary-button" data-create-group>新建分组</button></div>`;
+      return;
+    }
+    const taskByName = new Map(tasks.map(task => [task.name, task]));
+    const members = group.taskNames.map(name => taskByName.get(name)).filter(Boolean);
+    dom.groupDetail.innerHTML = `
+      <div class="group-detail-head"><div><p class="eyebrow">雕雕助手 / 编辑分组</p><h2>${esc(group.name)}</h2></div>
+        <button class="secondary-button" id="refresh-groups">刷新</button></div>
+      <nav class="tabs" aria-label="分组功能"><span class="tab active">组内任务</span><button class="tab" id="edit-group">分组设置</button><span class="tab-spacer"></span><span class="meta">${members.length} 个任务 · 自动保存</span></nav>
+      <div class="group-editor-body"><section class="group-order-pane" aria-label="组内执行顺序">
+      <p class="group-order-hint">拖入任务即可加入分组，拖动把手可调整执行顺序。</p>
+      <div class="group-members" id="group-members">${members.length ? members.map((task, index) => `
+        <div class="task-entry" data-task-entry="${esc(task.name)}">
+          <button class="task-sort-handle" data-task-drag="${esc(task.name)}" title="拖动排序，也可用 ↑ / ↓ 移动" aria-label="调整 ${esc(task.name)} 的顺序"><span>${index + 1}</span><span aria-hidden="true">⠿</span></button>
+          <div class="group-member-info"><p class="group-member-name">${esc(task.name)}</p>${task.description ? `<p class="group-member-desc">${esc(task.description)}</p>` : ""}</div>
+          <button class="icon-button group-remove" data-remove-group-task="${esc(task.name)}" title="移出当前分组" aria-label="将 ${esc(task.name)} 移出当前分组">×</button>
+        </div>`).join("") : '<div class="group-empty"><div class="empty-symbol">＋</div><h2>拖拽任务到这里</h2><p>从任务列表拖入任务，或点击任务旁的＋加入当前分组。</p></div>'}</div></section>
+        <aside class="group-task-library" aria-label="可添加的任务"><h3 class="panel-title">任务列表</h3><p class="panel-sub">拖入执行顺序或左侧分组。同一任务可加入多个分组。</p>
+          <label class="search"><span>⌕</span><input id="group-task-search" type="search" placeholder="搜索任务" value="${esc(groupTaskQuery)}"></label>
+          <div class="group-task-sources" id="group-task-sources"></div>
+        </aside></div>`;
+    dom.groupMembers = document.getElementById("group-members");
+    dom.groupSources = document.getElementById("group-task-sources");
+    renderGroupTaskSources();
+  }
+
+  function renderGroupTaskSources() {
+    if (!dom.groupSources) return;
+    const group = groups.find(item => item.id === activeGroupId);
+    const members = new Set(group?.taskNames || []);
+    const query = groupTaskQuery.trim().toLowerCase();
+    const filtered = tasks.filter(task => task.name.toLowerCase().includes(query) || (task.description || "").toLowerCase().includes(query));
+    dom.groupSources.innerHTML = filtered.length ? filtered.map(task => `
+      <div class="group-source-task" data-group-task-source="${esc(task.name)}">
+        <button class="task-sort-handle" data-group-task-drag="${esc(task.name)}" title="拖入分组" aria-label="将 ${esc(task.name)} 拖入分组">⠿</button>
+        <div class="group-member-info"><p class="group-member-name">${esc(task.name)}</p><p class="group-member-desc">${members.has(task.name) ? "已在当前分组" : task.type === "flow" ? "流程任务" : "脚本任务"}</p></div>
+        <button class="icon-button" data-add-group-task="${esc(task.name)}" ${members.has(task.name) ? "disabled" : ""} title="加入当前分组" aria-label="将 ${esc(task.name)} 加入当前分组">${members.has(task.name) ? "✓" : "＋"}</button>
+      </div>`).join("") : `<div class="inspector-empty">${query ? "没有匹配的任务" : "请先在任务管理中创建任务"}</div>`;
+  }
+
+  function showPage() {
+    const page = location.hash === "#groups" ? "groups" : "tasks";
+    dom.tasksPage.hidden = page !== "tasks";
+    dom.groupsPage.hidden = page !== "groups";
+    dom.workspaceNav.querySelectorAll("[data-page]").forEach(link => {
+      if (link.dataset.page === page) link.setAttribute("aria-current", "page");
+      else link.removeAttribute("aria-current");
+    });
+    dom.taskRail.classList.remove("open");
+    if (page === "groups") renderGroupsPage();
+  }
+
+  function groupModal(group = null) {
+    showModal(`
+      <div class="modal-head">
+        <div><h3>${group ? "分组设置" : "新建分组"}</h3><p>${group ? esc(group.name) : "创建后可在详情页拖拽添加任务"}</p></div>
+        <button class="modal-close" data-close-modal aria-label="关闭">×</button>
+      </div>
+      <form id="group-form">
+        <div class="modal-body settings-body">
+          <label class="field"><span>分组名称</span><input class="input" name="name" required maxlength="50" value="${esc(group?.name || "")}" placeholder="例如：每日任务"></label>
+        </div>
+        <div class="modal-actions settings-actions">
+          ${group ? '<button class="secondary-button danger" type="button" id="delete-group">删除分组</button>' : ""}
+          <button class="secondary-button" type="button" data-close-modal>取消</button><button class="primary-button" type="submit">${group ? "保存设置" : "创建"}</button>
+        </div>
+      </form>`);
+    const form = dom.modal.querySelector("form");
+    form.onsubmit = event => {
+      event.preventDefault();
+      const name = form.elements.namedItem("name").value.trim();
+      if (!name) return toast("请输入分组名称", true);
+      const taskNames = group?.taskNames || [];
+      perform(async () => {
+        try {
+          const result = await api(group ? `/api/task-groups/${encodeURIComponent(group.id)}` : "/api/task-groups", {
+            method: group ? "PUT" : "POST",
+            headers: group ? { "If-Match": String(group.revision) } : {},
+            body: JSON.stringify({ name, taskNames })
+          });
+          activeGroupId = result.group.id;
+          dom.groupSearch.value = "";
+          closeModal();
+          await loadTasks();
+          toast(group ? "分组设置已保存" : "分组已创建，可拖拽添加任务");
+        } catch (error) {
+          await loadTasks();
+          if (group && [404, 409].includes(error.status)) {
+            const latest = groups.find(item => item.id === group.id);
+            if (latest) groupModal(latest);
+            else closeModal();
+          }
+          throw error;
+        }
+      });
+    };
+    if (group) form.querySelector("#delete-group").onclick = () => {
+      if (!confirm(`删除分组「${group.name}」？组内任务会保留。`)) return;
+      perform(async () => {
+        try {
+          await api(`/api/task-groups/${encodeURIComponent(group.id)}`, { method: "DELETE", headers: { "If-Match": String(group.revision) } });
+          activeGroupId = "";
+          closeModal();
+          await loadTasks();
+          toast("分组已删除，任务已保留");
+        } catch (error) {
+          await loadTasks();
+          throw error;
+        }
+      });
+    };
+    form.elements.namedItem("name").focus();
+  }
+
+  async function moveGroupTask(groupId, name, targetName, after) {
+    const group = groups.find(item => item.id === groupId);
+    if (!group || name === targetName || !group.taskNames.includes(name) || !group.taskNames.includes(targetName)) return;
+    const taskNames = group.taskNames.filter(item => item !== name);
+    taskNames.splice(taskNames.indexOf(targetName) + (after ? 1 : 0), 0, name);
+    if (taskNames.every((item, index) => item === group.taskNames[index])) return;
+    await updateGroupMembers(group, taskNames, "分组顺序已保存", name);
+  }
+
+  async function addGroupTask(groupId, name, targetName = null, after = true) {
+    const group = groups.find(item => item.id === groupId);
+    if (!group || !tasks.some(task => task.name === name)) return;
+    if (group.taskNames.includes(name)) return toast("该任务已在此分组中");
+    const taskNames = [...group.taskNames];
+    const index = targetName == null ? -1 : taskNames.indexOf(targetName);
+    taskNames.splice(index < 0 ? taskNames.length : index + (after ? 1 : 0), 0, name);
+    await updateGroupMembers(group, taskNames, "任务已加入分组", name);
+  }
+
+  async function removeGroupTask(name) {
+    const group = groups.find(item => item.id === activeGroupId);
+    if (!group || !group.taskNames.includes(name)) return;
+    await updateGroupMembers(group, group.taskNames.filter(item => item !== name), "已移出当前分组");
+  }
+
+  async function updateGroupMembers(group, taskNames, message, focusName = null) {
+    await perform(async () => {
+      try {
+        const result = await api(`/api/task-groups/${encodeURIComponent(group.id)}`, {
+          method: "PUT", headers: { "If-Match": String(group.revision) },
+          body: JSON.stringify({ name: group.name, taskNames })
+        });
+        groups = groups.map(item => item.id === result.group.id ? result.group : item);
+        const sameGroup = activeGroupId === group.id;
+        const scrollTop = sameGroup ? dom.groupMembers?.scrollTop || 0 : 0;
+        const sourceScrollTop = dom.groupSources?.scrollTop || 0;
+        activeGroupId = group.id;
+        renderGroupsPage();
+        dom.groupMembers.scrollTop = scrollTop;
+        dom.groupSources.scrollTop = sourceScrollTop;
+        if (focusName) [...dom.groupMembers.querySelectorAll("[data-task-drag]")].find(handle => handle.dataset.taskDrag === focusName)?.focus({ preventScroll: true });
+        toast(message);
+      } catch (error) {
+        await loadTasks();
+        throw error;
+      }
+    });
   }
 
   async function openTask(name) {
@@ -1551,8 +1745,25 @@
   }
 
   document.addEventListener("click", event => {
+    const pageLink = event.target.closest("[data-page]");
+    if (pageLink) {
+      event.preventDefault();
+      if (!busy && !drag) location.hash = pageLink.dataset.page;
+      return;
+    }
     if (busy) return;
     const target = event.target;
+    const groupButton = target.closest("[data-group-id]");
+    if (groupButton) {
+      if (drag) return;
+      activeGroupId = groupButton.dataset.groupId;
+      renderGroupsPage();
+      return;
+    }
+    const addToGroup = target.closest("[data-add-group-task]");
+    if (addToGroup) return addGroupTask(activeGroupId, addToGroup.dataset.addGroupTask);
+    const removeFromGroup = target.closest("[data-remove-group-task]");
+    if (removeFromGroup) return removeGroupTask(removeFromGroup.dataset.removeGroupTask);
     const taskButton = target.closest("[data-task]");
     if (taskButton) return openTask(taskButton.dataset.task);
 
@@ -1574,6 +1785,9 @@
     }
 
     if (target.closest("#create-task") || target.closest("#empty-create")) return createTaskModal();
+    if (target.closest("#create-group,[data-create-group]")) return groupModal();
+    if (target.closest("#edit-group,[data-manage-group]")) return groupModal(groups.find(group => group.id === activeGroupId));
+    if (target.closest("#refresh-groups")) return perform(loadTasks);
     if (target.closest("#open-tasks") || target.closest("#empty-tasks")) {
       dom.taskRail.classList.toggle("open");
       return;
@@ -1705,6 +1919,11 @@
 
   document.addEventListener("input", event => {
     if (event.target === dom.search) renderTaskList();
+    if (event.target === dom.groupSearch) renderGroupsPage();
+    if (event.target.id === "group-task-search") {
+      groupTaskQuery = event.target.value;
+      renderGroupTaskSources();
+    }
   });
 
   document.addEventListener("change", event => {
@@ -1727,6 +1946,24 @@
 
   document.addEventListener("pointerdown", event => {
     if (busy || drag || !event.isPrimary || event.button !== 0) return;
+    const sourceHandle = event.target.closest("[data-group-task-drag]");
+    const sourceCard = event.target.closest("[data-group-task-source]");
+    if (sourceHandle || (sourceCard && event.pointerType === "mouse" && !event.target.closest("button"))) {
+      const handle = sourceHandle || sourceCard;
+      event.preventDefault();
+      drag = { kind: "group-task", name: sourceHandle?.dataset.groupTaskDrag || sourceCard.dataset.groupTaskSource,
+        pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, active: false, target: null };
+      handle.setPointerCapture?.(event.pointerId);
+      return;
+    }
+    const taskHandle = event.target.closest("[data-task-drag]");
+    if (taskHandle) {
+      event.preventDefault();
+      drag = { kind: "task", groupId: activeGroupId, name: taskHandle.dataset.taskDrag,
+        pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, active: false, target: null };
+      taskHandle.setPointerCapture?.(event.pointerId);
+      return;
+    }
     const handle = event.target.closest("[data-drag]");
     if (handle) {
       event.preventDefault();
@@ -1735,14 +1972,13 @@
       drag = {
         kind: "node",
         id: handle.dataset.drag,
+        label: nodeTitle(found.node),
         pointerId: event.pointerId,
         startX: event.clientX,
         startY: event.clientY,
         target: null,
-        active: true
+        active: false
       };
-      createDragGhost(nodeTitle(found.node), event);
-      document.body.classList.add("dragging-module");
       handle.setPointerCapture?.(event.pointerId);
       return;
     }
@@ -1758,12 +1994,10 @@
       startX: event.clientX,
       startY: event.clientY,
       target: null,
-      active: Boolean(libraryHandle)
+      active: false
     };
     (libraryHandle || libraryCard).setPointerCapture?.(event.pointerId);
     if (libraryHandle) {
-      createDragGhost(catalogFlat[drag.defIndex]?.[1] || "添加模块", event);
-      document.body.classList.add("dragging-module");
       event.preventDefault();
     }
   });
@@ -1773,15 +2007,82 @@
     if (!drag.active) {
       if (Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 6) return;
       drag.active = true;
-      createDragGhost(catalogFlat[drag.defIndex]?.[1] || "添加模块", event);
+      const label = drag.kind === "node" ? drag.label
+        : ["task", "group-task"].includes(drag.kind) ? drag.name
+        : catalogFlat[drag.defIndex]?.[1] || "添加模块";
+      createDragGhost(label, event);
       document.body.classList.add("dragging-module");
     }
     event.preventDefault();
     drag.ghost.style.left = `${event.clientX + 12}px`;
     drag.ghost.style.top = `${event.clientY - 34}px`;
     drag.point = { x: event.clientX, y: event.clientY };
+    if (["task", "group-task"].includes(drag.kind)) {
+      updateTaskDrop(event.clientX, event.clientY);
+      if (!drag.panFrame) drag.panFrame = requestAnimationFrame(scrollWhileTaskDragging);
+      return;
+    }
     updateModuleDrop(event.clientX, event.clientY);
     if (!drag.panFrame) drag.panFrame = requestAnimationFrame(panWhileDragging);
+  });
+
+  function updateTaskDrop(x, y) {
+    clearGroupDropHighlights();
+    drag.target = null;
+    const hit = document.elementFromPoint(x, y);
+    const groupCard = hit?.closest("[data-group-id]");
+    if (groupCard && dom.groupList.contains(groupCard)) {
+      groupCard.classList.add("group-drop-target");
+      drag.target = { groupId: groupCard.dataset.groupId, name: null, after: true };
+      return;
+    }
+    if (!dom.groupMembers?.contains(hit)) return;
+    const row = hit?.closest("[data-task-entry]");
+    if (!row) {
+      dom.groupMembers.classList.add("drop-target");
+      const group = groups.find(item => item.id === activeGroupId);
+      drag.target = { groupId: activeGroupId, name: group?.taskNames.at(-1) || null, after: true };
+      return;
+    }
+    if (drag.kind === "task" && row.dataset.taskEntry === drag.name) return;
+    const bounds = row.getBoundingClientRect();
+    const after = y >= (bounds.top + bounds.bottom) / 2;
+    row.classList.add(after ? "drop-after" : "drop-before");
+    drag.target = { groupId: activeGroupId, name: row.dataset.taskEntry, after };
+  }
+
+  function scrollWhileTaskDragging() {
+    if (!drag || !["task", "group-task"].includes(drag.kind)) return;
+    drag.panFrame = null;
+    const { x, y } = drag.point;
+    const container = [dom.groupMembers, dom.groupList].find(element => {
+      if (!element) return false;
+      const bounds = element.getBoundingClientRect();
+      return x >= bounds.left && x <= bounds.right && y >= bounds.top && y <= bounds.bottom;
+    });
+    if (!container) return;
+    const bounds = container.getBoundingClientRect();
+    const edgeX = Math.min(40, bounds.width / 3);
+    const edgeY = Math.min(40, bounds.height / 3);
+    const speed = (start, end, edge) => edge <= 0 ? 0 : Math.max(0, 1 - end / edge) * 10 - Math.max(0, 1 - start / edge) * 10;
+    const dx = container.scrollWidth > container.clientWidth ? speed(x - bounds.left, bounds.right - x, edgeX) : 0;
+    const dy = container.scrollHeight > container.clientHeight ? speed(y - bounds.top, bounds.bottom - y, edgeY) : 0;
+    if (!dx && !dy) return;
+    container.scrollLeft += dx;
+    container.scrollTop += dy;
+    updateTaskDrop(x, y);
+    drag.panFrame = requestAnimationFrame(scrollWhileTaskDragging);
+  }
+
+  document.addEventListener("keydown", event => {
+    const handle = event.target.closest("[data-task-drag]");
+    if (!handle || busy || drag || !["ArrowUp", "ArrowDown"].includes(event.key)) return;
+    event.preventDefault();
+    const group = groups.find(item => item.id === activeGroupId);
+    if (!group) return;
+    const index = group.taskNames.indexOf(handle.dataset.taskDrag);
+    const targetName = group.taskNames[index + (event.key === "ArrowDown" ? 1 : -1)];
+    if (targetName) moveGroupTask(group.id, handle.dataset.taskDrag, targetName, event.key === "ArrowDown");
   });
 
   function updateModuleDrop(x, y) {
@@ -1853,6 +2154,15 @@
     document.body.classList.remove("dragging-module");
     clearDropHighlights();
     if (!state.active) return;
+    if (["task", "group-task"].includes(state.kind)) {
+      if (state.target) {
+        const target = state.target;
+        if (state.kind === "task" && state.groupId === target.groupId) {
+          if (target.name) moveGroupTask(state.groupId, state.name, target.name, target.after);
+        } else addGroupTask(target.groupId, state.name, target.name, target.after);
+      }
+      return;
+    }
     if (state.kind === "library") {
       suppressAddClick = true;
       setTimeout(() => { suppressAddClick = false; }, 0);
@@ -1884,7 +2194,14 @@
     clearDropHighlights();
   });
 
+  function clearGroupDropHighlights() {
+    dom.groupMembers?.querySelectorAll(".drop-before,.drop-after").forEach(row => row.classList.remove("drop-before", "drop-after"));
+    dom.groupMembers?.classList.remove("drop-target");
+    dom.groupList.querySelectorAll(".group-drop-target").forEach(row => row.classList.remove("group-drop-target"));
+  }
+
   function clearDropHighlights() {
+    clearGroupDropHighlights();
     document.querySelectorAll(".drop-zone.drag-over, .inline-add.drag-over, .empty-flow.drag-over, .flow-node.drag-over, .flow-list.drag-over")
       .forEach(element => element.classList.remove("drag-over"));
   }
@@ -1905,5 +2222,10 @@
     event.returnValue = "";
   });
 
+  window.addEventListener("hashchange", () => {
+    showPage();
+    if (location.hash === "#groups" && !busy) perform(loadTasks);
+  });
+  showPage();
   loadTasks();
 })();

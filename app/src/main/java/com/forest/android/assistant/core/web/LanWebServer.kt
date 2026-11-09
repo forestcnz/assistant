@@ -10,6 +10,7 @@ import com.forest.android.assistant.core.image.CropRegion
 import com.forest.android.assistant.core.task.ImageHistory
 import com.forest.android.assistant.core.task.TaskLoop
 import com.forest.android.assistant.core.task.TaskManager
+import com.forest.android.assistant.core.task.TaskGroups
 import fi.iki.elonen.NanoHTTPD
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -110,6 +111,7 @@ private class EditorHttpServer(
 
         return when {
             segments == listOf("api", "tasks") -> tasks(session)
+            segments[1] == "task-groups" && segments.size <= 3 -> groupRoute(session, segments.getOrNull(2))
             segments.size >= 3 && segments[1] == "tasks" -> taskRoute(
                 session,
                 segments[2],
@@ -137,7 +139,8 @@ private class EditorHttpServer(
                         .put("imageCount", TaskManager.listImages(context, task.name).size)
                 )
             }
-            json(Response.Status.OK, JSONObject().put("tasks", items))
+            json(Response.Status.OK, JSONObject().put("tasks", items)
+                .put("groups", JSONArray(TaskGroups.list(context).map(TaskGroups::toJson))))
         }
         Method.POST -> {
             requireIdle()
@@ -150,6 +153,44 @@ private class EditorHttpServer(
             json(Response.Status.CREATED, JSONObject().put("name", task.name).put("type", type))
         }
         else -> methodNotAllowed()
+    }
+
+    private fun groupRoute(session: IHTTPSession, id: String?): Response = try {
+        when {
+            id == null && session.method == Method.GET -> json(Response.Status.OK,
+                JSONObject().put("groups", JSONArray(TaskGroups.list(context).map(TaskGroups::toJson))))
+            id == null && session.method == Method.POST -> {
+                val request = jsonBody(session)
+                val members = request.getJSONArray("taskNames")
+                val group = TaskGroups.create(context, request.getString("name"),
+                    (0 until members.length()).map(members::getString))
+                json(Response.Status.CREATED, JSONObject().put("group", TaskGroups.toJson(group)))
+            }
+            id != null && session.method == Method.PUT -> {
+                val revision = session.headers["if-match"]?.toLongOrNull()
+                require(revision != null) { "缺少分组版本，请刷新后重试" }
+                val request = jsonBody(session)
+                val members = request.getJSONArray("taskNames")
+                val group = TaskGroups.update(context, id, revision, request.getString("name"),
+                    (0 until members.length()).map(members::getString))
+                json(Response.Status.OK, JSONObject().put("group", TaskGroups.toJson(group)))
+            }
+            id != null && session.method == Method.DELETE -> {
+                val revision = session.headers["if-match"]?.toLongOrNull()
+                require(revision != null) { "缺少分组版本，请刷新后重试" }
+                TaskGroups.delete(context, id, revision)
+                json(Response.Status.OK, JSONObject().put("ok", true))
+            }
+            else -> methodNotAllowed()
+        }
+    } catch (error: ConcurrentModificationException) {
+        json(Response.Status.CONFLICT, JSONObject().put("error", error.message))
+    } catch (error: NoSuchElementException) {
+        json(Response.Status.NOT_FOUND, JSONObject().put("error", error.message))
+    } catch (error: IllegalArgumentException) {
+        json(Response.Status.BAD_REQUEST, JSONObject().put("error", error.message))
+    } catch (error: org.json.JSONException) {
+        json(Response.Status.BAD_REQUEST, JSONObject().put("error", "分组数据不合法"))
     }
 
     @Synchronized
