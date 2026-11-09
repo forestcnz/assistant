@@ -390,6 +390,19 @@ body.dragging-module .drop-zone::after { color: var(--orange); }
 .inspector-actions button { min-height: 34px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); font-size: 12px; }
 .danger { color: var(--red) !important; }
 .switch-line { display: flex; align-items: center; justify-content: space-between; margin-top: 12px; font-size: 12px; }
+.step-enabled-row { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
+.step-enabled-row .switch-line { flex: 1; margin-top: 0; gap: 12px; }
+.batch-enabled-button { padding: 4px 0; border: 0; background: transparent; color: var(--orange-dark); font-size: 12px; }
+.batch-enabled-empty { margin-top: 14px; }
+.batch-enable-toolbar { display: flex; gap: 8px; margin-bottom: 12px; }
+.enabled-steps-list { max-height: min(50dvh, 420px); overflow: auto; border: 1px solid var(--line); border-radius: 10px; }
+.enabled-step-row { display: flex; align-items: center; gap: 10px; min-height: 54px; padding: 9px 12px; cursor: pointer; }
+.enabled-step-row + .enabled-step-row { border-top: 1px solid var(--line); }
+.enabled-step-row:hover { background: var(--soft); }
+.enabled-step-row input { flex: 0 0 auto; width: 16px; height: 16px; margin: 0; accent-color: var(--orange); }
+.enabled-step-row > span { min-width: 0; overflow-wrap: anywhere; }
+.enabled-step-row strong { font-size: 13px; font-weight: 500; }
+.enabled-step-row small { display: block; margin-top: 3px; color: var(--muted); font-size: 12px; }
 
 .modal-layer {
   position: fixed; inset: 0; z-index: 50;

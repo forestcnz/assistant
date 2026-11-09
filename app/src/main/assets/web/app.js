@@ -925,6 +925,7 @@
     const found = selectedId ? findNode(selectedId) : null;
     if (!found) {
       return `<h3 class="panel-title">步骤参数</h3><p class="panel-sub">选择流程中的步骤或容器进行配置。</p>
+        <button class="secondary-button batch-enabled-empty" data-batch-enable ${flow?.nodes?.length ? "" : "disabled"}>批量设置启用状态</button>
         <div class="inspector-empty">找图与找字默认仅识别，可单独选择“点击命中位置”。</div>`;
     }
     const node = found.node;
@@ -983,7 +984,10 @@
       <h3 class="panel-title">步骤参数</h3>
       <p class="panel-sub">${esc(nodeTitle(node))} · ${esc(node.type)}</p>
       <label class="field"><span>步骤名称</span><input class="input" data-title value="${esc(node.title)}"></label>
-      <label class="switch-line"><span>启用此步骤</span><input type="checkbox" data-enabled ${node.enabled === false ? "" : "checked"}></label>
+      <div class="step-enabled-row">
+        <label class="switch-line"><span>启用此步骤</span><input type="checkbox" data-enabled ${node.enabled === false ? "" : "checked"}></label>
+        <button class="batch-enabled-button" data-batch-enable>批量设置</button>
+      </div>
       ${fields}
       <div class="inspector-actions">
         <button data-move="-1" ${found.index <= 0 ? "disabled" : ""}>上移</button>
@@ -992,6 +996,49 @@
         <button class="danger" data-delete>删除</button>
         <button class="save-template-action" data-save-selection-template>保存为模板</button>
       </div>`;
+  }
+
+  function batchEnableModal() {
+    const steps = [];
+    function visit(nodes, prefix = "", depth = 0) {
+      nodes.forEach((node, index) => {
+        const number = prefix ? `${prefix}.${index + 1}` : `${index + 1}`;
+        steps.push({ node, number, depth });
+        for (const slot of ["children", "then", "else"]) {
+          const branch = slot === "then" ? "（条件成立）" : slot === "else" ? "（否则）" : "";
+          visit(node[slot] || [], number + branch, depth + 1);
+        }
+      });
+    }
+    visit(flow?.nodes || []);
+    if (!steps.length) return;
+    showModal(`<div class="modal-head"><div><h3>批量设置启用状态</h3><p>勾选启用，取消勾选停用；点击应用后生效。</p></div><button class="modal-close" data-close-modal aria-label="关闭">×</button></div>
+      <form id="batch-enable-form"><div class="modal-body settings-body">
+        <div class="batch-enable-toolbar"><button type="button" class="secondary-button" data-enable-all="true">全部启用</button><button type="button" class="secondary-button" data-enable-all="false">全部停用</button></div>
+        <div class="enabled-steps-list">${steps.map(({ node, number, depth }) => `
+          <label class="enabled-step-row" style="padding-inline-start:${12 + Math.min(depth, 6) * 16}px">
+            <input type="checkbox" data-enable-id="${esc(node.id)}" aria-label="启用：${esc(nodeTitle(node))}" ${node.enabled === false ? "" : "checked"}>
+            <span><strong>${esc(number)} ${esc(nodeTitle(node))}</strong><small>${esc(nodeSummary(node))}</small></span>
+          </label>`).join("")}</div>
+      </div><div class="modal-actions"><button type="button" class="secondary-button" data-close-modal>取消</button><button type="submit" class="primary-button">应用</button></div></form>`);
+    const form = dom.modal.querySelector("#batch-enable-form");
+    form.querySelectorAll("[data-enable-all]").forEach(button => button.onclick = () => {
+      form.querySelectorAll("[data-enable-id]").forEach(input => input.checked = button.dataset.enableAll === "true");
+    });
+    form.onsubmit = event => {
+      event.preventDefault();
+      let changed = false;
+      form.querySelectorAll("[data-enable-id]").forEach(input => {
+        const found = findNode(input.dataset.enableId);
+        if (found && (found.node.enabled !== false) !== input.checked) {
+          found.node.enabled = input.checked;
+          changed = true;
+        }
+      });
+      closeModal();
+      if (changed) setDirty(true);
+      renderFlowEditor();
+    };
   }
 
   function textField(label, key, value) {
@@ -1196,6 +1243,7 @@
       const name = form.elements.namedItem("name").value.trim();
       if (!name) return toast("请输入模板名称", true);
       const description = form.elements.namedItem("description")?.value.trim() || "";
+      if (!entry && !snapshot.length && current?.templateId && !confirmDiscard()) return;
       perform(async () => {
         const result = await api(entry ? `/api/flow-templates/${encodeURIComponent(entry.id)}` : "/api/flow-templates", {
           method: entry ? "PUT" : "POST", headers: entry ? { "If-Match": String(entry.revision) } : {},
@@ -1211,8 +1259,11 @@
         if (entry && current?.templateId === entry.id) {
           Object.assign(current, { name, description, revision: result.template.revision });
           renderEditor();
+        } else if (!entry && !snapshot.length) {
+          dom.templateSearch.value = "";
+          await activateTemplateEditor(result.template.id);
         } else refreshLibraryView();
-        toast(entry ? "模板设置已保存" : snapshot.length ? "模板已保存" : "模板已创建，点击编辑开始编排");
+        toast(entry ? "模板设置已保存" : snapshot.length ? "模板已保存" : "模板已创建，可直接编辑");
       });
     };
     if (entry) form.querySelector("#delete-template").onclick = () => {
@@ -2178,6 +2229,7 @@
     if (uploadImage) return chooseImage(selectedId, uploadImage.dataset.pickImage);
     const removeImage = target.closest("[data-remove-image]");
     if (removeImage) return updateNodeProperty(removeImage.dataset.removeImage, "");
+    if (target.closest("[data-batch-enable]")) return batchEnableModal();
     if (target.closest("[data-duplicate]")) return duplicateNode(selectedId);
     if (target.closest("[data-delete]")) {
       const found = findNode(selectedId);
