@@ -117,6 +117,12 @@ data class FlowNode(
             "text" -> "查找「${props.optString("text", "未填写")}」 · ${
                 if (props.optString("onMatch", "recognize") == "click") "命中后点击" else "仅识别"
             }"
+            "waitCondition" -> "${conditionLabel()} · 超时 ${props.optInt("timeout", 10000)} ms"
+            "waitImageAppear" -> "${props.optString("asset", "未选择素材")} · 出现后继续"
+            "waitImageGone" -> "${props.optString("asset", "未选择素材")} · 消失后继续"
+            "multiImage" -> "${props.optJSONArray("images")?.length() ?: 0} 张图片 · ${
+                if (props.optString("matchMode", "any") == "all") "全部存在" else "任一命中"
+            }"
             "log" -> props.optString("text", "记录日志")
             "stop" -> "停止当前任务与剩余队列"
             "continue" -> "跳过本轮余下步骤"

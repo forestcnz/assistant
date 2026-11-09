@@ -56,7 +56,11 @@
     ],
     screen: [
       ["image", "找图", "匹配图片，返回位置"],
-      ["text", "找字", "匹配文字，返回位置"]
+      ["text", "找字", "匹配文字，返回位置"],
+      ["waitCondition", "等待条件成立", "条件满足后继续"],
+      ["waitImageAppear", "等待图片出现", "图片出现后继续"],
+      ["waitImageGone", "等待图片消失", "图片消失后继续"],
+      ["multiImage", "多图匹配", "任一或全部命中"]
     ]
   };
   const catalogFlat = Object.values(catalog).flat();
@@ -92,6 +96,8 @@
   let pendingImageNode = null;
   let toastTimer = null;
   let nextNodeId = 0;
+  let flowUndoStack = [];
+  let flowBaseline = "";
 
   function esc(value) {
     return String(value ?? "").replace(/[&<>"']/g, c => ({
@@ -144,6 +150,52 @@
     dom.saveState.textContent = dirty ? "有未保存修改" : "已保存";
     dom.saveState.style.color = dirty ? "var(--orange-dark)" : "var(--muted)";
     dom.saveButton.disabled = !dirtyModes.has(mode);
+  }
+
+  function serializedFlow() {
+    return flow ? JSON.stringify(flow) : "";
+  }
+
+  function resetFlowHistory() {
+    flowUndoStack = [];
+    flowBaseline = serializedFlow();
+  }
+
+  function markFlowSaved() {
+    flowBaseline = serializedFlow();
+  }
+
+  function isTextEditingTarget(target) {
+    return target instanceof HTMLElement &&
+      (target.isContentEditable || Boolean(target.closest("input, textarea, select, [contenteditable='true']")));
+  }
+
+  function pushFlowUndoSnapshot() {
+    if (!flow) return;
+    const snapshot = serializedFlow();
+    if (flowUndoStack.at(-1)?.flow === snapshot) return;
+    flowUndoStack.push({
+      flow: snapshot,
+      selectedId,
+      insertTarget: { ...insertTarget },
+      expanded: [...expanded]
+    });
+    if (flowUndoStack.length > 100) flowUndoStack.shift();
+  }
+
+  function undoFlowEdit() {
+    const snapshot = flowUndoStack.pop();
+    if (!snapshot) return false;
+    flow = JSON.parse(snapshot.flow);
+    selectedId = snapshot.selectedId;
+    insertTarget = snapshot.insertTarget;
+    expanded.clear();
+    snapshot.expanded.forEach(id => expanded.add(id));
+    pendingImageNode = null;
+    setDirty(serializedFlow() !== flowBaseline);
+    renderFlowEditor();
+    toast("已撤销上一步");
+    return true;
   }
 
   function confirmDiscard() {
@@ -418,6 +470,7 @@
       current = data;
       mode = data.type === "flow" ? "flow" : "script";
       flow = nextFlow;
+      resetFlowHistory();
       assets = null;
       assetsError = "";
       assetView = "current";
@@ -528,6 +581,25 @@
         onMatch: "recognize", onMiss: "continue", region: ""
       });
     }
+    if (type === "waitCondition") {
+      Object.assign(node.props, {
+        conditionKind: "image", conditionValue: "", combine: "single",
+        timeout: 10000, poll: 300, onTimeout: "stop"
+      });
+    }
+    if (type === "waitImageAppear" || type === "waitImageGone") {
+      Object.assign(node.props, {
+        asset: "", threshold: 0.9, timeout: 10000, poll: 300,
+        region: "", onTimeout: "stop"
+      });
+    }
+    if (type === "multiImage") {
+      Object.assign(node.props, {
+        images: [{ asset: "", threshold: 0.9 }], matchMode: "any",
+        timeout: 5000, poll: 300, region: "",
+        onMatch: "recognize", onMiss: "continue", failure: "stop"
+      });
+    }
     return node;
   }
 
@@ -556,6 +628,10 @@
       case "condition": return `${p.conditionKind === "text" ? "文字存在" : "图片存在"} · ${p.conditionValue || "未设置"}`;
       case "image": return `${p.asset || "未选择素材"} · ${p.onMatch === "click" ? "命中后点击" : "仅识别"}`;
       case "text": return `查找「${p.text || "未填写"}」 · ${p.onMatch === "click" ? "命中后点击" : "仅识别"}`;
+      case "waitCondition": return `${p.conditionKind === "text" ? "文字条件" : "图片条件"} · 超时 ${p.timeout || 10000} ms`;
+      case "waitImageAppear": return `${p.asset || "未选择素材"} · 出现后继续`;
+      case "waitImageGone": return `${p.asset || "未选择素材"} · 消失后继续`;
+      case "multiImage": return `${(p.images || []).length} 张图片 · ${p.matchMode === "all" ? "全部存在" : "任一命中"}`;
       case "log": return p.text || "记录日志";
       case "stop": return "停止当前任务与剩余队列";
       case "continue": return "跳过本轮余下步骤";
@@ -604,7 +680,7 @@
   }
 
   function nodeSymbol(type) {
-    return ({ click: "⌖", swipe: "↗", wait: "◷", repeat: "↻", condition: "⑂", image: "▧", text: "T", sequence: "≡", log: "≡", stop: "■" })[type] || "•";
+    return ({ click: "⌖", swipe: "↗", wait: "◷", repeat: "↻", condition: "⑂", image: "▧", text: "T", waitCondition: "⌛", waitImageAppear: "▧", waitImageGone: "◌", multiImage: "▦", sequence: "≡", log: "≡", stop: "■" })[type] || "•";
   }
 
   function listAt(parentId, slot) {
@@ -721,6 +797,7 @@
           <div class="canvas-hint" aria-hidden="true">拖动空白平移 · Ctrl / ⌘ + 滚轮缩放</div>
           <div class="canvas-controls" data-canvas-controls role="group" aria-label="画布操作">
             <button class="canvas-mobile-add" data-open-library>＋ 模块</button>
+            <button data-canvas-action="undo" title="撤销上一步（Ctrl / ⌘ + Z）" aria-label="撤销上一步" ${flowUndoStack.length ? "" : "disabled"}>↶ 撤销</button>
             <button data-canvas-action="out" title="缩小" aria-label="缩小">−</button>
             <span class="canvas-zoom">100%</span>
             <button data-canvas-action="in" title="放大" aria-label="放大">＋</button>
@@ -763,6 +840,10 @@
   }
 
   function canvasAction(canvas, action) {
+    if (action === "undo") {
+      undoFlowEdit();
+      return;
+    }
     if (action === "in" || action === "out") {
       moveCanvas(canvas, 0, 0, action === "in" ? 1.2 : 1 / 1.2);
       return;
@@ -894,6 +975,19 @@
   });
   window.addEventListener("blur", () => { canvasPanKey = false; });
 
+  document.addEventListener("keydown", event => {
+    if ((event.ctrlKey || event.metaKey) && !event.shiftKey && event.key.toLowerCase() === "z" &&
+        mode === "flow" && flowUndoStack.length && !busy && dom.modal.hidden &&
+        !isTextEditingTarget(event.target)) {
+      if (undoFlowEdit()) event.preventDefault();
+      return;
+    }
+    if ((event.key !== "Delete" && event.key !== "Backspace") || mode !== "flow" ||
+        !selectedId || busy || !dom.modal.hidden) return;
+    if (isTextEditingTarget(event.target)) return;
+    if (deleteSelectedNode()) event.preventDefault();
+  });
+
   function renderCategoryTabs() {
     return `<div class="segmented">${Object.keys(catalog).map(key =>
       `<button class="${category === key ? "active" : ""}" data-category="${key}">${categoryNames[key]}</button>`
@@ -971,6 +1065,29 @@
       fields += textField("查找文字", "text", p.text || "");
       fields += choiceField("匹配方式", "match", [["contains", "包含"], ["exact", "完全相同"]], p.match || "contains");
     }
+    if (node.type === "waitCondition") {
+      fields += conditionFields(p);
+      fields += fieldPair(numberField("最长等待 ms", "timeout", p.timeout || 10000), numberField("轮询间隔 ms", "poll", p.poll || 300));
+      fields += choiceField("超时后", "onTimeout", [["stop", "停止报错"], ["continue", "继续下一步"]], p.onTimeout || "stop");
+    }
+    if (node.type === "waitImageAppear" || node.type === "waitImageGone") {
+      fields += assetField(p.asset || "");
+      fields += thresholdField("匹配阈值 %", "threshold", p.threshold);
+      fields += textField("识别区域 [X,Y,宽,高]", "region", p.region || "");
+      fields += fieldPair(numberField("最长等待 ms", "timeout", p.timeout || 10000), numberField("轮询间隔 ms", "poll", p.poll || 300));
+      fields += choiceField("超时后", "onTimeout", [["stop", "停止报错"], ["continue", "继续下一步"]], p.onTimeout || "stop");
+    }
+    if (node.type === "multiImage") {
+      fields += choiceField("匹配方式", "matchMode", [["any", "任一命中"], ["all", "全部存在"]], p.matchMode || "any");
+      fields += multiImageFields(p);
+      fields += textField("识别区域 [X,Y,宽,高]", "region", p.region || "");
+      fields += fieldPair(numberField("最长等待 ms", "timeout", p.timeout || 5000), numberField("轮询间隔 ms", "poll", p.poll || 300));
+      fields += choiceField("命中后", "onMatch", [["recognize", "仅识别"], ["click", "点击命中图片"]], p.onMatch || "recognize");
+      fields += choiceField("未命中时", "onMiss", [["continue", "继续执行"], ["stop", "停止报错"]], p.onMiss || "continue");
+      if ((p.onMatch || "recognize") === "click") {
+        fields += choiceField("点击失败时", "failure", [["stop", "停止报错"], ["skip", "记录跳过"]], p.failure || "stop");
+      }
+    }
     if (["image", "text"].includes(node.type)) {
       fields += textField("识别区域 [X,Y,宽,高]", "region", p.region || "");
       fields += fieldPair(numberField("等待超时 ms", "timeout", p.timeout || 5000), numberField("轮询间隔 ms", "poll", p.poll || 300));
@@ -1027,16 +1144,17 @@
     });
     form.onsubmit = event => {
       event.preventDefault();
-      let changed = false;
+      const changes = [];
       form.querySelectorAll("[data-enable-id]").forEach(input => {
         const found = findNode(input.dataset.enableId);
         if (found && (found.node.enabled !== false) !== input.checked) {
-          found.node.enabled = input.checked;
-          changed = true;
+          changes.push({ found, enabled: input.checked });
         }
       });
+      if (changes.length) pushFlowUndoSnapshot();
+      changes.forEach(({ found, enabled }) => found.node.enabled = enabled);
       closeModal();
-      if (changed) setDirty(true);
+      if (changes.length) setDirty(true);
       renderFlowEditor();
     };
   }
@@ -1106,6 +1224,22 @@
     </div></div>`;
   }
 
+  function multiImageFields(props) {
+    const images = Array.isArray(props.images) && props.images.length
+      ? props.images
+      : [{ asset: "", threshold: 0.9 }];
+    return `<div class="multi-image-fields">${images.map((image, index) => `
+      <div class="multi-image-item">
+        <div class="multi-image-head"><strong>图片 ${index + 1}</strong>
+          <button type="button" class="text-button danger" data-remove-match-image="${index}" ${images.length <= 1 ? "disabled" : ""}>移除</button>
+        </div>
+        ${assetField(image?.asset || "", `multiAsset:${index}`, `匹配图片 ${index + 1}`)}
+        ${thresholdField("匹配阈值 %", `multiThreshold:${index}`, image?.threshold ?? 0.9)}
+      </div>`).join("")}
+      <button type="button" class="secondary-button add-match-image" data-add-match-image>＋ 添加图片</button>
+    </div>`;
+  }
+
   function openLibrary(target = insertTarget) {
     insertTarget = target;
     if (window.innerWidth > 900) {
@@ -1132,6 +1266,7 @@
     const list = listAt(target.parentId, target.slot);
     if (!list) return null;
     const index = target.index === Number.MAX_SAFE_INTEGER ? list.length : Math.min(target.index, list.length);
+    pushFlowUndoSnapshot();
     list.splice(index, 0, node);
     if (target.parentId) expanded.add(target.parentId);
     expanded.add(node.id);
@@ -1151,9 +1286,10 @@
     if (found.parentId === target.parentId && found.slot === target.slot && found.index < destinationIndex) {
       destinationIndex--;
     }
-    found.list.splice(found.index, 1);
     const destination = listAt(target.parentId, target.slot);
     if (!destination) return false;
+    pushFlowUndoSnapshot();
+    found.list.splice(found.index, 1);
     destination.splice(Math.max(0, Math.min(destinationIndex, destination.length)), 0, found.node);
     setDirty(true);
     return true;
@@ -1163,11 +1299,23 @@
     const found = findNode(id);
     if (!found) return;
     const copy = deepCopyWithIds(found.node);
+    pushFlowUndoSnapshot();
     found.list.splice(found.index + 1, 0, copy);
     selectedId = copy.id;
     expanded.add(copy.id);
     setDirty(true);
     renderFlowEditor();
+  }
+
+  function deleteSelectedNode() {
+    const found = findNode(selectedId);
+    if (!found) return false;
+    pushFlowUndoSnapshot();
+    found.list.splice(found.index, 1);
+    selectedId = null;
+    setDirty(true);
+    renderFlowEditor();
+    return true;
   }
 
   function deepCopyWithIds(node) {
@@ -1289,6 +1437,7 @@
     };
     current = document;
     flow = nextFlow;
+    resetFlowHistory();
     mode = "flow";
     assets = imageHistory = null;
     assetsError = historyError = "";
@@ -1317,6 +1466,7 @@
     templateReturnState = null;
     current = state.current;
     flow = state.flow;
+    resetFlowHistory();
     mode = state.mode;
     assets = state.assets;
     assetsError = state.assetsError;
@@ -1356,6 +1506,7 @@
       const node = { id: uid(), type: "sequence", title: entry.name, enabled: true, props: {}, children: result.document.nodes.map(deepCopyWithIds) };
       const list = listAt(target.parentId, target.slot);
       if (!list) throw new Error("插入位置已变化，请重试");
+      pushFlowUndoSnapshot();
       list.splice(Math.min(target.index, list.length), 0, node);
       if (target.parentId) expanded.add(target.parentId);
       expanded.add(node.id);
@@ -1394,6 +1545,7 @@
         if (result.template) current.revision = result.template.revision;
         current.source = JSON.stringify(flow);
         current.scriptSource = result.scriptSource;
+        markFlowSaved();
         if (!dirtyModes.has("script")) current.editorSource = null;
       } else {
         throw new Error("当前页面没有可保存的编辑内容");
@@ -1921,6 +2073,28 @@
   function updateNodeProperty(key, value, rerender = true) {
     const found = findNode(selectedId);
     if (!found) return;
+    const multiThreshold = key.match(/^multiThreshold:(\d+)Percent$/);
+    if (multiThreshold) {
+      const index = Number(multiThreshold[1]);
+      const images = Array.isArray(found.node.props?.images) ? found.node.props.images : [];
+      if (!images[index]) return;
+      pushFlowUndoSnapshot();
+      images[index].threshold = Math.max(0, Math.min(100, Number(value) || 0)) / 100;
+      setDirty(true);
+      if (rerender) renderFlowEditor();
+      return;
+    }
+    const multiAsset = key.match(/^multiAsset:(\d+)$/);
+    if (multiAsset) {
+      const index = Number(multiAsset[1]);
+      const images = Array.isArray(found.node.props?.images) ? found.node.props.images : [];
+      if (!images[index]) return;
+      pushFlowUndoSnapshot();
+      images[index].asset = value;
+      setDirty(true);
+      if (rerender) renderFlowEditor();
+      return;
+    }
     if (["thresholdPercent", "conditionThresholdPercent", "secondThresholdPercent"].includes(key)) {
       key = key.slice(0, -"Percent".length);
       value = Math.max(0, Math.min(100, Number(value) || 0)) / 100;
@@ -1930,6 +2104,7 @@
   }
 
   function setNodeProperty(node, key, value) {
+    pushFlowUndoSnapshot();
     (node.props ||= {})[key] = value;
     // Older flows store parameters on the node; remove the old value so it can't override the edit.
     delete node[key];
@@ -1943,6 +2118,17 @@
   }
 
   function assignNodeAsset(node, key, name) {
+    const multiAsset = key.match(/^multiAsset:(\d+)$/);
+    if (multiAsset) {
+      const index = Number(multiAsset[1]);
+      const images = Array.isArray(node.props?.images) ? node.props.images : [];
+      if (!images[index]) return;
+      pushFlowUndoSnapshot();
+      images[index].asset = name;
+      setDirty(true);
+      renderFlowEditor();
+      return;
+    }
     setNodeProperty(node, key, name);
     renderFlowEditor();
   }
@@ -1954,7 +2140,7 @@
       if (!assets.length) return toast("当前任务没有图片，请先上传");
       showModal(`
         <div class="modal-head">
-          <div><h3>选择任务素材</h3><p>${key === "asset" ? "找图步骤" : key === "secondValue" ? "第二项图片条件" : "第一项图片条件"}</p></div>
+          <div><h3>选择任务素材</h3><p>${key === "asset" ? "找图或等待步骤" : key.startsWith("multiAsset:") ? `多图匹配 · 图片 ${Number(key.split(":")[1]) + 1}` : key === "secondValue" ? "第二项图片条件" : "第一项图片条件"}</p></div>
           <button class="modal-close" data-close-modal aria-label="关闭">×</button>
         </div>
         <div class="modal-body assets-grid">${assets.map(asset => `
@@ -2229,17 +2415,31 @@
     if (uploadImage) return chooseImage(selectedId, uploadImage.dataset.pickImage);
     const removeImage = target.closest("[data-remove-image]");
     if (removeImage) return updateNodeProperty(removeImage.dataset.removeImage, "");
-    if (target.closest("[data-batch-enable]")) return batchEnableModal();
-    if (target.closest("[data-duplicate]")) return duplicateNode(selectedId);
-    if (target.closest("[data-delete]")) {
+    const addMatchImage = target.closest("[data-add-match-image]");
+    if (addMatchImage) {
       const found = findNode(selectedId);
       if (!found) return;
-      found.list.splice(found.index, 1);
-      selectedId = null;
+      if (!Array.isArray(found.node.props.images)) found.node.props.images = [];
+      pushFlowUndoSnapshot();
+      found.node.props.images.push({ asset: "", threshold: 0.9 });
       setDirty(true);
       renderFlowEditor();
       return;
     }
+    const removeMatchImage = target.closest("[data-remove-match-image]");
+    if (removeMatchImage) {
+      const found = findNode(selectedId);
+      const images = found?.node.props?.images;
+      if (!Array.isArray(images) || images.length <= 1) return;
+      pushFlowUndoSnapshot();
+      images.splice(Number(removeMatchImage.dataset.removeMatchImage), 1);
+      setDirty(true);
+      renderFlowEditor();
+      return;
+    }
+    if (target.closest("[data-batch-enable]")) return batchEnableModal();
+    if (target.closest("[data-duplicate]")) return duplicateNode(selectedId);
+    if (target.closest("[data-delete]")) return deleteSelectedNode();
     const moveButton = target.closest("[data-move]");
     if (moveButton) {
       const found = findNode(selectedId);
@@ -2247,6 +2447,7 @@
       const direction = Number(moveButton.dataset.move);
       const destination = found.index + direction;
       if (destination < 0 || destination >= found.list.length) return;
+      pushFlowUndoSnapshot();
       const [node] = found.list.splice(found.index, 1);
       found.list.splice(destination, 0, node);
       setDirty(true);
@@ -2268,10 +2469,12 @@
     const found = findNode(selectedId);
     if (!found) return;
     if (event.target.matches("[data-title]")) {
+      pushFlowUndoSnapshot();
       found.node.title = event.target.value.trim() || found.node.type;
       setDirty(true);
       renderFlowEditor();
     } else if (event.target.matches("[data-enabled]")) {
+      pushFlowUndoSnapshot();
       found.node.enabled = event.target.checked;
       setDirty(true);
       renderFlowEditor();

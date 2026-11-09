@@ -108,6 +108,55 @@ function __flowText(text, options) {
         throw Error(result.lastError || result.reason);
     return result.value;
 }
+function __flowWaitCondition(check, timeoutMs, intervalMs) {
+    if (!requestScreenCapture()) throw Error('截屏不可用');
+    var started = __flowNow();
+    while (true) {
+        if (check()) return true;
+        if (__flowNow() - started >= timeoutMs) return false;
+        sleep(intervalMs);
+    }
+}
+function __flowWaitImageGone(path, timeoutMs, intervalMs, options) {
+    if (!requestScreenCapture()) throw Error('截屏不可用');
+    var template = __flowTemplates[path];
+    if (!template) throw Error('图片素材不存在');
+    var started = __flowNow();
+    while (true) {
+        var shot = captureScreen();
+        if (!shot) throw Error('截图失败');
+        var exists = false;
+        try { exists = images.existsImage(shot, template, options); }
+        finally { images.release(shot); }
+        if (!exists) return true;
+        if (__flowNow() - started >= timeoutMs) return false;
+        sleep(intervalMs);
+    }
+}
+function __flowMultiImage(entries, mode, timeoutMs, intervalMs, options) {
+    if (!requestScreenCapture()) throw Error('截屏不可用');
+    var started = __flowNow();
+    while (true) {
+        var shot = captureScreen();
+        if (!shot) throw Error('截图失败');
+        var first = null, matched = 0;
+        try {
+            for (var i = 0; i < entries.length; i++) {
+                var template = __flowTemplates[entries[i].path];
+                if (!template) throw Error('图片素材不存在：' + entries[i].path);
+                var point = images.findImage(shot, template, Object.assign({}, options, { threshold: entries[i].threshold }));
+                if (point) {
+                    matched++;
+                    if (!first) first = point;
+                }
+            }
+        } finally { images.release(shot); }
+        if (mode === 'any' && first) return first;
+        if (mode === 'all' && matched === entries.length) return first;
+        if (__flowNow() - started >= timeoutMs) return null;
+        sleep(intervalMs);
+    }
+}
 function __flowMain() {
 """.trimStart())
         output.append(steps).append("}\n")
@@ -191,6 +240,45 @@ function __flowMain() {
                             .append('\n')
                     }
                 }
+                "waitCondition" -> {
+                    val timeout = positive(properties, "timeout", 10000)
+                    val interval = positive(properties, "poll", 300, 50)
+                    out.append(pad).append("var $variable = __flowWaitCondition(function() { return ")
+                        .append(condition(properties, templates)).append("; }, $timeout, $interval);\n")
+                    if (properties.optString("onTimeout", "stop") == "stop")
+                        out.append(pad).append("if (!$variable) throw Error('等待条件超时');\n")
+                }
+                "waitImageAppear", "waitImageGone" -> {
+                    val path = imagePath(properties.getString("asset")).also { templates.add(it) }
+                    val timeout = positive(properties, "timeout", 10000)
+                    val interval = positive(properties, "poll", 300, 50)
+                    val threshold = threshold(properties)
+                    val options = "{ threshold: $threshold${region(properties)} }"
+                    val expression = if (type == "waitImageAppear")
+                        "__flowImage(${quoted(path)}, $timeout, $interval, $options)"
+                    else "__flowWaitImageGone(${quoted(path)}, $timeout, $interval, $options)"
+                    out.append(pad).append("var $variable = $expression;\n")
+                    if (properties.optString("onTimeout", "stop") == "stop")
+                        out.append(pad).append("if (!$variable) throw Error('")
+                            .append(if (type == "waitImageAppear") "等待图片出现超时" else "等待图片消失超时")
+                            .append("');\n")
+                }
+                "multiImage" -> {
+                    val timeout = positive(properties, "timeout", 5000)
+                    val interval = positive(properties, "poll", 300, 50)
+                    val mode = properties.optString("matchMode", "any")
+                    require(mode == "any" || mode == "all") { "多图匹配方式不合法" }
+                    val entries = multiImageEntries(properties, templates)
+                    val regionOption = region(properties).removePrefix(", ")
+                    out.append(pad).append("var $variable = __flowMultiImage($entries, ${quoted(mode)}, $timeout, $interval, { $regionOption });\n")
+                    if (properties.optString("onMiss", "continue") == "stop")
+                        out.append(pad).append("if (!$variable) throw Error('多图匹配未命中');\n")
+                    if (properties.optString("onMatch", "recognize") == "click") {
+                        out.append(pad).append("if ($variable && !click($variable.x, $variable.y)) ")
+                            .append(if (properties.optString("failure") == "skip") "console.warn('点击失败');" else "throw Error('点击失败');")
+                            .append('\n')
+                    }
+                }
                 "break", "continue" -> {
                     require(loops > 0) { "退出循环和进入下一轮只能放在循环内" }
                     out.append(pad).append(type).append(";\n")
@@ -235,8 +323,15 @@ function __flowMain() {
                 val primary = node.optString("conditionKind", props?.optString("conditionKind", "image") ?: "image")
                 val secondary = node.optString("secondKind", props?.optString("secondKind") ?: "")
                 listOfNotNull(node, props).forEach { fields ->
-                    if (type == "image") replace(fields, "asset")
-                    if (type == "condition" || type == "repeat") {
+                    if (type in setOf("image", "waitImageAppear", "waitImageGone")) replace(fields, "asset")
+                    if (type == "multiImage") {
+                        fields.optJSONArray("images")?.let { images ->
+                            for (index in 0 until images.length()) {
+                                images.optJSONObject(index)?.let { replace(it, "asset") }
+                            }
+                        }
+                    }
+                    if (type in setOf("condition", "waitCondition", "repeat")) {
                         if (primary == "image") replace(fields, "conditionValue")
                         if (secondary == "image") replace(fields, "secondValue")
                     }
@@ -290,6 +385,21 @@ function __flowMain() {
         return "__flowImage(${quoted(path)}, $timeout, $interval, { threshold: $threshold${region(node)} })"
     }
 
+    private fun multiImageEntries(node: JSONObject, templates: MutableSet<String>): String {
+        val images = node.optJSONArray("images") ?: error("多图匹配缺少图片")
+        require(images.length() in 1..20) { "多图匹配需要 1～20 张图片" }
+        val entries = (0 until images.length()).map { index ->
+            val image = images.getJSONObject(index)
+            val asset = image.optString("asset")
+            require(asset.isNotBlank()) { "多图匹配存在未选择的图片" }
+            val path = imagePath(asset).also { templates.add(it) }
+            val value = image.optDouble("threshold", 0.9)
+            require(value.isFinite() && value in 0.0..1.0) { "多图匹配阈值不合法" }
+            "{ path: ${quoted(path)}, threshold: $value }"
+        }
+        return "[${entries.joinToString(", ")}]"
+    }
+
     private fun textSearch(node: JSONObject): String {
         val query = node.getString("text")
         require(query.isNotBlank()) { "找字内容不能为空" }
@@ -312,6 +422,18 @@ function __flowMain() {
     private fun number(node: JSONObject, key: String, default: Int = -1): Int {
         val value = node.optInt(key, default)
         require(value >= 0) { "$key 不能小于 0" }
+        return value
+    }
+
+    private fun positive(node: JSONObject, key: String, default: Int, minimum: Int = 1): Int {
+        val value = node.optInt(key, default)
+        require(value >= minimum) { "$key 不能小于 $minimum" }
+        return value
+    }
+
+    private fun threshold(node: JSONObject, key: String = "threshold"): Double {
+        val value = node.optDouble(key, 0.9)
+        require(value.isFinite() && value in 0.0..1.0) { "找图阈值不合法" }
         return value
     }
 

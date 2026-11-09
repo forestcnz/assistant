@@ -13,7 +13,11 @@ object FlowTemplateContent {
         require(document.optInt("schemaVersion", 1) == 1) { "模板流程版本不受支持" }
         var count = 0
         val ids = hashSetOf<String>()
-        val types = setOf("click", "swipe", "wait", "log", "sequence", "repeat", "condition", "image", "text", "break", "continue", "endRound", "stop")
+        val types = setOf(
+            "click", "swipe", "wait", "log", "sequence", "repeat", "condition",
+            "image", "text", "waitCondition", "waitImageAppear", "waitImageGone", "multiImage",
+            "break", "continue", "endRound", "stop"
+        )
         fun visit(nodes: JSONArray, depth: Int) {
             require(depth <= 18) { "模板嵌套层级过深" }
             for (index in 0 until nodes.length()) {
@@ -74,8 +78,15 @@ object FlowTemplateContent {
                 val first = node.optString("conditionKind", props?.optString("conditionKind", "image") ?: "image")
                 val second = node.optString("secondKind", props?.optString("secondKind", "text") ?: "text")
                 listOfNotNull(node, props).forEach { fields ->
-                    if (type == "image") action(fields, "asset")
-                    if (type == "condition" || type == "repeat") {
+                    if (type in setOf("image", "waitImageAppear", "waitImageGone")) action(fields, "asset")
+                    if (type == "multiImage") {
+                        fields.optJSONArray("images")?.let { images ->
+                            for (index in 0 until images.length()) {
+                                images.optJSONObject(index)?.let { action(it, "asset") }
+                            }
+                        }
+                    }
+                    if (type in setOf("condition", "waitCondition", "repeat")) {
                         if (first == "image") action(fields, "conditionValue")
                         if (second == "image") action(fields, "secondValue")
                     }

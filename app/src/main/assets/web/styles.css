@@ -385,6 +385,13 @@ body.dragging-module .drop-zone::after { color: var(--orange); }
 .condition-asset .asset-preview img { height: 78px; }
 .asset-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
 .asset-actions button { flex: 1 0 auto; min-height: 34px; border-radius: 8px; padding-inline: 6px; font-size: 12px; white-space: nowrap; }
+.multi-image-fields { display: grid; gap: 10px; }
+.multi-image-item { padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--soft); }
+.multi-image-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 9px; }
+.multi-image-head strong { font-size: 12px; font-weight: 600; }
+.text-button { min-height: 30px; padding: 0 4px; border: 0; background: transparent; font-size: 12px; }
+.text-button:disabled { opacity: .45; cursor: not-allowed; }
+.add-match-image { width: 100%; }
 .inspector-empty { margin-top: 18px; padding: 15px; border: 1px solid var(--line); border-radius: 11px; color: var(--muted); font-size: 12px; line-height: 1.6; }
 .inspector-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 14px; }
 .inspector-actions button { min-height: 34px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); font-size: 12px; }

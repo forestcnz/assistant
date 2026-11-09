@@ -56,6 +56,26 @@ class FlowTemplateContentTest {
         assertEquals("images/a.png", source.getJSONArray("nodes").getJSONObject(0).getJSONObject("props").getString("asset"))
     }
 
+    @Test fun includesWaitAndMultiImageReferencesForTemplates() {
+        val wait = JSONObject().put("id", "wait").put("type", "waitImageAppear")
+            .put("props", JSONObject().put("asset", "wait.png"))
+        val multi = JSONObject().put("id", "multi").put("type", "multiImage").put("props", JSONObject()
+            .put("images", JSONArray()
+                .put(JSONObject().put("asset", "one.png").put("threshold", 0.9))
+                .put(JSONObject().put("asset", "images/two.png").put("threshold", 0.8))))
+        val source = document(wait, multi)
+
+        assertEquals(setOf("wait.png", "one.png", "two.png"), FlowTemplateContent.imageNames(source))
+        val updated = FlowTemplateContent.remapImages(source, mapOf(
+            "wait.png" to "wait-new.png", "one.png" to "one-new.png", "two.png" to "two-new.png"
+        ))
+        val nodes = updated.getJSONArray("nodes")
+        assertEquals("wait-new.png", nodes.getJSONObject(0).getJSONObject("props").getString("asset"))
+        val images = nodes.getJSONObject(1).getJSONObject("props").getJSONArray("images")
+        assertEquals("one-new.png", images.getJSONObject(0).getString("asset"))
+        assertEquals("images/two-new.png", images.getJSONObject(1).getString("asset"))
+    }
+
     @Test fun reusesIdenticalImagesAndPreservesConflictingTargetImages() {
         val source = temporary.newFolder("source")
         val target = temporary.newFolder("target")
