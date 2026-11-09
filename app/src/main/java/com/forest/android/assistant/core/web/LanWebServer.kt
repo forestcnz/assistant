@@ -300,6 +300,17 @@ private class EditorHttpServer(
         }
         return when {
             rest.isEmpty() && session.method == Method.GET -> taskDocument(taskName)
+            !templateResource && rest == listOf("copy") && session.method == Method.POST -> {
+                val request = jsonBody(session)
+                val result = TaskManager.copyTask(context, taskName, request.getString("name"))
+                result.fold(onSuccess = { copied ->
+                    json(Response.Status.CREATED, JSONObject().put("name", copied.name)
+                        .put("type", if (FlowCompiler.isVisual(context, copied.name)) "flow" else "script"))
+                }, onFailure = { error ->
+                    val status = if (error is IllegalArgumentException) Response.Status.BAD_REQUEST else Response.Status.INTERNAL_ERROR
+                    json(status, JSONObject().put("error", error.message ?: "复制任务失败"))
+                })
+            }
             rest.isEmpty() && session.method == Method.PUT -> saveTaskSettings(session, taskName)
             rest.isEmpty() && session.method == Method.DELETE -> {
                 TaskManager.deleteTask(context, taskName).getOrThrow()

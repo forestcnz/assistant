@@ -1722,6 +1722,7 @@
         </div>
         <div class="modal-actions settings-actions">
           <button class="secondary-button danger" type="button" id="delete-task">删除任务</button>
+          <button class="secondary-button" type="button" id="copy-task">复制任务</button>
           <button class="secondary-button" type="button" data-close-modal>取消</button>
           <button class="primary-button" type="submit">保存设置</button>
         </div>
@@ -1738,6 +1739,7 @@
     }
     field("loopMode").onchange = showLoopField;
     showLoopField();
+    dom.modal.querySelector("#copy-task").onclick = copyTaskModal;
     form.onsubmit = event => {
       event.preventDefault();
       if (!field("name").value.trim()) return toast("请输入任务名称", true);
@@ -1772,6 +1774,52 @@
         await loadTasks();
       });
     };
+  }
+
+  function copyTaskModal() {
+    if (!current || current.templateId) return;
+    if (dirtyModes.size) return toast("请先保存任务修改，再复制任务", true);
+    const sourceName = current.name;
+    let number = 1;
+    let name;
+    do {
+      const suffix = number === 1 ? " 副本" : ` 副本 ${number}`;
+      name = sourceName.slice(0, 50 - suffix.length).replace(/[\uD800-\uDBFF]$/, "") + suffix;
+      number++;
+    } while (tasks.some(task => task.name === name));
+    showModal(`
+      <div class="modal-head"><div><h3>复制任务</h3><p>${esc(sourceName)}</p></div><button class="modal-close" data-close-modal aria-label="关闭">×</button></div>
+      <form id="copy-task-form"><div class="modal-body settings-body">
+        <label class="field"><span>新任务名称</span><input class="input" name="name" required maxlength="50" value="${esc(name)}"></label>
+        <p class="settings-hint">复制已保存的脚本或流程、素材和任务配置。副本可独立编辑，分组、定时和运行记录独立设置。</p>
+      </div><div class="modal-actions"><button class="secondary-button" type="button" data-close-modal>取消</button><button class="primary-button" type="submit">创建副本</button></div></form>`);
+    const form = dom.modal.querySelector("#copy-task-form");
+    const input = form.elements.namedItem("name");
+    form.onsubmit = async event => {
+      event.preventDefault();
+      const newName = input.value.trim();
+      if (!newName || newName.length > 50 || newName === "." || newName === ".." || /[/\\\x00-\x1f\x7f]/.test(newName)) {
+        return toast("任务名称不合法", true);
+      }
+      if (tasks.some(task => task.name === newName)) return toast("该任务名称已存在", true);
+      const submit = form.querySelector('[type="submit"]');
+      submit.textContent = "正在复制…";
+      let copiedName = null;
+      await perform(async () => {
+        const result = await api(`${taskPath(sourceName)}/copy`, { method: "POST", body: JSON.stringify({ name: newName }) });
+        closeModal();
+        dom.search.value = "";
+        await loadTasks();
+        copiedName = result.name;
+      });
+      if (form.isConnected) submit.textContent = "创建副本";
+      if (copiedName) {
+        await openTask(copiedName);
+        toast(`已复制为「${copiedName}」`);
+      }
+    };
+    input.focus();
+    input.select();
   }
 
   function assetDetails(asset) {

@@ -114,6 +114,7 @@ object TaskManager {
      * 新建任务：生成目录 + 脚手架脚本 + 默认配置。
      * 返回 null 表示名称非法（空/含路径符/重名）。
      */
+    @Synchronized
     fun createTask(
         context: Context,
         rawName: String,
@@ -135,6 +136,17 @@ object TaskManager {
             File(dir, "images").mkdirs()
         }
         return TaskInfo(name)
+    }
+
+    /** 复制已保存的任务内容；分组、定时及运行记录保持独立。 */
+    @Synchronized
+    fun copyTask(context: Context, sourceName: String, rawName: String): Result<TaskInfo> = runCatching {
+        requireTasksIdle()
+        val name = rawName.trim()
+        val source = checkedTaskDir(context, sourceName)
+        val target = checkedTaskDir(context, name)
+        TaskCopy.create(source, target)
+        TaskInfo(name)
     }
 
     /** 重命名整个任务目录，素材与历史保持相对路径；同步迁移定时设置。 */
