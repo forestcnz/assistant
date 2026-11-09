@@ -71,6 +71,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -570,7 +571,7 @@ class MainActivity : ComponentActivity() {
                     ) {
                         pageStates.SaveableStateProvider(mainTab) {
                             when (mainTab) {
-                                0 -> TaskListSection(runState, Modifier.fillMaxSize())
+                                0 -> TaskWorkspace(runState)
                                 1 -> LogsTab(logs)
                                 2 -> PermissionsTab()
                                 else -> SettingsTab(launcherEnabled)
@@ -1402,9 +1403,38 @@ class MainActivity : ComponentActivity() {
 
     /** 任务列表区：标题行（数量 + 导入/导出全部 + 新建） + 列表 */
     @Composable
-    private fun TaskListSection(runState: ScriptRunner.RunState, modifier: Modifier = Modifier) {
+    private fun TaskWorkspace(runState: ScriptRunner.RunState) {
+        var groupsSelected by rememberSaveable { mutableStateOf(false) }
+        val pages = rememberSaveableStateHolder()
+        Column(Modifier.fillMaxSize()) {
+            PageHeading(if (groupsSelected) "分组空间" else "任务空间", "把重复的事交给脚本，留时间给自己。")
+            Box(Modifier.weight(1f)) {
+                pages.SaveableStateProvider(false) {
+                    RetainedManagementPage(visible = !groupsSelected) {
+                        TaskListSection(runState, Modifier.fillMaxSize(), onSwitchToGroups = { groupsSelected = true })
+                    }
+                }
+                pages.SaveableStateProvider(true) {
+                    RetainedManagementPage(visible = groupsSelected) {
+                        TaskGroupsPage(lifecycle, Modifier.fillMaxSize(), onSwitchToTasks = { groupsSelected = false })
+                    }
+                }
+            }
+        }
+    }
+
+    /** 保留两页的组合、数据和滚动状态；未放置的页面不绘制，也不接收点击。 */
+    @Composable
+    private fun RetainedManagementPage(visible: Boolean, content: @Composable () -> Unit) {
+        Layout(modifier = Modifier.fillMaxSize(), content = { Box(Modifier.fillMaxSize()) { content() } }) { children, constraints ->
+            val page = children.single().measure(constraints)
+            layout(page.width, page.height) { if (visible) page.placeRelative(0, 0) }
+        }
+    }
+
+    @Composable
+    private fun TaskListSection(runState: ScriptRunner.RunState, modifier: Modifier = Modifier, onSwitchToGroups: () -> Unit) {
         Column(modifier) {
-            PageHeading("任务空间", "把重复的事交给脚本，留时间给自己。")
             LazyColumn(Modifier.fillMaxWidth().weight(1f),
                 contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(0.dp)) {
                 item {
@@ -1416,6 +1446,7 @@ class MainActivity : ComponentActivity() {
                         }
                         IconButton(onClick = { showCreateDialog = true }) { AppIcon(R.drawable.ic_add, "新建任务") }
                         IconButton(onClick = { showTransferDialog = true }) { AppIcon(R.drawable.ic_more, "导入与导出") }
+                        IconButton(onClick = onSwitchToGroups) { AppIcon(R.drawable.ic_switch_lists, "切换到分组列表") }
                     }
                 }
                 if (tasks.isEmpty()) item {

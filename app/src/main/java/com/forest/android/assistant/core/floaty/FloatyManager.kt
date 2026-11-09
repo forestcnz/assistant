@@ -1157,7 +1157,7 @@ object FloatyManager {
             headerLogo.visibility = if (activeGroup == null) View.VISIBLE else View.GONE
             backToTasks.visibility = if (activeGroup == null) View.GONE else View.VISIBLE
             backToTasks.contentDescription = "返回分组列表"
-            pageSwitch.visibility = View.VISIBLE
+            pageSwitch.visibility = if (activeGroup == null) View.VISIBLE else View.GONE
             val destination = if (showingGroups) "任务列表" else "分组列表"
             pageSwitch.contentDescription = "切换到$destination"
             pageSwitch.tooltipText = "切换到$destination"
@@ -1168,7 +1168,7 @@ object FloatyManager {
             cellHolders.clear()
             if (showingGroups && activeGroup == null) {
                 if (groups.isEmpty()) {
-                    list.addView(textView(context, "暂无分组\n请在 Web 端的分组管理页面创建", 12f, COLOR_TEXT_DIM).apply {
+                    list.addView(textView(context, "暂无分组\n请在 APP 或 Web 端的分组管理页面创建", 12f, COLOR_TEXT_DIM).apply {
                         gravity = Gravity.CENTER
                         setPadding((8 * d).toInt(), (18 * d).toInt(), (8 * d).toInt(), (18 * d).toInt())
                     })
@@ -1220,7 +1220,7 @@ object FloatyManager {
                         isClickable = false
                         setPadding(0, (8 * d).toInt(), 0, (4 * d).toInt())
                     })
-                    addView(textView(context, if (activeGroup == null) "在应用中创建或导入任务后即可运行" else "请在 Web 端为该分组添加任务", 10f, COLOR_TEXT_DIM).apply {
+                    addView(textView(context, if (activeGroup == null) "在应用中创建或导入任务后即可运行" else "请在 APP 或 Web 端为该分组添加任务", 10f, COLOR_TEXT_DIM).apply {
                         gravity = Gravity.CENTER
                     })
                 })
