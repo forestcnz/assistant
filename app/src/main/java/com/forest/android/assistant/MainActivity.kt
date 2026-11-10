@@ -10,6 +10,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.material3.FilterChip
 import androidx.compose.foundation.background
@@ -59,8 +61,10 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
@@ -71,8 +75,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -97,6 +108,7 @@ import com.forest.android.assistant.core.task.ScheduleManager
 import com.forest.android.assistant.core.task.RunHistory
 import com.forest.android.assistant.core.task.TaskManager
 import com.forest.android.assistant.core.task.TaskLoop
+import com.forest.android.assistant.core.task.TaskOrder
 import com.forest.android.assistant.core.task.ImageHistory
 import com.forest.android.assistant.core.task.TaskZip
 import com.forest.android.assistant.core.web.LanWebServer
@@ -129,6 +141,8 @@ class MainActivity : ComponentActivity() {
     private var overlayGranted by mutableStateOf(false)
     private var captureReady by mutableStateOf(false)
     private var tasks by mutableStateOf(emptyList<TaskManager.TaskInfo>())
+    /** 任务列表顺序的版本号，保存拖拽结果时用于检测其他端的修改 */
+    private var taskOrderRevision by mutableStateOf(0L)
     private var taskTransferBusy by mutableStateOf(false)
     private var pendingExportFile by mutableStateOf<File?>(null)
     private var showCreateDialog by mutableStateOf(false)
@@ -435,12 +449,17 @@ class MainActivity : ComponentActivity() {
                     captureReady = ScreenCapture.captureAvailableCached(this@MainActivity)
                     // 文件扫描与定时配置读取不占用主线程，避免列表滚动时卡顿。
                     val snapshot = withContext(Dispatchers.IO) {
-                        TaskManager.listTasks(this@MainActivity) to
+                        Triple(
+                            TaskManager.listTasks(this@MainActivity),
                             ScheduleManager.load(this@MainActivity)
-                                .filter { it.enabled }.associateBy { it.taskName }
+                                .filter { it.enabled }.associateBy { it.taskName },
+                            TaskOrder.read(this@MainActivity).revision
+                        )
                     }
                     tasks = snapshot.first
                     schedules = snapshot.second
+                    // 顺带同步任务顺序版本，拖拽保存时可发现其他端的修改
+                    if (snapshot.third != taskOrderRevision) taskOrderRevision = snapshot.third
                     delay(1000)
                 }
             }
@@ -872,20 +891,32 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /** 任务行：名称、定时状态与详情入口；执行操作统一进入悬浮面板。 */
+    /** 任务行：图标可长按拖动；名称、定时状态与详情入口；执行操作统一进入悬浮面板。 */
     @Composable
-    private fun TaskRow(task: TaskManager.TaskInfo, runState: ScriptRunner.RunState) {
+    private fun TaskRow(task: TaskManager.TaskInfo, runState: ScriptRunner.RunState,
+        iconDragModifier: Modifier = Modifier) {
         val schedule = schedules[task.name]
-        DesignRow(task.name,
-            schedule?.describe() ?: taskSubtitles[task.name]?.ifBlank { "脚本任务 · 待运行" } ?: "脚本任务 · 待运行",
-            if (schedule != null) R.drawable.ic_clock else R.drawable.ic_code,
-            enabled = !taskMutationBusy && !taskTransferBusy,
-            trailing = {
-                if (runState.running && runState.taskName == task.name) StatusBadge("运行中")
-                else if (schedule != null) StatusBadge("已定时", warning = true)
-                else AppIcon(R.drawable.ic_arrow, modifier = Modifier.size(16.dp))
+        val enabled = !taskMutationBusy && !taskTransferBusy
+        val subtitle = schedule?.describe() ?: taskSubtitles[task.name]?.ifBlank { "脚本任务 · 待运行" } ?: "脚本任务 · 待运行"
+        Row(Modifier.fillMaxWidth().clickable(enabled = enabled) { menuTask = task.name }
+            .heightIn(min = 76.dp)
+            .padding(start = 4.dp, end = 14.dp, top = 12.dp, bottom = 12.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            // 图标本身作为拖动区域，长按图标即可调整顺序。
+            Box(Modifier.size(48.dp).then(iconDragModifier), contentAlignment = Alignment.Center) {
+                IconTile(if (schedule != null) R.drawable.ic_clock else R.drawable.ic_code,
+                    warm = schedule != null, blue = schedule == null)
             }
-        ) { menuTask = task.name }
+            Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
+                Text(task.name, style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = if (enabled) 1f else .45f))
+                Text(subtitle, style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 3.dp))
+            }
+            if (runState.running && runState.taskName == task.name) StatusBadge("运行中")
+            else if (schedule != null) StatusBadge("已定时", warning = true)
+            else AppIcon(R.drawable.ic_arrow, modifier = Modifier.size(16.dp))
+        }
     }
 
 
@@ -1434,14 +1465,57 @@ class MainActivity : ComponentActivity() {
 
     @Composable
     private fun TaskListSection(runState: ScriptRunner.RunState, modifier: Modifier = Modifier, onSwitchToGroups: () -> Unit) {
+        val scope = rememberCoroutineScope()
+        val listState = rememberLazyListState()
+        val haptics = LocalHapticFeedback.current
+        // 拖动期间只改预览顺序，松手后一次保存；每秒的列表刷新不会打断拖动。
+        var orderDraft by remember { mutableStateOf<List<String>?>(null) }
+        var dragging by remember { mutableStateOf<String?>(null) }
+        var dragRevision by remember { mutableStateOf(0L) }
+        var pointerY by remember { mutableFloatStateOf(0f) }
+        var listTop by remember { mutableFloatStateOf(0f) }
+        val tasksByName = tasks.associateBy { it.name }
+        val taskNames = orderDraft ?: tasks.map { it.name }
+        val latestNames by rememberUpdatedState(taskNames)
+        val latestTasks by rememberUpdatedState(tasks)
+        fun reorderAtPointer() {
+            val name = dragging ?: return
+            val from = latestNames.indexOf(name)
+            // 只处理任务行（key 为任务名），标题和工具栏项保持不动。
+            val hit = listState.layoutInfo.visibleItemsInfo
+                .firstOrNull { pointerY >= it.offset && pointerY < it.offset + it.size } ?: return
+            val to = latestNames.indexOf(hit.key as? String)
+            if (from >= 0 && to >= 0 && from != to) {
+                orderDraft = latestNames.toMutableList().apply { add(to, removeAt(from)) }
+            }
+        }
+        // 拖到列表边缘时自动滚动，便于调整长列表。
+        LaunchedEffect(dragging) {
+            if (dragging != null) while (true) {
+                val info = listState.layoutInfo
+                val edge = 100f
+                val delta = when {
+                    pointerY < info.viewportStartOffset + edge -> -12f
+                    pointerY > info.viewportEndOffset - edge -> 12f
+                    else -> 0f
+                }
+                if (delta != 0f) {
+                    listState.scrollBy(delta)
+                    reorderAtPointer()
+                }
+                delay(16)
+            }
+        }
+        LaunchedEffect(tasks) { if (dragging == null) orderDraft = null }
         Column(modifier) {
-            LazyColumn(Modifier.fillMaxWidth().weight(1f),
+            LazyColumn(Modifier.fillMaxWidth().weight(1f).onGloballyPositioned { listTop = it.positionInRoot().y },
+                state = listState,
                 contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(0.dp)) {
                 item {
                     Row(Modifier.fillMaxWidth().padding(bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
                             Text("全部任务", style = MaterialTheme.typography.titleMedium)
-                            Text("${tasks.size} 个任务 · 按名称管理", style = MaterialTheme.typography.bodySmall,
+                            Text("${tasks.size} 个任务 · 长按任务图标拖动排序", style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         IconButton(onClick = { showCreateDialog = true }) { AppIcon(R.drawable.ic_add, "新建任务") }
@@ -1454,15 +1528,64 @@ class MainActivity : ComponentActivity() {
                         R.drawable.ic_nav_tasks, "创建第一个任务") { showCreateDialog = true }
                 }
                 // 行按需组合，长任务列表不一次性加载所有内容。
-                itemsIndexed(tasks, key = { _, task -> task.name }) { index, task ->
-                    Surface(Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.surface,
+                itemsIndexed(taskNames, key = { _, name -> name }) { index, name ->
+                    val task = tasksByName[name] ?: return@itemsIndexed
+                    // 长按任务图标即可拖动，跟随手指移动，松手自动保存顺序。
+                    var iconTop by remember { mutableFloatStateOf(0f) }
+                    val dragEnabled = !taskMutationBusy && !taskTransferBusy
+                    // 被拖起的行高亮并浮起；其余行平滑移动，拖动过程更直观。
+                    val isDragging = dragging == name
+                    Surface(Modifier.fillMaxWidth().then(if (isDragging) Modifier else Modifier.animateItem()),
+                        color = if (isDragging) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface,
+                        shadowElevation = if (isDragging) 8.dp else 0.dp,
                         shape = RoundedCornerShape(topStart = if (index == 0) 18.dp else 0.dp,
                             topEnd = if (index == 0) 18.dp else 0.dp,
-                            bottomStart = if (index == tasks.lastIndex) 18.dp else 0.dp,
-                            bottomEnd = if (index == tasks.lastIndex) 18.dp else 0.dp)) {
+                            bottomStart = if (index == taskNames.lastIndex) 18.dp else 0.dp,
+                            bottomEnd = if (index == taskNames.lastIndex) 18.dp else 0.dp)) {
                         Column {
-                            TaskRow(task, runState)
-                            if (index < tasks.lastIndex) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                            TaskRow(task, runState, iconDragModifier = Modifier
+                                .semantics { contentDescription = "长按「$name」的图标拖动排序" }
+                                .onGloballyPositioned { iconTop = it.positionInRoot().y }
+                                .pointerInput(name, dragEnabled) {
+                                    if (dragEnabled) detectDragGesturesAfterLongPress(
+                                        onDragStart = { offset ->
+                                            // 长按触发时给一次触感反馈，确认已进入拖动状态。
+                                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            dragRevision = taskOrderRevision
+                                            orderDraft = latestTasks.map { it.name }
+                                            dragging = name
+                                            pointerY = iconTop - listTop + offset.y
+                                        },
+                                        onDrag = { change, amount ->
+                                            change.consume()
+                                            pointerY += amount.y
+                                            reorderAtPointer()
+                                        },
+                                        onDragEnd = {
+                                            val result = orderDraft
+                                            val revision = dragRevision
+                                            val before = latestTasks.map { it.name }
+                                            dragging = null
+                                            if (result != null && result != before) {
+                                                scope.launch {
+                                                    val failure = withContext(Dispatchers.IO) {
+                                                        runCatching { TaskOrder.save(this@MainActivity, revision, result) }
+                                                            .exceptionOrNull()
+                                                    }
+                                                    // 成功或冲突都重新读取，界面始终展示已保存顺序。
+                                                    tasks = withContext(Dispatchers.IO) { TaskManager.listTasks(this@MainActivity) }
+                                                    taskOrderRevision = withContext(Dispatchers.IO) { TaskOrder.read(this@MainActivity).revision }
+                                                    orderDraft = null
+                                                    Toast.makeText(this@MainActivity,
+                                                        failure?.message ?: "任务顺序已保存",
+                                                        if (failure == null) Toast.LENGTH_SHORT else Toast.LENGTH_LONG).show()
+                                                }
+                                            } else orderDraft = null
+                                        },
+                                        onDragCancel = { dragging = null; orderDraft = null }
+                                    )
+                                })
+                            if (index < taskNames.lastIndex) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                         }
                     }
                 }
@@ -1987,12 +2110,17 @@ class MainActivity : ComponentActivity() {
             try {
                 val result = withContext(Dispatchers.IO) { operation() }
                 val snapshot = withContext(Dispatchers.IO) {
-                    TaskManager.listTasks(this@MainActivity) to
+                    Triple(
+                        TaskManager.listTasks(this@MainActivity),
                         ScheduleManager.load(this@MainActivity)
-                            .filter { it.enabled }.associateBy { it.taskName }
+                            .filter { it.enabled }.associateBy { it.taskName },
+                        TaskOrder.read(this@MainActivity).revision
+                    )
                 }
                 tasks = snapshot.first
                 schedules = snapshot.second
+                // 改名/删除会同步更新顺序文件，这里立即同步版本，随后的拖拽保存不会误判冲突
+                taskOrderRevision = snapshot.third
                 taskMetadataVersion++
                 if (result.isSuccess) {
                     ScriptRunner.appendLog(successMessage)

@@ -126,7 +126,7 @@ h1 { margin-top: 3px; font-size: 22px; font-weight: 600; }
 .group-task-library { min-width: 0; min-height: 0; display: flex; flex-direction: column; padding: 16px 14px; border-left: 1px solid var(--line); background: var(--paper); }
 .group-task-library .search { flex-shrink: 0; margin: 12px 0 10px; }
 .group-task-sources { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; overflow: auto; }
-.group-source-task { display: flex; align-items: center; gap: 5px; flex-shrink: 0; min-width: 0; padding: 7px 4px; border: 1px solid var(--line); border-radius: 10px; cursor: grab; }
+.group-source-task { display: flex; align-items: center; gap: 5px; flex-shrink: 0; min-width: 0; padding: 7px 4px; border: 1px solid var(--line); border-radius: 10px; cursor: grab; user-select: none; }
 .group-source-task:hover { border-color: var(--orange); }
 .group-source-task .group-member-name { font-size: 13px; }
 .group-source-task .icon-button { width: 30px; flex-shrink: 0; }
@@ -141,13 +141,15 @@ h1 { margin-top: 3px; font-size: 22px; font-weight: 600; }
 .group-empty p { max-width: 340px; color: var(--muted); font-size: 13px; line-height: 1.7; }
 .task-entry.drop-before { box-shadow: 0 -2px var(--orange); }
 .task-entry.drop-after { box-shadow: 0 2px var(--orange); }
-.task-sort-handle { width: 27px; flex-shrink: 0; border: 0; border-radius: 8px; padding: 4px 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; background: transparent; color: var(--muted); cursor: grab; touch-action: none; }
-.task-sort-handle:hover { background: var(--soft); color: var(--orange-dark); }
-.task-sort-handle span:first-child { font-size: 10px; }
+.task-entry { cursor: grab; user-select: none; }
 .task-item {
   flex: 0 0 auto; width: 100%; min-width: 0; border: 1px solid transparent; border-radius: 11px;
   padding: 10px 11px; background: transparent; text-align: left;
+  cursor: grab; user-select: none;
 }
+.task-order-hint { margin: 0 2px 8px; color: var(--muted); font-size: 11px; }
+.task-row-dragging { opacity: .6; }
+.task-row-dragging.task-item { background: var(--orange-soft); border-color: var(--orange); }
 .task-item:hover { background: var(--paper-2); }
 .task-item.active { border-color: #f4c7b7; background: var(--orange-soft); }
 .task-line { display: flex; align-items: center; gap: 7px; }

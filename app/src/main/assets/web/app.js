@@ -2,6 +2,7 @@
   const dom = {
     taskList: document.getElementById("task-list"),
     exportAll: document.getElementById("export-all-tasks"),
+    orderHint: document.getElementById("task-order-hint"),
     search: document.getElementById("task-search"),
     tasksPage: document.getElementById("tasks-page"),
     groupsPage: document.getElementById("groups-page"),
@@ -93,8 +94,10 @@
   const canvasView = { x: 0, y: 32, zoom: 1 };
   const groupCanvasViews = new Map();
   let exportingTasks = false;
+  let taskOrderRevision = 0;
   let canvasPanKey = false;
   let drag = null;
+  let suppressNextClick = false;
   let pendingImageNode = null;
   let toastTimer = null;
   let nextNodeId = 0;
@@ -249,6 +252,7 @@
     try {
       const data = await api("/api/tasks");
       tasks = data.tasks || [];
+      taskOrderRevision = Number(data.orderRevision) || 0;
       groups = data.groups || [];
       if (data.templates) templates = data.templates;
       if (!groups.some(group => group.id === activeGroupId)) activeGroupId = groups[0]?.id || "";
@@ -276,6 +280,9 @@
     dom.exportAll.disabled = exportingTasks || !tasks.length;
     descriptionObserver.disconnect();
     const query = dom.search.value.trim().toLowerCase();
+    // 搜索过滤时隐藏把手：仅在完整列表下支持拖拽排序，避免只保存部分顺序。
+    const orderable = !query && tasks.length > 1;
+    dom.orderHint.hidden = !orderable;
     const filtered = tasks.filter(task =>
       !query || task.name.toLowerCase().includes(query) || (task.description || "").toLowerCase().includes(query)
     );
@@ -284,7 +291,8 @@
       return;
     }
     dom.taskList.innerHTML = filtered.map(task => `
-      <button class="task-item${current?.name === task.name ? " active" : ""}" data-task="${esc(task.name)}">
+      <button class="task-item${current?.name === task.name ? " active" : ""}" data-task="${esc(task.name)}"
+        ${orderable ? `data-task-row="${esc(task.name)}" title="拖动排序，也可用 ↑ / ↓ 移动"` : ""}>
         <span class="task-line">
           <span class="task-name">${esc(task.name)}</span>
           <span class="task-badge ${task.type}">${task.type === "flow" ? "流程" : "脚本"}</span>
@@ -321,8 +329,7 @@
       <div class="canvas-stage">
       <div class="boundary"><span class="boundary-dot"></span><span>开始</span><span class="boundary-line"></span><span>从上到下执行</span></div>
       <div class="group-members" id="group-members">${members.length ? members.map((task, index) => `
-        <div class="task-entry" data-task-entry="${esc(task.name)}">
-          <button class="task-sort-handle" data-task-drag="${esc(task.name)}" title="拖动排序，也可用 ↑ / ↓ 移动" aria-label="调整 ${esc(task.name)} 的顺序"><span>${index + 1}</span><span aria-hidden="true">⠿</span></button>
+        <div class="task-entry" data-task-entry="${esc(task.name)}" tabindex="0" title="拖动排序，也可用 ↑ / ↓ 移动">
           <div class="group-member-info"><p class="group-member-name">${esc(task.name)}</p>${task.description ? `<p class="group-member-desc">${esc(task.description)}</p>` : ""}</div>
           <button class="icon-button group-remove" data-remove-group-task="${esc(task.name)}" title="移出当前分组" aria-label="将 ${esc(task.name)} 移出当前分组">×</button>
         </div>`).join("") : '<div class="group-empty"><div class="empty-symbol">＋</div><h2>拖拽任务到这里</h2><p>从任务列表拖入任务，或点击任务旁的＋加入当前分组。</p></div>'}</div>
@@ -384,8 +391,7 @@
     const query = groupTaskQuery.trim().toLowerCase();
     const filtered = tasks.filter(task => task.name.toLowerCase().includes(query) || (task.description || "").toLowerCase().includes(query));
     dom.groupSources.innerHTML = filtered.length ? filtered.map(task => `
-      <div class="group-source-task" data-group-task-source="${esc(task.name)}">
-        <button class="task-sort-handle" data-group-task-drag="${esc(task.name)}" title="拖入分组" aria-label="将 ${esc(task.name)} 拖入分组">⠿</button>
+      <div class="group-source-task" data-group-task-source="${esc(task.name)}" tabindex="0" title="拖入分组">
         <div class="group-member-info"><p class="group-member-name">${esc(task.name)}</p><p class="group-member-desc">${members.has(task.name) ? "已在当前分组" : task.type === "flow" ? "流程任务" : "脚本任务"}</p></div>
         <button class="icon-button" data-add-group-task="${esc(task.name)}" ${members.has(task.name) ? "disabled" : ""} title="加入当前分组" aria-label="将 ${esc(task.name)} 加入当前分组">${members.has(task.name) ? "✓" : "＋"}</button>
       </div>`).join("") : `<div class="inspector-empty">${query ? "没有匹配的任务" : "请先在任务管理中创建任务"}</div>`;
@@ -475,6 +481,38 @@
     form.elements.namedItem("name").focus();
   }
 
+  /** 保存任务列表顺序；版本不一致时服务端返回 409，刷新后由用户重试。 */
+  async function saveTaskOrder(names, focusName = null) {
+    const before = tasks.map(task => task.name);
+    if (names.length !== before.length || names.every((name, index) => name === before[index])) {
+      renderTaskList();
+      return;
+    }
+    await perform(async () => {
+      try {
+        const result = await api("/api/tasks/order", {
+          method: "PUT", headers: { "If-Match": String(taskOrderRevision) },
+          body: JSON.stringify({ taskNames: names })
+        });
+        taskOrderRevision = Number(result.revision) || taskOrderRevision;
+        const byName = new Map(tasks.map(task => [task.name, task]));
+        tasks = names.map(name => byName.get(name)).filter(Boolean);
+        renderTaskList();
+        if (dom.groupSources) renderGroupTaskSources();
+        toast("任务顺序已保存");
+      } catch (error) {
+        await loadTasks();
+        throw error;
+      }
+    });
+    // perform 期间任务栏是 inert 状态，结束后再恢复键盘焦点。
+    if (focusName) {
+      const handle = [...dom.taskList.querySelectorAll("[data-task-row]")]
+        .find(item => item.dataset.taskRow === focusName);
+      handle?.focus({ preventScroll: true });
+    }
+  }
+
   async function moveGroupTask(groupId, name, targetName, after) {
     const group = groups.find(item => item.id === groupId);
     if (!group || name === targetName || !group.taskNames.includes(name) || !group.taskNames.includes(targetName)) return;
@@ -513,7 +551,7 @@
         renderGroupsPage();
         dom.groupSources.scrollTop = sourceScrollTop;
         if (focusName) {
-          const handle = [...dom.groupMembers.querySelectorAll("[data-task-drag]")].find(handle => handle.dataset.taskDrag === focusName);
+          const handle = [...dom.groupMembers.querySelectorAll("[data-task-entry]")].find(handle => handle.dataset.taskEntry === focusName);
           handle?.focus({ preventScroll: true });
           if (handle) revealCanvasElement(handle.closest(".group-canvas"), handle.closest(".task-entry"));
         }
@@ -979,7 +1017,7 @@
       const touch = event.pointerType === "touch";
       const forced = !touch && (canvasPanKey || event.button === 1);
       if (event.button !== 0 && event.button !== 1) return;
-      if (!forced && event.target.closest(touch ? "[data-drag],[data-task-drag]" : "button,[data-drop],[data-drag],.task-entry")) return;
+      if (!forced && event.target.closest(touch ? "[data-drag],.task-entry" : "button,[data-drop],[data-drag],.task-entry")) return;
       if (pointers.size && (!touch || pointers.size >= 2)) return;
       if (!pointers.size) {
         moved = false;
@@ -2351,6 +2389,12 @@
   }
 
   document.addEventListener("click", event => {
+    // 拖动刚结束时忽略随后的 click，避免误触任务或按钮。
+    if (suppressNextClick) {
+      suppressNextClick = false;
+      event.preventDefault();
+      return;
+    }
     const pageLink = event.target.closest("[data-page]");
     if (pageLink) {
       event.preventDefault();
@@ -2610,8 +2654,37 @@
     }
   });
 
+  /** 卡片拖动入口：鼠标立即生效；触屏长按 400ms 后生效，避免和页面滚动冲突。 */
+  function beginCardDrag(event, draft, card) {
+    draft.pointerId = event.pointerId;
+    draft.startX = event.clientX;
+    draft.startY = event.clientY;
+    draft.active = false;
+    draft.target = null;
+    draft.card = card;
+    draft.armed = event.pointerType === "mouse";
+    drag = draft;
+    if (draft.armed) {
+      // 不阻止默认事件，短按仍按普通点击处理；拖动阈值与 click 屏蔽负责区分。
+      card.setPointerCapture?.(event.pointerId);
+      return;
+    }
+    draft.pressTimer = setTimeout(() => {
+      if (drag !== draft) return;
+      draft.armed = true;
+      card.setPointerCapture?.(event.pointerId);
+      navigator.vibrate?.(12);
+    }, 400);
+  }
+
   document.addEventListener("pointerdown", event => {
     if (busy || drag || !event.isPrimary || event.button !== 0) return;
+    // 任务列表：整行都可以拖动；搜索过滤时不挂 data-task-row，避免只保存部分顺序。
+    const orderRow = event.target.closest("[data-task-row]");
+    if (orderRow && dom.taskList.contains(orderRow)) {
+      beginCardDrag(event, { kind: "task-order", name: orderRow.dataset.taskRow }, orderRow);
+      return;
+    }
     const templateCard = event.target.closest("[data-template-card]");
     if (templateCard) {
       if (event.target.closest("[data-edit-template],[data-template-settings]")) return;
@@ -2626,22 +2699,15 @@
       if (handle) event.preventDefault();
       return;
     }
-    const sourceHandle = event.target.closest("[data-group-task-drag]");
+    // 分组成员与任务库：按住卡片任意位置即可拖动，触屏需长按；按钮保留原点击行为。
     const sourceCard = event.target.closest("[data-group-task-source]");
-    if (sourceHandle || (sourceCard && event.pointerType === "mouse" && !event.target.closest("button"))) {
-      const handle = sourceHandle || sourceCard;
-      event.preventDefault();
-      drag = { kind: "group-task", name: sourceHandle?.dataset.groupTaskDrag || sourceCard.dataset.groupTaskSource,
-        pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, active: false, target: null };
-      handle.setPointerCapture?.(event.pointerId);
+    if (sourceCard && !event.target.closest("button")) {
+      beginCardDrag(event, { kind: "group-task", name: sourceCard.dataset.groupTaskSource }, sourceCard);
       return;
     }
-    const taskHandle = event.target.closest("[data-task-drag]");
-    if (taskHandle) {
-      event.preventDefault();
-      drag = { kind: "task", groupId: activeGroupId, name: taskHandle.dataset.taskDrag,
-        pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, active: false, target: null };
-      taskHandle.setPointerCapture?.(event.pointerId);
+    const taskCard = event.target.closest("[data-task-entry]");
+    if (taskCard && !event.target.closest("button")) {
+      beginCardDrag(event, { kind: "task", groupId: activeGroupId, name: taskCard.dataset.taskEntry }, taskCard);
       return;
     }
     const handle = event.target.closest("[data-drag]");
@@ -2685,6 +2751,14 @@
 
   document.addEventListener("pointermove", event => {
     if (drag?.pointerId !== event.pointerId) return;
+    if (drag.armed === false) {
+      // 触屏尚未长按成功：手指移动视为滚动，取消本次待拖动。
+      if (Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) > 8) {
+        clearTimeout(drag.pressTimer);
+        drag = null;
+      }
+      return;
+    }
     if (!drag.active) {
       if (Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 6) return;
       drag.active = true;
@@ -2693,7 +2767,7 @@
         dom.modal.hidden = true;
       }
       const label = ["node", "template"].includes(drag.kind) ? drag.label
-        : ["task", "group-task"].includes(drag.kind) ? drag.name
+        : ["task", "group-task", "task-order"].includes(drag.kind) ? drag.name
         : catalogFlat[drag.defIndex]?.[1] || "添加模块";
       createDragGhost(label, event);
       document.body.classList.add("dragging-module");
@@ -2702,6 +2776,11 @@
     drag.ghost.style.left = `${event.clientX + 12}px`;
     drag.ghost.style.top = `${event.clientY - 34}px`;
     drag.point = { x: event.clientX, y: event.clientY };
+    if (drag.kind === "task-order") {
+      moveTaskOrderRow(event.clientY);
+      if (!drag.panFrame) drag.panFrame = requestAnimationFrame(scrollWhileTaskOrdering);
+      return;
+    }
     if (["task", "group-task"].includes(drag.kind)) {
       updateTaskDrop(event.clientX, event.clientY);
       if (!drag.panFrame) drag.panFrame = requestAnimationFrame(scrollWhileTaskDragging);
@@ -2735,6 +2814,41 @@
     const after = y >= (bounds.top + bounds.bottom) / 2;
     row.classList.add(after ? "drop-after" : "drop-before");
     drag.target = { groupId: activeGroupId, name: row.dataset.taskEntry, after };
+  }
+
+  /** 拖动任务列表行：按指针位置在 DOM 中插入，松手后再一次性保存。 */
+  function moveTaskOrderRow(y) {
+    const row = [...dom.taskList.querySelectorAll("[data-task-row]")]
+      .find(item => item.dataset.taskRow === drag?.name);
+    if (!row) return;
+    row.classList.add("task-row-dragging");
+    const others = [...dom.taskList.querySelectorAll("[data-task-row]")].filter(item => item !== row);
+    const hit = others.find(item => {
+      const bounds = item.getBoundingClientRect();
+      return y >= bounds.top && y <= bounds.bottom;
+    });
+    if (hit) {
+      const bounds = hit.getBoundingClientRect();
+      dom.taskList.insertBefore(row, y >= (bounds.top + bounds.bottom) / 2 ? hit.nextSibling : hit);
+      return;
+    }
+    const bounds = dom.taskList.getBoundingClientRect();
+    if (y < bounds.top) dom.taskList.insertBefore(row, dom.taskList.firstElementChild);
+    else if (y > bounds.bottom) dom.taskList.appendChild(row);
+  }
+
+  function scrollWhileTaskOrdering() {
+    if (!drag || drag.kind !== "task-order") return;
+    drag.panFrame = null;
+    const { y } = drag.point;
+    const bounds = dom.taskList.getBoundingClientRect();
+    if (y < bounds.top || y > bounds.bottom) return;
+    const edge = Math.min(48, bounds.height / 4);
+    const delta = y < bounds.top + edge ? -10 : y > bounds.bottom - edge ? 10 : 0;
+    if (!delta) return;
+    dom.taskList.scrollTop += delta;
+    moveTaskOrderRow(y);
+    drag.panFrame = requestAnimationFrame(scrollWhileTaskOrdering);
   }
 
   function scrollWhileTaskDragging() {
@@ -2777,12 +2891,23 @@
   }
 
   document.addEventListener("keydown", event => {
-    const handle = event.target.closest("[data-task-drag]");
+    const orderRow = event.target.closest("[data-task-row]");
+    if (orderRow && !busy && !drag && ["ArrowUp", "ArrowDown"].includes(event.key)) {
+      event.preventDefault();
+      const names = tasks.map(task => task.name);
+      const from = names.indexOf(orderRow.dataset.taskRow);
+      const to = from + (event.key === "ArrowDown" ? 1 : -1);
+      if (from < 0 || to < 0 || to >= names.length) return;
+      names.splice(to, 0, names.splice(from, 1)[0]);
+      saveTaskOrder(names, orderRow.dataset.taskRow);
+      return;
+    }
+    const handle = event.target.closest("[data-task-entry]");
     if (!handle || busy || drag || !["ArrowUp", "ArrowDown"].includes(event.key)) return;
     event.preventDefault();
     const group = groups.find(item => item.id === activeGroupId);
     if (!group) return;
-    const index = group.taskNames.indexOf(handle.dataset.taskDrag);
+    const index = group.taskNames.indexOf(handle.dataset.taskEntry);
     const targetName = group.taskNames[index + (event.key === "ArrowDown" ? 1 : -1)];
     if (targetName) moveGroupTask(group.id, handle.dataset.taskDrag, targetName, event.key === "ArrowDown");
   });
@@ -2851,11 +2976,25 @@
     if (drag?.pointerId !== event.pointerId) return;
     const state = drag;
     drag = null;
+    clearTimeout(state.pressTimer);
     if (state.panFrame) cancelAnimationFrame(state.panFrame);
     state.ghost?.remove();
     document.body.classList.remove("dragging-module");
     clearDropHighlights();
     if (!state.active) return;
+    // 拖动结束后浏览器仍会派发 click，屏蔽这次点击避免误开任务。
+    suppressNextClick = true;
+    setTimeout(() => { suppressNextClick = false; }, 400);
+    if (state.kind === "task-order") {
+      const names = [...dom.taskList.querySelectorAll("[data-task-row]")].map(row => row.dataset.taskRow);
+      const before = tasks.map(task => task.name);
+      if (names.length === before.length && names.some((name, index) => name !== before[index])) {
+        saveTaskOrder(names, state.name);
+      } else {
+        renderTaskList();
+      }
+      return;
+    }
     if (["task", "group-task"].includes(state.kind)) {
       if (state.target) {
         const target = state.target;
@@ -2888,12 +3027,25 @@
 
   document.addEventListener("pointercancel", event => {
     if (drag?.pointerId !== event.pointerId) return;
+    clearTimeout(drag.pressTimer);
     if (drag.panFrame) cancelAnimationFrame(drag.panFrame);
     drag.ghost?.remove();
     if (drag.fromModal) dom.modal.hidden = false;
+    const reorderCancelled = drag.kind === "task-order";
     drag = null;
     document.body.classList.remove("dragging-module");
     clearDropHighlights();
+    if (reorderCancelled) renderTaskList();
+  });
+
+  // 长按拖动的触屏场景下阻止页面跟随滚动，松手后恢复。
+  document.addEventListener("touchmove", event => {
+    if (drag?.armed) event.preventDefault();
+  }, { passive: false });
+
+  // 触屏长按开始拖动后屏蔽系统上下文菜单。
+  document.addEventListener("contextmenu", event => {
+    if (drag?.armed) event.preventDefault();
   });
 
   function clearGroupDropHighlights() {

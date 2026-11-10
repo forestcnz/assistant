@@ -13,6 +13,7 @@ import com.forest.android.assistant.core.task.ImageHistory
 import com.forest.android.assistant.core.task.TaskLoop
 import com.forest.android.assistant.core.task.TaskManager
 import com.forest.android.assistant.core.task.TaskGroups
+import com.forest.android.assistant.core.task.TaskOrder
 import com.forest.android.assistant.core.task.TaskZip
 import fi.iki.elonen.NanoHTTPD
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -116,6 +117,7 @@ private class EditorHttpServer(
         return when {
             segments == listOf("api", "task-bundle") -> exportTaskBundle(session)
             segments == listOf("api", "tasks") -> tasks(session)
+            segments == listOf("api", "tasks", "order") -> taskOrder(session)
             segments[1] == "task-groups" && segments.size <= 3 -> groupRoute(session, segments.getOrNull(2))
             segments[1] == "flow-templates" -> templateRoute(session, segments.getOrNull(2), segments.drop(3))
             segments.size >= 3 && segments[1] == "tasks" -> taskRoute(
@@ -162,6 +164,7 @@ private class EditorHttpServer(
                 )
             }
             json(Response.Status.OK, JSONObject().put("tasks", items)
+                .put("orderRevision", TaskOrder.read(context).revision)
                 .put("groups", JSONArray(TaskGroups.list(context).map(TaskGroups::toJson)))
                 .put("templates", JSONArray(FlowTemplates.list(context).map(FlowTemplates::toJson))))
         }
@@ -176,6 +179,34 @@ private class EditorHttpServer(
             json(Response.Status.CREATED, JSONObject().put("name", task.name).put("type", type))
         }
         else -> methodNotAllowed()
+    }
+
+    /** 任务列表顺序：GET 返回当前顺序与版本，PUT 携带 If-Match 保存拖拽结果。 */
+    @Synchronized
+    private fun taskOrder(session: IHTTPSession): Response = try {
+        when (session.method) {
+            Method.GET -> {
+                val snapshot = TaskOrder.read(context)
+                json(Response.Status.OK, JSONObject()
+                    .put("taskNames", JSONArray(TaskManager.listTasks(context).map { it.name }))
+                    .put("revision", snapshot.revision))
+            }
+            Method.PUT -> {
+                val revision = session.headers["if-match"]?.toLongOrNull()
+                    ?: throw IllegalArgumentException("缺少任务顺序版本，请刷新后重试")
+                val names = jsonBody(session).getJSONArray("taskNames")
+                val snapshot = TaskOrder.save(context, revision,
+                    (0 until names.length()).map(names::getString))
+                json(Response.Status.OK, JSONObject().put("ok", true).put("revision", snapshot.revision))
+            }
+            else -> methodNotAllowed()
+        }
+    } catch (error: ConcurrentModificationException) {
+        json(Response.Status.CONFLICT, JSONObject().put("error", error.message))
+    } catch (error: IllegalArgumentException) {
+        json(Response.Status.BAD_REQUEST, JSONObject().put("error", error.message))
+    } catch (error: org.json.JSONException) {
+        json(Response.Status.BAD_REQUEST, JSONObject().put("error", "任务顺序数据不合法"))
     }
 
     private fun groupRoute(session: IHTTPSession, id: String?): Response = try {

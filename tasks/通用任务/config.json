@@ -1,6 +1,0 @@
-{
-  "name": "通用任务",
-  "desc": "每秒检查通用图片，找到后点击一次，持续运行至手动停止。",
-  "designSize": [1920, 1080],
-  "loop": { "mode": "count", "count": 1, "interval": 0 }
-}

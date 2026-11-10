@@ -55,11 +55,18 @@ object TaskManager {
     /** 任务入口脚本（固定名 task.js，点击任务即运行） */
     fun scriptFile(context: Context, name: String): File = File(taskDir(context, name), "task.js")
 
-    /** 列出所有任务（含 task.js 的目录），按名称排序 */
+    /** 列出所有任务（含 task.js 的目录）：按用户拖拽设置的顺序排列，未排序的新任务追加在末尾 */
     fun listTasks(context: Context): List<TaskInfo> =
-        tasksRoot(context).listFiles { f -> f.isDirectory && !f.name.startsWith(".deleted-") && File(f, "task.js").isFile }
-            ?.map { TaskInfo(it.name) }
-            ?.sortedBy { it.name }
+        TaskOrder.ordered(context, taskNamesIn(tasksRoot(context))).map { TaskInfo(it) }
+
+    /** 当前任务名集合（顺序无关）；供任务顺序等逻辑校验名称使用 */
+    internal fun availableTaskNames(context: Context): Set<String> =
+        taskNamesIn(tasksRoot(context)).toSet()
+
+    /** 扫描任务根目录下包含 task.js 的任务目录；已被删除标记的临时目录不计入 */
+    private fun taskNamesIn(root: File): List<String> =
+        root.listFiles { f -> f.isDirectory && !f.name.startsWith(".deleted-") && File(f, "task.js").isFile }
+            ?.map { it.name }
             ?: emptyList()
 
     /** 首次启动时将 APK 内 assets/tasks/ 的任务复制到可写任务目录；已有任务保留用户修改。 */
@@ -188,27 +195,29 @@ object TaskManager {
             config.put("loop", savedLoop.put("mode", loop.mode.key).put("count", loop.count)
                 .put("durationSec", loop.durationSec).put("interval", loop.intervalSec))
         }
-        TaskGroups.withTaskReferences(context, oldName, name) {
-            val suppressionMarker = if (name != oldName) markBuiltinSuppressed(context, oldName) else null
-            try {
-                writeAtomic(configFile, config.toString(2) + "\n")
-            } catch (error: Exception) {
-                suppressionMarker?.delete()
-                throw error
+        TaskOrder.withTaskOrderReference(context, oldName, name) {
+            TaskGroups.withTaskReferences(context, oldName, name) {
+                val suppressionMarker = if (name != oldName) markBuiltinSuppressed(context, oldName) else null
+                try {
+                    writeAtomic(configFile, config.toString(2) + "\n")
+                } catch (error: Exception) {
+                    suppressionMarker?.delete()
+                    throw error
+                }
+                if (name == oldName) return@withTaskReferences TaskInfo(name)
+                if (!source.renameTo(target)) {
+                    suppressionMarker?.delete()
+                    if (oldConfig != null) writeAtomic(configFile, oldConfig) else configFile.delete()
+                    error("无法重命名任务目录")
+                }
+                if (!ScheduleManager.rename(context, oldName, name)) {
+                    check(target.renameTo(source)) { "任务已改名为「$name」，但定时迁移失败，请重新设置定时" }
+                    suppressionMarker?.delete()
+                    if (oldConfig != null) writeAtomic(configFile, oldConfig) else configFile.delete()
+                    error("无法迁移定时设置，已恢复原名称")
+                }
+                TaskInfo(name)
             }
-            if (name == oldName) return@withTaskReferences TaskInfo(name)
-            if (!source.renameTo(target)) {
-                suppressionMarker?.delete()
-                if (oldConfig != null) writeAtomic(configFile, oldConfig) else configFile.delete()
-                error("无法重命名任务目录")
-            }
-            if (!ScheduleManager.rename(context, oldName, name)) {
-                check(target.renameTo(source)) { "任务已改名为「$name」，但定时迁移失败，请重新设置定时" }
-                suppressionMarker?.delete()
-                if (oldConfig != null) writeAtomic(configFile, oldConfig) else configFile.delete()
-                error("无法迁移定时设置，已恢复原名称")
-            }
-            TaskInfo(name)
         }
     }
 
@@ -218,19 +227,21 @@ object TaskManager {
         requireTasksIdle()
         val directory = checkedTaskDir(context, name)
         check(File(directory, "task.js").isFile) { "任务不存在" }
-        TaskGroups.withTaskReferences(context, name, null) {
-            val suppressionMarker = markBuiltinSuppressed(context, name)
-            val removed = File(tasksRoot(context), ".deleted-${java.util.UUID.randomUUID()}")
-            if (!directory.renameTo(removed)) {
-                suppressionMarker?.delete()
-                error("无法删除任务目录")
+        TaskOrder.withTaskOrderReference(context, name, null) {
+            TaskGroups.withTaskReferences(context, name, null) {
+                val suppressionMarker = markBuiltinSuppressed(context, name)
+                val removed = File(tasksRoot(context), ".deleted-${java.util.UUID.randomUUID()}")
+                if (!directory.renameTo(removed)) {
+                    suppressionMarker?.delete()
+                    error("无法删除任务目录")
+                }
+                if (!ScheduleManager.remove(context, name)) {
+                    check(removed.renameTo(directory)) { "定时取消失败，任务文件暂存于 ${removed.name}" }
+                    suppressionMarker?.delete()
+                    error("无法取消该任务的定时设置，已恢复任务")
+                }
+                if (!removed.deleteRecursively()) android.util.Log.w("ScriptJs", "任务已移除，部分临时文件未清理：${removed.name}")
             }
-            if (!ScheduleManager.remove(context, name)) {
-                check(removed.renameTo(directory)) { "定时取消失败，任务文件暂存于 ${removed.name}" }
-                suppressionMarker?.delete()
-                error("无法取消该任务的定时设置，已恢复任务")
-            }
-            if (!removed.deleteRecursively()) android.util.Log.w("ScriptJs", "任务已移除，部分临时文件未清理：${removed.name}")
         }
     }
 

@@ -121,7 +121,7 @@ fun TaskGroupsPage(lifecycle: Lifecycle, modifier: Modifier = Modifier, onSwitch
             if (selected != null) IconButton(enabled = !busy, onClick = { selectedId = null }) { AppIcon(R.drawable.ic_back, "返回分组列表") }
             Column(Modifier.weight(1f)) {
                 Text(selected?.name ?: "全部分组", style = MaterialTheme.typography.titleMedium)
-                Text(if (selected == null) "同一任务可加入多个分组" else "长按把手排序 · 左滑移出任务",
+                Text(if (selected == null) "同一任务可加入多个分组" else "长按任务图标排序 · 左滑移出任务",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             if (selected == null) IconButton(enabled = !busy, onClick = { nameTarget = null; nameDialog = true }) { AppIcon(R.drawable.ic_add, "新建分组") }
@@ -321,9 +321,10 @@ private fun GroupMembersList(group: TaskGroup, busy: Boolean, modifier: Modifier
                 Surface(Modifier.fillMaxWidth(), color = if (dragging == name) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface,
                     shape = shape) {
                     Column {
-                        Row(Modifier.fillMaxWidth().heightIn(min = 76.dp).padding(end = 8.dp),
+                        Row(Modifier.fillMaxWidth().heightIn(min = 76.dp).padding(start = 6.dp, end = 8.dp),
                             verticalAlignment = Alignment.CenterVertically) {
-                            Box(Modifier.size(48.dp).semantics { contentDescription = "长按拖动 $name 排序" }
+                            // 长按任务图标即可拖动排序，不再单独显示拖拽符号。
+                            Box(Modifier.size(48.dp).semantics { contentDescription = "长按「$name」的图标拖动排序" }
                                 .onGloballyPositioned { handleTop = it.positionInRoot().y }
                                 .pointerInput(name, busy) {
                                     if (!busy) detectDragGesturesAfterLongPress(
@@ -335,8 +336,9 @@ private fun GroupMembersList(group: TaskGroup, busy: Boolean, modifier: Modifier
                                             dragging = null
                                             if (result != null && original != null && result != original.taskNames) latestSave(original, result) else draft = null
                                         }, onDragCancel = { dragging = null; draft = null })
-                                }, contentAlignment = Alignment.Center) { Text("⠿") }
-                            IconTile(R.drawable.ic_code, blue = true)
+                                }, contentAlignment = Alignment.Center) {
+                                IconTile(R.drawable.ic_code, blue = true)
+                            }
                             Column(Modifier.weight(1f).padding(horizontal = 12.dp, vertical = 12.dp)) {
                                 Text(name, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall)
                                 Text("第 ${index + 1} 个执行", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
