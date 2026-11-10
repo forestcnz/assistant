@@ -105,6 +105,9 @@ object ScriptRunner {
     @Volatile private var runStopRequested: AtomicBoolean? = null
     private var appContext: Context? = null
 
+    /** 用户是否已请求停止；流程的异常兜底据此避免停止后又被重跑。 */
+    internal fun isStopRequested(): Boolean = runStopRequested?.get() == true
+
     /** 日志去重：同内容 500ms 内只保留一条 */
     private val lastLogLock = Any()
     private var lastLogMsg: String? = null

@@ -85,7 +85,8 @@ data class FlowNode(
     val props: JSONObject = JSONObject()
 ) {
     val isContainer: Boolean
-        get() = type == "sequence" || type == "repeat" || type == "condition"
+        get() = type == "sequence" || type == "repeat" || type == "condition" ||
+            type == "imageSwitch" || type == "onError"
 
     val displayTitle: String
         get() = when {
@@ -123,6 +124,31 @@ data class FlowNode(
             "multiImage" -> "${props.optJSONArray("images")?.length() ?: 0} 张图片 · ${
                 if (props.optString("matchMode", "any") == "all") "全部存在" else "任一命中"
             }"
+            "waitClick" -> "${props.optString("asset", "未选择素材")} · ${
+                when {
+                    props.optInt("timeout", 10000) <= 0 -> "一直等待"
+                    else -> "最长 ${props.optInt("timeout", 10000)} ms"
+                }
+            }${if (props.optBoolean("stable", false)) " · 点击后等稳定" else ""}"
+            "waitStable" -> "画面稳定 · 最长 ${props.optInt("timeout", 10000)} ms"
+            "imageSwitch" -> "${children.size} 个命中分支 · 超时 ${props.optInt("timeout", 5000)} ms"
+            "switchCase" -> "${props.optString("asset", "未选择素材")}${
+                if (props.optBoolean("click", false)) " · 命中后点击" else ""
+            }"
+            "dialogClear" -> "${props.optJSONArray("images")?.length() ?: 0} 张弹窗图片 · 连续 ${
+                props.optInt("emptyRounds", 3)
+            } 轮无命中结束"
+            "repeatClick" -> "连点 ${props.optInt("count", 3)} 次 · X ${props.optInt("x", 0)} / Y ${props.optInt("y", 0)}"
+            "anchor" -> "锚点「${props.optString("name", "未命名")}」"
+            "onError" -> "异常兜底 · ${
+                if (props.optString("mode", "stop") == "restart") "重跑 ${props.optInt("retries", 1)} 次" else "执行后停止"
+            } · ${children.size} 个步骤"
+            "waitEvent" -> when (props.optString("mode", "duration")) {
+                "imageAppear" -> "${props.optString("asset", "未选择素材")} · 出现后继续"
+                "imageGone" -> "${props.optString("asset", "未选择素材")} · 消失后继续"
+                "forever" -> "一直等待到停止"
+                else -> "等待 ${props.optInt("duration", 60000)} ms"
+            }
             "log" -> props.optString("text", "记录日志")
             "stop" -> "停止当前任务与剩余队列"
             "continue" -> "跳过本轮余下步骤"
@@ -170,7 +196,8 @@ data class FlowNode(
         put("type", type)
         put("title", title)
         put("enabled", enabled)
-        if (children.isNotEmpty() || type == "sequence" || type == "repeat") {
+        if (children.isNotEmpty() || type == "sequence" || type == "repeat" ||
+            type == "imageSwitch" || type == "onError") {
             put("children", children.toJsonArray())
         }
         if (thenNodes.isNotEmpty() || elseNodes.isNotEmpty() || type == "condition") {

@@ -41,6 +41,7 @@
     common: [
       ["click", "点击", "坐标操作"],
       ["swipe", "滑动", "起点与终点"],
+      ["repeatClick", "连续点击", "同一位置点多次"],
       ["wait", "等待", "设置停留时间"],
       ["log", "记录日志", "输出运行信息"]
     ],
@@ -51,6 +52,9 @@
       ["repeat:until", "直到满足", "满足条件后退出"],
       ["repeat:forever", "持续循环", "直到跳出或停止"],
       ["condition", "条件分支", "如果 / 否则"],
+      ["imageSwitch", "图片分支", "按命中的图片分支"],
+      ["anchor", "锚点", "跳转目标标记"],
+      ["onError", "异常兜底", "出错时执行"],
       ["break", "退出循环", "跳出最近一层"],
       ["continue", "进入下一轮", "跳过本轮余下步骤"],
       ["endRound", "结束本轮", "完成当前整任务轮次"],
@@ -58,11 +62,15 @@
     ],
     screen: [
       ["image", "找图", "匹配图片，返回位置"],
+      ["waitClick", "等图点击", "图片出现后点击"],
       ["text", "找字", "匹配文字，返回位置"],
       ["waitCondition", "等待条件成立", "条件满足后继续"],
       ["waitImageAppear", "等待图片出现", "图片出现后继续"],
       ["waitImageGone", "等待图片消失", "图片消失后继续"],
-      ["multiImage", "多图匹配", "任一或全部命中"]
+      ["waitStable", "等待界面稳定", "画面停止变化后继续"],
+      ["multiImage", "多图匹配", "任一或全部命中"],
+      ["dialogClear", "弹窗清理", "循环点掉一组弹窗"],
+      ["waitEvent", "长等待", "固定时长或等图"]
     ]
   };
   const catalogFlat = Object.values(catalog).flat();
@@ -707,7 +715,69 @@
         onMatch: "recognize", onMiss: "continue", failure: "stop"
       });
     }
+    if (type === "waitClick") {
+      Object.assign(node.props, {
+        asset: "", threshold: 0.9, region: "", timeout: 10000, poll: 300,
+        offsetX: 0, offsetY: 0, afterWait: 0, stable: false,
+        clickRetry: 2, retryGap: 300, missLimit: 0,
+        onMiss: "stop", failure: "stop"
+      });
+    }
+    if (type === "waitStable") {
+      Object.assign(node.props, {
+        region: "", precision: "medium", diff: 0.02, frames: 2,
+        timeout: 10000, poll: 200, onTimeout: "continue"
+      });
+    }
+    if (type === "imageSwitch") {
+      Object.assign(node.props, { timeout: 5000, poll: 300, onMiss: "continue" });
+      node.children = [newSwitchCase()];
+      node.else = [];
+    }
+    if (type === "dialogClear") {
+      Object.assign(node.props, {
+        images: [{ asset: "", threshold: 0.9 }], poll: 200, emptyRounds: 3,
+        maxDuration: 0, maxClicks: 0, afterClick: "wait", afterWait: 300,
+        clickFailure: "skip", onDone: "continue"
+      });
+    }
+    if (type === "repeatClick") {
+      Object.assign(node.props, {
+        x: 960, y: 540, count: 3, interval: 300, jitter: 0, duration: 50, failure: "stop"
+      });
+    }
+    if (type === "waitEvent") {
+      Object.assign(node.props, {
+        mode: "duration", asset: "", threshold: 0.9, region: "",
+        duration: 60000, poll: 1000, heartbeat: 30000, onTimeout: "continue"
+      });
+    }
+    if (type === "anchor") node.props.name = "锚点1";
+    if (type === "onError") {
+      Object.assign(node.props, { mode: "stop", retries: 1, delay: 1000 });
+      node.children = [];
+    }
     return node;
+  }
+
+  /** 图片分支的单个命中项：素材 + 阈值，children 为命中后要执行的步骤。 */
+  function newSwitchCase() {
+    return {
+      id: uid(),
+      type: "switchCase",
+      title: "命中分支",
+      enabled: true,
+      props: { asset: "", threshold: 0.9, region: "", click: false, failure: "stop" },
+      children: []
+    };
+  }
+
+  function switchCases(node) {
+    return (node?.children || []).filter(child => child.type === "switchCase");
+  }
+
+  function switchCaseAt(node, index) {
+    return switchCases(node)[index] || null;
   }
 
   function nodeProperties(node) {
@@ -715,6 +785,12 @@
   }
 
   function nodeTitle(node) {
+    if (node.type === "switchCase") {
+      const name = String(nodeProperties(node).asset || "").replace(/^images[\\/]/, "");
+      return `命中分支 - ${name || "未选择图片"}`;
+    }
+    if (node.type === "anchor") return `锚点 - ${String(nodeProperties(node).name || "未命名")}`;
+    if (node.type === "onError") return `异常兜底 - ${nodeProperties(node).mode === "restart" ? "出错后重跑" : "出错后停止"}`;
     const key = node.type === "repeat" ? `repeat:${nodeProperties(node).mode || "count"}` : node.type;
     const moduleName = catalogFlat.find(def => def[0] === key)?.[1] || node.type;
     return `${moduleName} - ${node.title || moduleName}`;
@@ -735,6 +811,20 @@
       case "waitImageAppear": return `${p.asset || "未选择素材"} · 出现后继续`;
       case "waitImageGone": return `${p.asset || "未选择素材"} · 消失后继续`;
       case "multiImage": return `${(p.images || []).length} 张图片 · ${p.matchMode === "all" ? "全部存在" : "任一命中"}`;
+      case "waitClick": return `${p.asset || "未选择素材"} · ${Number(p.timeout) > 0 ? `最长 ${p.timeout || 10000} ms` : "一直等待"}${p.stable ? " · 点击后等稳定" : ""}`;
+      case "waitStable": return `画面稳定 · 最长 ${p.timeout ?? 10000} ms`;
+      case "imageSwitch": return `${(node.children || []).filter(c => c.type === "switchCase").length} 个命中分支 · 超时 ${p.timeout ?? 5000} ms`;
+      case "switchCase": return `${String(p.asset || "").replace(/^images[\\/]/, "") || "未选择素材"}${p.click ? " · 命中后点击" : ""}`;
+      case "dialogClear": return `${(p.images || []).length} 张弹窗图片 · 连续 ${p.emptyRounds ?? 3} 轮无命中结束`;
+      case "repeatClick": return `连点 ${p.count || 3} 次 · X ${p.x || 0} / Y ${p.y || 0}`;
+      case "waitEvent": return p.mode === "imageAppear" ? `${p.asset || "未选择素材"} · 出现后继续`
+        : p.mode === "imageGone" ? `${p.asset || "未选择素材"} · 消失后继续`
+        : p.mode === "forever" ? "一直等待到停止"
+        : `等待 ${p.duration || 60000} ms`;
+      case "anchor": return `跳转目标：${p.name || "未命名"}`;
+      case "onError": return p.mode === "restart"
+        ? `出错时执行 ${(node.children || []).length} 个步骤后重跑 ${p.retries ?? 1} 次`
+        : `出错时执行 ${(node.children || []).length} 个步骤后停止`;
       case "log": return p.text || "记录日志";
       case "stop": return "停止当前任务与剩余队列";
       case "continue": return "跳过本轮余下步骤";
@@ -775,6 +865,7 @@
 
   function countLeaves(node) {
     if (node.enabled === false) return 0;
+    if (node.type === "switchCase") return (node.children || []).reduce((sum, child) => sum + countLeaves(child), 0);
     if (node.children?.length) return node.children.reduce((sum, child) => sum + countLeaves(child), 0);
     if (node.then?.length || node.else?.length) {
       return [...(node.then || []), ...(node.else || [])].reduce((sum, child) => sum + countLeaves(child), 0);
@@ -783,7 +874,7 @@
   }
 
   function nodeSymbol(type) {
-    return ({ click: "⌖", swipe: "↗", wait: "◷", repeat: "↻", condition: "⑂", image: "▧", text: "T", waitCondition: "⌛", waitImageAppear: "▧", waitImageGone: "◌", multiImage: "▦", sequence: "≡", log: "≡", stop: "■" })[type] || "•";
+    return ({ click: "⌖", swipe: "↗", wait: "◷", repeat: "↻", condition: "⑂", image: "▧", text: "T", waitCondition: "⌛", waitImageAppear: "▧", waitImageGone: "◌", multiImage: "▦", sequence: "≡", log: "≡", stop: "■", waitClick: "▧", waitStable: "◎", imageSwitch: "⇄", switchCase: "◇", dialogClear: "✕", repeatClick: "⌖", waitEvent: "⏳", anchor: "⚑", onError: "⚠" })[type] || "•";
   }
 
   function listAt(parentId, slot) {
@@ -825,7 +916,7 @@
   }
 
   function renderNode(node, number) {
-    const isContainer = ["sequence", "repeat", "condition"].includes(node.type);
+    const isContainer = ["sequence", "repeat", "condition", "imageSwitch", "onError"].includes(node.type);
     const isExpanded = expanded.has(node.id);
     const title = nodeTitle(node);
     const asset = node.type === "image" ? (nodeProperties(node).asset || "") : "";
@@ -834,7 +925,26 @@
       : `<span class="node-symbol ${node.type}">${nodeSymbol(node.type)}</span>`;
     let children = "";
     if (isContainer && isExpanded) {
-      if (node.type === "condition") {
+      if (node.type === "onError") {
+        children = `
+          <div class="children">
+            <div class="branch-label">⚠ 出错时执行（不参与正常顺序）</div>
+            ${renderList(node.children || [], node.id, "children", `${number}.1`)}
+            <button class="inline-add" data-inline-add data-parent="${node.id}" data-slot="children">＋ 添加兜底步骤</button>
+          </div>`;
+      } else if (node.type === "imageSwitch") {
+        const cases = switchCases(node);
+        children = `
+          <div class="children">
+            ${cases.map((item, index) => `
+              <div class="branch-label">命中 ${index + 1}：${esc(String(item.props?.asset || "未选择图片").replace(/^images[\\/]/, ""))}${item.props?.click ? " · 命中后点击" : ""}</div>
+              ${renderList(item.children || [], item.id, "children", `${number}.${index + 1}`)}
+              <button class="inline-add" data-inline-add data-parent="${item.id}" data-slot="children">＋ 添加命中 ${index + 1} 的步骤</button>`).join("")}
+            <div class="branch-label">− 都不命中</div>
+            ${renderList(node.else || [], node.id, "else", `${number}.0`)}
+            <button class="inline-add" data-inline-add data-parent="${node.id}" data-slot="else">＋ 添加都不命中的步骤</button>
+          </div>`;
+      } else if (node.type === "condition") {
         children = `
           <div class="children">
             <div class="branch-label">✓ 条件成立</div>
@@ -855,7 +965,9 @@
     }
     const badge = node.type === "repeat"
       ? `<span class="node-badge">${(node.props?.mode || "count") === "count" ? `×${node.props?.count || 1}` : "循环"}</span>`
-      : "";
+      : node.type === "imageSwitch"
+        ? `<span class="node-badge">${switchCases(node).length} 分支</span>`
+        : "";
     return `
       <div class="flow-node${node.enabled === false ? " disabled" : ""}${selectedId === node.id ? " selected" : ""}" data-type="${node.type}" data-node="${node.id}">
         <div class="flow-row">
@@ -1137,8 +1249,14 @@
   function targetLabel(target) {
     if (!target.parentId) return "主流程末尾";
     const found = findNode(target.parentId);
-    const scope = target.slot === "then" ? "条件成立" : target.slot === "else" ? "否则" : "容器内部";
-    return `${found?.node?.title || "当前容器"} · ${scope}`;
+    const scope = target.slot === "then"
+      ? "条件成立"
+      : target.slot === "else"
+        ? (found?.node?.type === "imageSwitch" ? "都不命中" : "否则")
+        : found?.node?.type === "onError"
+          ? "出错时执行"
+          : "容器内部";
+    return `${found ? nodeTitle(found.node) : "当前容器"} · ${scope}`;
   }
 
   function renderInspector() {
@@ -1160,7 +1278,8 @@
         fields += fieldPair(numberField("终点 X", "endX", p.endX || 0), numberField("终点 Y", "endY", p.endY || 0));
       }
       fields += numberField(node.type === "swipe" ? "滑动时长 ms" : "按下时长 ms", "duration", p.duration || 0);
-      fields += choiceField("操作失败时", "failure", [["stop", "停止报错"], ["skip", "记录跳过"]], p.failure || "stop");
+      fields += retryFields(p);
+      fields += choiceField("操作失败时", "failure", [["stop", "停止报错"], ["skip", "记录跳过"], ...failureActions()], p.failure || "stop");
     }
     if (node.type === "wait") fields += numberField("等待时间 ms", "duration", p.duration || 1000);
     if (node.type === "log") {
@@ -1194,14 +1313,16 @@
     if (node.type === "waitCondition") {
       fields += conditionFields(p);
       fields += fieldPair(numberField("最长等待 ms", "timeout", p.timeout || 10000), numberField("轮询间隔 ms", "poll", p.poll || 300));
-      fields += choiceField("超时后", "onTimeout", [["stop", "停止报错"], ["continue", "继续下一步"]], p.onTimeout || "stop");
+      fields += retryFields(p);
+      fields += choiceField("超时后", "onTimeout", [["stop", "停止报错"], ["continue", "继续下一步"], ...failureActions()], p.onTimeout || "stop");
     }
     if (node.type === "waitImageAppear" || node.type === "waitImageGone") {
       fields += assetField(p.asset || "");
       fields += thresholdField("匹配阈值 %", "threshold", p.threshold);
       fields += textField("识别区域 [X,Y,宽,高]", "region", p.region || "");
       fields += fieldPair(numberField("最长等待 ms", "timeout", p.timeout || 10000), numberField("轮询间隔 ms", "poll", p.poll || 300));
-      fields += choiceField("超时后", "onTimeout", [["stop", "停止报错"], ["continue", "继续下一步"]], p.onTimeout || "stop");
+      fields += retryFields(p);
+      fields += choiceField("超时后", "onTimeout", [["stop", "停止报错"], ["continue", "继续下一步"], ...failureActions()], p.onTimeout || "stop");
     }
     if (node.type === "multiImage") {
       fields += choiceField("匹配方式", "matchMode", [["any", "任一命中"], ["all", "全部存在"]], p.matchMode || "any");
@@ -1209,18 +1330,152 @@
       fields += textField("识别区域 [X,Y,宽,高]", "region", p.region || "");
       fields += fieldPair(numberField("最长等待 ms", "timeout", p.timeout || 5000), numberField("轮询间隔 ms", "poll", p.poll || 300));
       fields += choiceField("命中后", "onMatch", [["recognize", "仅识别"], ["click", "点击命中图片"]], p.onMatch || "recognize");
-      fields += choiceField("未命中时", "onMiss", [["continue", "继续执行"], ["stop", "停止报错"]], p.onMiss || "continue");
+      fields += retryFields(p);
+      fields += choiceField("未命中时", "onMiss", [["continue", "继续执行"], ["stop", "停止报错"], ...failureActions()], p.onMiss || "continue");
       if ((p.onMatch || "recognize") === "click") {
-        fields += choiceField("点击失败时", "failure", [["stop", "停止报错"], ["skip", "记录跳过"]], p.failure || "stop");
+        fields += choiceField("点击失败时", "failure", [["stop", "停止报错"], ["skip", "记录跳过"], ...failureActions()], p.failure || "stop");
       }
+    }
+    if (node.type === "waitClick") {
+      fields += assetField(p.asset || "");
+      fields += thresholdField("匹配阈值 %", "threshold", p.threshold);
+      fields += textField("识别区域 [X,Y,宽,高]", "region", p.region || "");
+      fields += fieldPair(
+        numberField("最长等待 ms", "timeout", p.timeout ?? 10000),
+        numberField("轮询间隔 ms", "poll", p.poll || 300)
+      );
+      fields += fieldNote("最长等待填 0 表示一直等到手动停止。");
+      fields += fieldPair(
+        numberField("点击偏移 X", "offsetX", p.offsetX || 0, null, -2000),
+        numberField("点击偏移 Y", "offsetY", p.offsetY || 0, null, -2000)
+      );
+      fields += choiceField("点击后等待", "stable", [["false", "固定时长"], ["true", "等界面稳定"]], p.stable ? "true" : "false");
+      fields += fieldPair(
+        numberField("点击后等待 ms", "afterWait", p.afterWait ?? 0),
+        numberField("点击重定位次数", "clickRetry", p.clickRetry ?? 2, 5)
+      );
+      fields += fieldPair(
+        numberField("未命中上限", "missLimit", p.missLimit || 0),
+        numberField("失败重试次数", "retries", p.retries ?? 0, 5)
+      );
+      fields += numberField("重试间隔 ms", "retryGap", p.retryGap ?? 300);
+      fields += fieldNote("未命中上限 0 表示不限；点击失败会先重新定位，再按失败重试次数整体重试。");
+      fields += choiceField("未命中时", "onMiss", [["stop", "停止报错"], ["continue", "继续下一步"], ...failureActions()], p.onMiss || "stop");
+      fields += choiceField("重定位后仍点击失败", "failure", [["stop", "停止报错"], ["skip", "记录跳过"]], p.failure || "stop");
+    }
+    if (node.type === "waitStable") {
+      fields += textField("检测区域 [X,Y,宽,高]", "region", p.region || "");
+      fields += choiceField("采样精度", "precision", [["low", "低"], ["medium", "中"], ["high", "高"]], p.precision || "medium");
+      fields += thresholdField("变化阈值 %", "diff", p.diff ?? 0.02);
+      fields += fieldPair(
+        numberField("连续稳定帧数", "frames", p.frames || 2, 10),
+        numberField("检查间隔 ms", "poll", p.poll || 200)
+      );
+      fields += numberField("最长等待 ms", "timeout", p.timeout ?? 10000);
+      fields += fieldNote("最长等待填 0 表示一直等到手动停止。");
+      fields += retryFields(p);
+      fields += choiceField("超时后", "onTimeout", [["stop", "停止报错"], ["continue", "继续下一步"], ...failureActions()], p.onTimeout || "continue");
+    }
+    if (node.type === "imageSwitch") {
+      const cases = switchCases(node);
+      fields += fieldPair(
+        numberField("最长等待 ms", "timeout", p.timeout ?? 5000),
+        numberField("轮询间隔 ms", "poll", p.poll || 300)
+      );
+      fields += fieldNote("最长等待填 0 表示一直等到手动停止；命中后点击在下面的每个命中项里单独设置。");
+      fields += retryFields(p);
+      fields += choiceField("都不命中时", "onMiss", [["continue", "执行「都不命中」步骤"], ["stop", "停止报错"], ...failureActions()], p.onMiss || "continue");
+      fields += `<div class="multi-image-fields">${cases.map((item, index) => `
+        <div class="multi-image-item">
+          <div class="multi-image-head"><strong>命中 ${index + 1}</strong>
+            <button type="button" class="text-button danger" data-remove-switch-case="${index}" ${cases.length <= 1 ? "disabled" : ""}>移除</button>
+          </div>
+          ${assetField(item.props?.asset || "", `switchAsset:${index}`, `命中图片 ${index + 1}`)}
+          ${thresholdField("匹配阈值 %", `switchThreshold:${index}`, item.props?.threshold ?? 0.9)}
+          ${textField("识别区域 [X,Y,宽,高]", `switchRegion:${index}`, item.props?.region || "")}
+          <button type="button" class="secondary-button" data-toggle-switch-click="${index}">${item.props?.click ? "命中后点击：已开启" : "命中后点击：关闭"}</button>
+        </div>`).join("")}
+        <button type="button" class="secondary-button add-match-image" data-add-switch-case>＋ 添加命中分支</button>
+      </div>`;
+    }
+    if (node.type === "switchCase") {
+      fields += assetField(p.asset || "");
+      fields += thresholdField("匹配阈值 %", "threshold", p.threshold);
+      fields += textField("识别区域 [X,Y,宽,高]", "region", p.region || "");
+      fields += choiceField("命中后点击", "click", [["false", "不点击"], ["true", "点击命中位置"]], p.click ? "true" : "false");
+    }
+    if (node.type === "dialogClear") {
+      fields += multiImageFields(p);
+      fields += fieldPair(
+        numberField("单轮间隔 ms", "poll", p.poll || 200),
+        numberField("连续无命中轮数", "emptyRounds", p.emptyRounds || 3, 20)
+      );
+      fields += fieldPair(
+        numberField("最长运行 ms", "maxDuration", p.maxDuration || 0),
+        numberField("点击上限", "maxClicks", p.maxClicks || 0)
+      );
+      fields += fieldNote("最长运行和点击上限填 0 表示不限制。");
+      fields += choiceField("每次点击后", "afterClick", [["wait", "固定时长"], ["stable", "等界面稳定"]], p.afterClick || "wait");
+      fields += numberField("点击后等待 ms", "afterWait", p.afterWait ?? 300);
+      fields += choiceField("点击失败", "clickFailure", [["skip", "跳过继续"], ["stop", "停止报错"]], p.clickFailure || "skip");
+      fields += choiceField("结束后", "onDone", [["continue", "继续下一步"], ["stop", "停止任务"]], p.onDone || "continue");
+    }
+    if (node.type === "repeatClick") {
+      fields += fieldPair(numberField("X 坐标", "x", p.x || 0), numberField("Y 坐标", "y", p.y || 0));
+      fields += fieldPair(
+        numberField("点击次数", "count", p.count || 3, 999),
+        numberField("间隔 ms", "interval", p.interval || 300)
+      );
+      fields += fieldPair(
+        numberField("随机抖动 px", "jitter", p.jitter || 0, 200),
+        numberField("按下时长 ms", "duration", p.duration ?? 50)
+      );
+      fields += retryFields(p);
+      fields += choiceField("失败时", "failure", [["stop", "停止报错"], ["skip", "记录跳过"], ...failureActions()], p.failure || "stop");
+    }
+    if (node.type === "waitEvent") {
+      fields += choiceField("等待方式", "mode", [
+        ["duration", "固定时长"], ["imageAppear", "直到图片出现"], ["imageGone", "直到图片消失"], ["forever", "一直等待"]
+      ], p.mode || "duration");
+      if (["imageAppear", "imageGone"].includes(p.mode)) {
+        fields += assetField(p.asset || "");
+        fields += thresholdField("匹配阈值 %", "threshold", p.threshold);
+        fields += textField("识别区域 [X,Y,宽,高]", "region", p.region || "");
+      }
+      const stillLabel = p.mode === "duration" ? "等待时长 ms" : "最长等待 ms";
+      fields += numberField(stillLabel, "duration", p.duration ?? 60000);
+      fields += fieldPair(
+        numberField("检查间隔 ms", "poll", p.poll || 1000),
+        numberField("心跳间隔 ms", "heartbeat", p.heartbeat ?? 30000)
+      );
+      fields += fieldNote(p.mode === "duration"
+        ? "按检查间隔分段等待，并按时输出心跳日志。"
+        : "最长等待填 0 表示一直等到条件满足；心跳间隔填 0 表示不输出日志。");
+      if (["imageAppear", "imageGone"].includes(p.mode)) {
+        fields += retryFields(p);
+        fields += choiceField("超时后", "onTimeout", [["stop", "停止报错"], ["continue", "继续下一步"], ...failureActions()], p.onTimeout || "continue");
+      }
+    }
+    if (node.type === "anchor") {
+      fields += textField("锚点名称", "name", p.name || "");
+      fields += fieldNote("锚点只能放在主流程顶层；失败处理里的「跳转」会从这里继续往下执行。");
+    }
+    if (node.type === "onError") {
+      fields += choiceField("出错后", "mode", [["stop", "执行兜底步骤后停止"], ["restart", "执行兜底步骤后重跑"]], p.mode || "stop");
+      fields += fieldPair(
+        numberField("重跑次数", "retries", p.retries ?? 1, 5),
+        numberField("重跑前等待 ms", "delay", p.delay ?? 1000)
+      );
+      fields += fieldNote("兜底步骤只在流程出错时执行，不参与正常顺序；素材缺失、截屏不可用这类错误不会触发兜底。");
     }
     if (["image", "text"].includes(node.type)) {
       fields += textField("识别区域 [X,Y,宽,高]", "region", p.region || "");
       fields += fieldPair(numberField("等待超时 ms", "timeout", p.timeout || 5000), numberField("轮询间隔 ms", "poll", p.poll || 300));
+      fields += retryFields(p);
       fields += choiceField("命中后", "onMatch", [["recognize", "仅识别"], ["click", "点击命中位置"]], p.onMatch || "recognize");
-      fields += choiceField("未命中时", "onMiss", [["continue", "继续执行"], ["stop", "停止报错"]], p.onMiss || "continue");
+      fields += choiceField("未命中时", "onMiss", [["continue", "继续执行"], ["stop", "停止报错"], ...failureActions()], p.onMiss || "continue");
       if ((p.onMatch || "recognize") === "click") {
-        fields += choiceField("点击失败时", "failure", [["stop", "停止报错"], ["skip", "记录跳过"]], p.failure || "stop");
+        fields += choiceField("点击失败时", "failure", [["stop", "停止报错"], ["skip", "记录跳过"], ...failureActions()], p.failure || "stop");
       }
     }
     return `
@@ -1289,8 +1544,8 @@
     return `<label class="field"><span>${label}</span><input class="input" data-prop="${key}" value="${esc(value)}"></label>`;
   }
 
-  function numberField(label, key, value, max = null) {
-    return `<label class="field"><span>${label}</span><input class="input" type="number" min="0"${max == null ? "" : ` max="${max}"`} data-prop="${key}" data-number="true" value="${esc(value)}"></label>`;
+  function numberField(label, key, value, max = null, min = 0) {
+    return `<label class="field"><span>${label}</span><input class="input" type="number" min="${min}"${max == null ? "" : ` max="${max}"`} data-prop="${key}" data-number="true" value="${esc(value)}"></label>`;
   }
 
   function thresholdField(label, key, value) {
@@ -1305,6 +1560,27 @@
     return `<div class="field"><span>${label}</span><div class="choice-grid">${options.map(([value, text]) =>
       `<button class="choice${selected === value ? " active" : ""}" data-choice-key="${key}" data-choice-value="${value}">${text}</button>`
     ).join("")}</div></div>`;
+  }
+
+  /** 失败后的额外动作：回到流程开头，或跳到主流程顶层的锚点。 */
+  function failureActions() {
+    const names = [...new Set((flow?.nodes || [])
+      .filter(node => node.type === "anchor" && node.enabled !== false)
+      .map(node => String(node.props?.name || "").trim())
+      .filter(Boolean))];
+    return [["start", "回流程开头"], ...names.map(name => [`goto:${name}`, `跳转·${name}`])];
+  }
+
+  /** 通用失败重试设置，所有动作类步骤共用。 */
+  function retryFields(p, gapDefault = 500) {
+    return fieldPair(
+      numberField("失败重试次数", "retries", p.retries ?? 0, 5),
+      numberField("重试间隔 ms", "retryGap", p.retryGap ?? gapDefault)
+    );
+  }
+
+  function fieldNote(text) {
+    return `<p class="panel-sub field-note">${esc(text)}</p>`;
   }
 
   function conditionFields(p) {
@@ -1388,8 +1664,17 @@
   function addModule(defIndex, targetOverride = null) {
     const definition = catalogFlat[defIndex];
     if (!definition) return null;
-    const node = newNode(definition);
+    const type = definition[0].split(":")[0];
     const target = { ...(targetOverride || insertTarget) };
+    if ((type === "anchor" || type === "onError") && target.parentId) {
+      toast("锚点和异常兜底只能放在主流程顶层", true);
+      return null;
+    }
+    if (type === "onError" && (flow.nodes || []).some(item => item.type === "onError")) {
+      toast("异常兜底只能添加一个", true);
+      return null;
+    }
+    const node = newNode(definition);
     const list = listAt(target.parentId, target.slot);
     if (!list) return null;
     const index = target.index === Number.MAX_SAFE_INTEGER ? list.length : Math.min(target.index, list.length);
@@ -1409,6 +1694,10 @@
   function moveNode(id, target) {
     const found = findNode(id);
     if (!found || containsNode(found.node, target.parentId)) return false;
+    if (["anchor", "onError"].includes(found.node.type) && target.parentId) {
+      toast("锚点和异常兜底只能放在主流程顶层", true);
+      return false;
+    }
     let destinationIndex = target.index;
     if (found.parentId === target.parentId && found.slot === target.slot && found.index < destinationIndex) {
       destinationIndex--;
@@ -2249,6 +2538,36 @@
   function updateNodeProperty(key, value, rerender = true) {
     const found = findNode(selectedId);
     if (!found) return;
+    const switchThreshold = key.match(/^switchThreshold:(\d+)Percent$/);
+    if (switchThreshold) {
+      const item = switchCaseAt(found.node, Number(switchThreshold[1]));
+      if (!item) return;
+      pushFlowUndoSnapshot();
+      (item.props ||= {}).threshold = Math.max(0, Math.min(100, Number(value) || 0)) / 100;
+      setDirty(true);
+      if (rerender) renderFlowEditor();
+      return;
+    }
+    const switchAsset = key.match(/^switchAsset:(\d+)$/);
+    if (switchAsset) {
+      const item = switchCaseAt(found.node, Number(switchAsset[1]));
+      if (!item) return;
+      pushFlowUndoSnapshot();
+      (item.props ||= {}).asset = value;
+      setDirty(true);
+      if (rerender) renderFlowEditor();
+      return;
+    }
+    const switchRegion = key.match(/^switchRegion:(\d+)$/);
+    if (switchRegion) {
+      const item = switchCaseAt(found.node, Number(switchRegion[1]));
+      if (!item) return;
+      pushFlowUndoSnapshot();
+      (item.props ||= {}).region = value;
+      setDirty(true);
+      if (rerender) renderFlowEditor();
+      return;
+    }
     const multiThreshold = key.match(/^multiThreshold:(\d+)Percent$/);
     if (multiThreshold) {
       const index = Number(multiThreshold[1]);
@@ -2275,6 +2594,8 @@
       key = key.slice(0, -"Percent".length);
       value = Math.max(0, Math.min(100, Number(value) || 0)) / 100;
     }
+    // 开关类属性由按钮的字符串取值传入，写入前转成布尔值
+    if (["stable", "click"].includes(key)) value = value === true || value === "true";
     setNodeProperty(found.node, key, value);
     if (rerender) renderFlowEditor();
   }
@@ -2294,6 +2615,16 @@
   }
 
   function assignNodeAsset(node, key, name) {
+    const switchAsset = key.match(/^switchAsset:(\d+)$/);
+    if (switchAsset) {
+      const item = switchCaseAt(node, Number(switchAsset[1]));
+      if (!item) return;
+      pushFlowUndoSnapshot();
+      (item.props ||= {}).asset = name;
+      setDirty(true);
+      renderFlowEditor();
+      return;
+    }
     const multiAsset = key.match(/^multiAsset:(\d+)$/);
     if (multiAsset) {
       const index = Number(multiAsset[1]);
@@ -2316,7 +2647,7 @@
       if (!assets.length) return toast("当前任务没有图片，请先上传");
       showModal(`
         <div class="modal-head">
-          <div><h3>选择任务素材</h3><p>${key === "asset" ? "找图或等待步骤" : key.startsWith("multiAsset:") ? `多图匹配 · 图片 ${Number(key.split(":")[1]) + 1}` : key === "secondValue" ? "第二项图片条件" : "第一项图片条件"}</p></div>
+          <div><h3>选择任务素材</h3><p>${key === "asset" ? "找图或等待步骤" : key.startsWith("multiAsset:") ? `多图匹配 · 图片 ${Number(key.split(":")[1]) + 1}` : key.startsWith("switchAsset:") ? `图片分支 · 命中图片 ${Number(key.split(":")[1]) + 1}` : key === "secondValue" ? "第二项图片条件" : "第一项图片条件"}</p></div>
           <button class="modal-close" data-close-modal aria-label="关闭">×</button>
         </div>
         <div class="modal-body assets-grid">${assets.map(asset => `
@@ -2602,6 +2933,42 @@
       if (!Array.isArray(images) || images.length <= 1) return;
       pushFlowUndoSnapshot();
       images.splice(Number(removeMatchImage.dataset.removeMatchImage), 1);
+      setDirty(true);
+      renderFlowEditor();
+      return;
+    }
+    const addSwitchCase = target.closest("[data-add-switch-case]");
+    if (addSwitchCase) {
+      const found = findNode(selectedId);
+      if (!found) return;
+      const item = newSwitchCase();
+      pushFlowUndoSnapshot();
+      if (!Array.isArray(found.node.children)) found.node.children = [];
+      found.node.children.push(item);
+      expanded.add(found.node.id);
+      setDirty(true);
+      renderFlowEditor();
+      return;
+    }
+    const removeSwitchCase = target.closest("[data-remove-switch-case]");
+    if (removeSwitchCase) {
+      const found = findNode(selectedId);
+      const cases = switchCases(found?.node);
+      if (!found || cases.length <= 1 || !Array.isArray(found.node.children)) return;
+      const victim = cases[Number(removeSwitchCase.dataset.removeSwitchCase)];
+      if (!victim) return;
+      pushFlowUndoSnapshot();
+      found.node.children = found.node.children.filter(child => child !== victim);
+      setDirty(true);
+      renderFlowEditor();
+      return;
+    }
+    const toggleSwitchClick = target.closest("[data-toggle-switch-click]");
+    if (toggleSwitchClick) {
+      const item = switchCaseAt(findNode(selectedId)?.node, Number(toggleSwitchClick.dataset.toggleSwitchClick));
+      if (!item) return;
+      pushFlowUndoSnapshot();
+      (item.props ||= {}).click = !item.props.click;
       setDirty(true);
       renderFlowEditor();
       return;

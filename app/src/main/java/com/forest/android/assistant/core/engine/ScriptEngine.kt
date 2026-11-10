@@ -262,6 +262,7 @@ object ScriptEngine {
             throw ScriptStoppedException()
         }
         guard("__flowNow") { _ -> android.os.SystemClock.elapsedRealtime() }
+        guard("__flowRunning") { _ -> !ScriptRunner.isStopRequested() }
         guard("__flowNode") { args ->
             ScriptRunner.setFlowNode(args.getOrNull(0)?.toString().orEmpty())
             null

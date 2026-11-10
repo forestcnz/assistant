@@ -76,6 +76,45 @@ class FlowTemplateContentTest {
         assertEquals("images/two-new.png", images.getJSONObject(1).getString("asset"))
     }
 
+    @Test fun acceptsNewFlowModulesInTemplatesAndRemapsTheirImages() {
+        val switchCase = JSONObject().put("id", "case").put("type", "switchCase")
+            .put("props", JSONObject().put("asset", "case.png"))
+        val switch = JSONObject().put("id", "switch").put("type", "imageSwitch")
+            .put("props", JSONObject())
+            .put("children", JSONArray().put(switchCase))
+        val waitClick = JSONObject().put("id", "wait_click").put("type", "waitClick")
+            .put("props", JSONObject().put("asset", "click.png"))
+        val waitEvent = JSONObject().put("id", "wait_event").put("type", "waitEvent")
+            .put("props", JSONObject().put("mode", "imageAppear").put("asset", "event.png"))
+        val clear = JSONObject().put("id", "clear").put("type", "dialogClear")
+            .put("props", JSONObject().put("images", JSONArray().put(JSONObject().put("asset", "dialog.png"))))
+        val tap = JSONObject().put("id", "tap").put("type", "repeatClick").put("props", JSONObject())
+        val stable = JSONObject().put("id", "stable").put("type", "waitStable").put("props", JSONObject())
+        val source = document(switch, waitClick, waitEvent, clear, tap, stable)
+
+        assertEquals(setOf("case.png", "click.png", "event.png", "dialog.png"), FlowTemplateContent.imageNames(source))
+        val updated = FlowTemplateContent.remapImages(source, mapOf(
+            "case.png" to "case-new.png", "click.png" to "click-new.png",
+            "event.png" to "event-new.png", "dialog.png" to "dialog-new.png"
+        ))
+        val nodes = updated.getJSONArray("nodes")
+        assertEquals("case-new.png",
+            nodes.getJSONObject(0).getJSONArray("children").getJSONObject(0).getJSONObject("props").getString("asset"))
+        assertEquals("click-new.png", nodes.getJSONObject(1).getJSONObject("props").getString("asset"))
+        assertEquals("event-new.png", nodes.getJSONObject(2).getJSONObject("props").getString("asset"))
+        assertEquals("dialog-new.png",
+            nodes.getJSONObject(3).getJSONObject("props").getJSONArray("images").getJSONObject(0).getString("asset"))
+    }
+
+    @Test fun previewsTemplatesContainingAnchors() {
+        val anchor = JSONObject().put("id", "anchor1").put("type", "anchor")
+            .put("props", JSONObject().put("name", "起点"))
+        val parsed = FlowTemplateContent.parse(document(anchor).toString())
+        val preview = FlowTemplateContent.preview(parsed)
+        assertTrue(preview.contains("if (__flowGate(\"anchor:起点\"))"))
+        assertTrue(preview.contains("function __flowRecover()"))
+    }
+
     @Test fun reusesIdenticalImagesAndPreservesConflictingTargetImages() {
         val source = temporary.newFolder("source")
         val target = temporary.newFolder("target")

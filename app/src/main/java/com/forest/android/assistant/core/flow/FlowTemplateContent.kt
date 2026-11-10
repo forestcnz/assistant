@@ -16,6 +16,8 @@ object FlowTemplateContent {
         val types = setOf(
             "click", "swipe", "wait", "log", "sequence", "repeat", "condition",
             "image", "text", "waitCondition", "waitImageAppear", "waitImageGone", "multiImage",
+            "waitClick", "waitStable", "imageSwitch", "switchCase", "dialogClear", "repeatClick", "waitEvent",
+            "anchor", "onError",
             "break", "continue", "endRound", "stop"
         )
         fun visit(nodes: JSONArray, depth: Int) {
@@ -38,6 +40,11 @@ object FlowTemplateContent {
     /** 单独保存的 break / continue 可在插入循环后使用；用一层循环校验其余参数。 */
     fun preview(document: JSONObject): String {
         if (document.getJSONArray("nodes").length() == 0) return FlowCompiler.compile(document)
+        // 锚点和异常兜底只能位于主流程顶层，不能包进校验用的循环
+        val special = (0 until document.getJSONArray("nodes").length()).any { index ->
+            document.getJSONArray("nodes").getJSONObject(index).optString("type") in setOf("anchor", "onError")
+        }
+        if (special) return FlowCompiler.compile(document)
         val wrapper = JSONObject().put("id", "validation_${java.util.UUID.randomUUID().toString().replace('-', '_')}")
             .put("type", "repeat").put("props", JSONObject().put("mode", "count").put("count", 1))
             .put("children", document.getJSONArray("nodes"))
@@ -78,8 +85,10 @@ object FlowTemplateContent {
                 val first = node.optString("conditionKind", props?.optString("conditionKind", "image") ?: "image")
                 val second = node.optString("secondKind", props?.optString("secondKind", "text") ?: "text")
                 listOfNotNull(node, props).forEach { fields ->
-                    if (type in setOf("image", "waitImageAppear", "waitImageGone")) action(fields, "asset")
-                    if (type == "multiImage") {
+                    if (type in setOf(
+                            "image", "waitImageAppear", "waitImageGone", "waitClick", "waitEvent", "switchCase"
+                        )) action(fields, "asset")
+                    if (type == "multiImage" || type == "dialogClear") {
                         fields.optJSONArray("images")?.let { images ->
                             for (index in 0 until images.length()) {
                                 images.optJSONObject(index)?.let { action(it, "asset") }
