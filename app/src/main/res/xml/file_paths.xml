@@ -2,4 +2,5 @@
 <paths>
     <!-- 任务 zip 导出目录（外部私有目录），用于分享给其他应用 -->
     <external-files-path name="task_zip" path="zip/" />
+    <external-files-path name="app_update" path="app-updates/" />
 </paths>

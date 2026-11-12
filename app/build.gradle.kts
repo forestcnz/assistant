@@ -19,6 +19,13 @@ android {
         testInstrumentationRunner = "com.forest.android.assistant.core.image.ImageApiInstrumentation"
         versionCode = providers.gradleProperty("appVersionCode").orElse("1").get().toInt()
         versionName = providers.gradleProperty("appVersionName").orElse("0.1.6").get()
+        val giteeRepository = providers.gradleProperty("appUpdateGiteeRepository").orElse("").get()
+        require(giteeRepository.isEmpty() || giteeRepository.matches(Regex("[A-Za-z0-9_-]+/[A-Za-z0-9_.-]+"))) {
+            "appUpdateGiteeRepository must be a Gitee owner/repository path"
+        }
+        buildConfigField("String", "UPDATE_GITEE_REPOSITORY", "\"$giteeRepository\"")
+        val releaseCertificate = providers.gradleProperty("appReleaseCertificateSha256").get()
+        buildConfigField("String", "RELEASE_CERTIFICATE_SHA256", "\"$releaseCertificate\"")
     }
 
     // 正式签名密钥不入库（仓库是公开的）。CI 由 workflow 从 RELEASE_KEYSTORE_BASE64 解码成文件，
@@ -64,6 +71,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 

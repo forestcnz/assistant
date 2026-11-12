@@ -4,6 +4,7 @@ import android.content.ComponentName
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
+import android.content.ActivityNotFoundException
 import android.os.Bundle
 import android.provider.Settings
 import androidx.activity.ComponentActivity
@@ -54,6 +55,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -96,6 +101,8 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import androidx.lifecycle.ViewModelProvider
+import androidx.core.net.toUri
 import com.forest.android.assistant.core.engine.ScriptRunner
 import com.forest.android.assistant.core.floaty.ConsoleOverlay
 import com.forest.android.assistant.core.floaty.FloatyManager
@@ -111,6 +118,9 @@ import com.forest.android.assistant.core.task.TaskLoop
 import com.forest.android.assistant.core.task.TaskOrder
 import com.forest.android.assistant.core.task.ImageHistory
 import com.forest.android.assistant.core.task.TaskZip
+import com.forest.android.assistant.core.update.AppUpdateModel
+import com.forest.android.assistant.core.update.AppUpdateState
+import com.forest.android.assistant.core.update.DownloadPhase
 import com.forest.android.assistant.core.web.LanWebServer
 import com.forest.android.assistant.core.web.LanWebService
 import com.forest.android.assistant.core.web.LanWebState
@@ -123,6 +133,10 @@ import com.forest.android.assistant.ui.WorkCard
 import android.widget.Toast
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -135,6 +149,8 @@ class MainActivity : ComponentActivity() {
     companion object {
         const val EXTRA_SHOW_TASKS = "show_recorded_tasks"
     }
+
+    private val appUpdate by lazy { ViewModelProvider(this)[AppUpdateModel::class.java] }
 
     // 权限状态（页面可见期间每秒轮询刷新）
     private var a11yEnabled by mutableStateOf(false)
@@ -438,6 +454,20 @@ class MainActivity : ComponentActivity() {
             }
         }
         lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                appUpdate.state.first { it.official != null }
+                appUpdate.check(manual = false)
+                appUpdate.state.map { it.downloadPhase }.distinctUntilChanged().collectLatest { phase ->
+                    if (phase == DownloadPhase.DOWNLOADING) {
+                        while (true) {
+                            appUpdate.refreshDownload()
+                            delay(1000)
+                        }
+                    }
+                }
+            }
+        }
+        lifecycleScope.launch {
             // APK 内置任务先复制到可写目录，之后任务列表与运行逻辑都从该目录读取。
             withContext(Dispatchers.IO) {
                 TaskManager.ensureBuiltinTasks(this@MainActivity)
@@ -554,6 +584,16 @@ class MainActivity : ComponentActivity() {
         val logs by ScriptRunner.logs.collectAsState()
         val launcherEnabled by ScriptRunner.launcherEnabled.collectAsState()
         val pageStates = rememberSaveableStateHolder()
+        val updateState by appUpdate.state.collectAsState()
+        var showAppUpdate by rememberSaveable { mutableStateOf(false) }
+        val updateSnackbar = remember { SnackbarHostState() }
+
+        LaunchedEffect(updateState.announcement) {
+            val release = updateState.announcement ?: return@LaunchedEffect
+            if (!appUpdate.markAnnounced(release.versionCode) || showAppUpdate) return@LaunchedEffect
+            val action = updateSnackbar.showSnackbar("发现新版 ${release.tag}", "查看", duration = SnackbarDuration.Long)
+            if (action == SnackbarResult.ActionPerformed) showAppUpdate = true
+        }
 
         // 任务副标题（描述/目标应用）：任务集合变化时后台读取一次，避免每秒轮询做文件 IO
         LaunchedEffect(tasks, taskMetadataVersion) {
@@ -570,7 +610,8 @@ class MainActivity : ComponentActivity() {
 
         Scaffold(
             containerColor = MaterialTheme.colorScheme.background,
-            bottomBar = { AppBottomNavigation(mainTab) { mainTab = it } }
+            bottomBar = { AppBottomNavigation(mainTab) { mainTab = it } },
+            snackbarHost = { SnackbarHost(updateSnackbar) },
         ) { padding ->
             // 内容在宽屏居中；各页面分别保存滚动位置。
             Column(
@@ -593,12 +634,16 @@ class MainActivity : ComponentActivity() {
                                 0 -> TaskWorkspace(runState)
                                 1 -> LogsTab(logs)
                                 2 -> PermissionsTab()
-                                else -> SettingsTab(launcherEnabled)
+                                else -> SettingsTab(launcherEnabled, updateState) { showAppUpdate = true }
                             }
                         }
                     }
                 }
             }
+        }
+
+        if (showAppUpdate) {
+            AppUpdateDialog(updateState, appUpdate, ::installAppUpdate) { showAppUpdate = false }
         }
 
 
@@ -1627,7 +1672,7 @@ class MainActivity : ComponentActivity() {
 
     /** 设置页：悬浮球与截屏通道；屏幕拾取工具和悬浮日志入口统一收在悬浮窗面板中。 */
     @Composable
-    private fun SettingsTab(launcherEnabled: Boolean) {
+    private fun SettingsTab(launcherEnabled: Boolean, update: AppUpdateState, onAppUpdate: () -> Unit) {
         val webState by LanWebServer.state.collectAsState()
         var showWebEditor by remember { mutableStateOf(false) }
         Column(Modifier.fillMaxSize()) {
@@ -1662,6 +1707,16 @@ class MainActivity : ComponentActivity() {
                         R.drawable.ic_code
                     ) { showWebEditor = true }
                 }
+                SectionLabel("版本")
+                WorkCard(Modifier.fillMaxWidth()) {
+                    val status = when (update.downloadPhase) {
+                        DownloadPhase.STARTING, DownloadPhase.DOWNLOADING -> "正在下载"
+                        DownloadPhase.VERIFYING -> "正在校验"
+                        DownloadPhase.READY -> "更新已下载"
+                        DownloadPhase.IDLE -> update.offers.firstOrNull()?.let { "发现新版 ${it.manifest.tag}" }
+                    }
+                    ToolRow("应用更新", status ?: "当前版本 ${update.currentVersion}", onClick = onAppUpdate)
+                }
             }
         }
         if (showWebEditor) {
@@ -1676,6 +1731,39 @@ class MainActivity : ComponentActivity() {
                 },
                 onDismiss = { showWebEditor = false }
             )
+        }
+    }
+
+    private fun installAppUpdate() {
+        fun taskBusy(): Boolean {
+            if (!ScriptRunner.state.value.running && !RecordingService.active) return false
+            Toast.makeText(this, "请在任务或录制结束后安装", Toast.LENGTH_SHORT).show()
+            return true
+        }
+        if (taskBusy()) return
+        try {
+            if (!packageManager.canRequestPackageInstalls()) {
+                Toast.makeText(this, "允许来自此来源的应用后，返回并点击立即安装", Toast.LENGTH_LONG).show()
+                startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, "package:$packageName".toUri()))
+                return
+            }
+        } catch (_: ActivityNotFoundException) {
+            Toast.makeText(this, "系统无法打开安装来源设置", Toast.LENGTH_LONG).show()
+            return
+        } catch (_: SecurityException) {
+            Toast.makeText(this, "系统限制了应用安装", Toast.LENGTH_LONG).show()
+            return
+        }
+        lifecycleScope.launch {
+            val installer = appUpdate.prepareInstaller() ?: return@launch
+            if (!lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) || taskBusy()) return@launch
+            try {
+                startActivity(installer)
+            } catch (_: ActivityNotFoundException) {
+                Toast.makeText(this@MainActivity, "系统无法打开 APK 安装器", Toast.LENGTH_LONG).show()
+            } catch (_: SecurityException) {
+                Toast.makeText(this@MainActivity, "系统限制了应用安装", Toast.LENGTH_LONG).show()
+            }
         }
     }
 
