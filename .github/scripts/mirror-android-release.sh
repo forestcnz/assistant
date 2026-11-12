@@ -62,7 +62,9 @@ for name in "$apk" update.json; do
   file="$temp/$name"
   if [[ "$name" == update.json ]]; then file="$temp/gitee-update.json"; fi
   if ! jq -e --arg name "$name" 'any(.[]; .name == $name)' "$temp/assets.json" > /dev/null; then
-    curl "${curl_options[@]}" --fail -o /dev/null \
+    echo "Uploading $name to Gitee"
+    curl "${curl_options[@]}" --max-time 900 --fail -o /dev/null \
+      --write-out 'Gitee upload returned HTTP %{http_code} after %{time_total}s (%{size_upload} bytes sent)\n' \
       --form-string "access_token=$GITEE_ACCESS_TOKEN" --form "file=@$file;filename=$name" \
       "$api/$release_id/attach_files"
   fi
