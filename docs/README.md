@@ -13,4 +13,4 @@
 
 正式版由 `vX.Y.Z` 标签触发。GitHub Release 附带 `update.json` 和正式签名 APK，自动检查从 Latest 读取清单。应用内安装入口位于「设置 → 应用更新」。已有正式版用户首次手动覆盖安装支持此功能的版本，后续可通过应用更新。
 
-Gitee 镜像仓库由 `gradle.properties` 中的 `appUpdateGiteeRepository` 指定。在 GitHub 仓库的 Actions secrets 添加有 Gitee 仓库写入权限的 `GITEE_ACCESS_TOKEN`，正式发布后 CI 会同步同一份 APK 和对应清单。令牌持有者与仓库所有者不同时，将持有者的用户名填入 Actions 变量 `GITEE_USERNAME`。添加令牌后可重跑最新正式版的发布流程补传镜像。
+Gitee 下载仓库由 `gradle.properties` 中的 `appUpdateGiteeRepository` 指定。Release 标签基于 Gitee 仓库已有的默认分支。将有该仓库写入权限的 `GITEE_ACCESS_TOKEN` 添加到 GitHub Actions secrets，正式发布后 CI 会上传同一份 APK 和应用读取的更新清单。补传时从 `master` 手动运行 Android build and release，在 `mirror_tag` 填写最新正式版的标签。
