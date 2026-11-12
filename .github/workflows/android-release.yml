@@ -182,7 +182,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GITEE_ACCESS_TOKEN: ${{ secrets.GITEE_ACCESS_TOKEN }}
-          GITEE_USERNAME: ${{ vars.GITEE_USERNAME }}
         shell: bash
         run: bash .github/scripts/mirror-android-release.sh '${{ steps.publish.outputs.tag }}'
 
@@ -193,13 +192,10 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
       - name: Mirror existing stable release to Gitee
         env:
           GH_TOKEN: ${{ github.token }}
           GITEE_ACCESS_TOKEN: ${{ secrets.GITEE_ACCESS_TOKEN }}
-          GITEE_USERNAME: ${{ vars.GITEE_USERNAME }}
           MIRROR_TAG: ${{ inputs.mirror_tag }}
         shell: bash
         run: |
