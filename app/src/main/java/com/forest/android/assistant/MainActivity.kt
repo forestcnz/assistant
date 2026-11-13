@@ -1713,7 +1713,7 @@ class MainActivity : ComponentActivity() {
                         DownloadPhase.STARTING, DownloadPhase.DOWNLOADING -> "正在下载"
                         DownloadPhase.VERIFYING -> "正在校验"
                         DownloadPhase.READY -> "更新已下载"
-                        DownloadPhase.IDLE -> update.offers.firstOrNull()?.let { "发现新版 ${it.manifest.tag}" }
+                        DownloadPhase.IDLE -> update.availableUpdate?.let { "发现新版 ${it.tag}" }
                     }
                     ToolRow("应用更新", status ?: "当前版本 ${update.currentVersion}", onClick = onAppUpdate)
                 }

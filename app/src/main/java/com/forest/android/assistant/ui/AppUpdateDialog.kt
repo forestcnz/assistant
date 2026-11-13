@@ -31,7 +31,7 @@ internal fun AppUpdateDialog(
     onDismiss: () -> Unit,
 ) {
     val context = LocalContext.current
-    val offer = state.download ?: state.offers.firstOrNull()
+    val update = state.availableUpdate
     val phase = state.downloadPhase
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -48,10 +48,10 @@ internal fun AppUpdateDialog(
                         Text("自动检查更新")
                         Switch(checked = state.automatic, onCheckedChange = model::setAutomatic)
                     }
-                    offer?.let {
-                        Text("${it.manifest.tag} · ${Formatter.formatShortFileSize(context, it.manifest.sizeBytes)}",
+                    update?.let {
+                        Text("${it.tag} · ${Formatter.formatShortFileSize(context, it.sizeBytes)}",
                             style = MaterialTheme.typography.titleMedium)
-                        if (it.manifest.notes.isNotBlank()) Text(it.manifest.notes)
+                        if (it.notes.isNotBlank()) Text(it.notes)
                     }
                     state.notice?.let { Text(it) }
                     when (phase) {
@@ -59,27 +59,19 @@ internal fun AppUpdateDialog(
                             TextButton(onClick = { model.check(manual = true) }, enabled = !state.checking) {
                                 Text(if (state.checking) "正在检查…" else "检查更新")
                             }
-                            if (!state.checking) state.offers.getOrNull(1)?.let { alternate ->
-                                TextButton(onClick = { model.startDownload(alternate.source) }) {
-                                    Text("从 ${alternate.source.label} 下载")
-                                }
-                            }
                         }
                         DownloadPhase.STARTING -> Text("正在准备下载…")
                         DownloadPhase.DOWNLOADING -> {
-                            val source = checkNotNull(state.download)
-                            val progress = (state.receivedBytes.toDouble() / source.manifest.sizeBytes).toFloat().coerceIn(0f, 1f)
-                            Text(if (state.paused) "${source.source.label} 下载已暂停，等待重试"
-                                else "正在从 ${source.source.label} 下载 ${(progress * 100).toInt()}%")
+                            val size = checkNotNull(update).sizeBytes
+                            val progress = (state.receivedBytes.toDouble() / size).toFloat().coerceIn(0f, 1f)
+                            Text(if (state.paused) "下载已暂停，等待重试"
+                                else "正在从 GitHub 下载 ${(progress * 100).toInt()}%")
                             LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
-                            if (state.canSwitchSource) {
-                                TextButton(onClick = model::switchDownloadSource) { Text("切换下载源") }
-                            }
                             TextButton(onClick = model::cancelDownload) { Text("取消下载") }
                         }
                         DownloadPhase.VERIFYING -> Text("正在校验安装包…")
                         DownloadPhase.READY -> {
-                            Text("已从 ${offer?.source?.label.orEmpty()} 下载，可以安装。")
+                            Text("下载完成，可以安装。")
                             TextButton(onClick = model::cancelDownload) { Text("删除安装包") }
                         }
                     }
@@ -91,12 +83,12 @@ internal fun AppUpdateDialog(
         confirmButton = {
             if (phase == DownloadPhase.READY) {
                 TextButton(onClick = onInstall) { Text("立即安装") }
-            } else if (phase == DownloadPhase.IDLE && offer != null && !state.checking) {
-                TextButton(onClick = { model.startDownload(offer.source) }) { Text("从 ${offer.source.label} 下载") }
+            } else if (phase == DownloadPhase.IDLE && update != null && !state.checking) {
+                TextButton(onClick = model::startDownload) { Text("从 GitHub 下载") }
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text(if (offer != null) "稍后" else "关闭") }
+            TextButton(onClick = onDismiss) { Text(if (update != null) "稍后" else "关闭") }
         },
     )
 }

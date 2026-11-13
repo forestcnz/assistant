@@ -5,23 +5,17 @@ on:
     tags:
       - '**'
   workflow_dispatch:
-    inputs:
-      mirror_tag:
-        description: Existing latest GitHub Release tag to retry on Gitee
-        type: string
-        required: false
 
 permissions:
   contents: write
 
 concurrency:
-  group: android-release-${{ (startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.mirror_tag != '')) && 'stable' || github.ref }}
+  group: android-release-${{ startsWith(github.ref, 'refs/tags/v') && 'stable' || github.ref }}
   cancel-in-progress: false
   queue: max
 
 jobs:
   build-and-release:
-    if: github.event_name != 'workflow_dispatch' || inputs.mirror_tag == ''
     runs-on: ubuntu-latest
 
     steps:
@@ -119,7 +113,6 @@ jobs:
           retention-days: 30
 
       - name: Publish GitHub Release
-        id: publish
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -140,8 +133,7 @@ jobs:
           - \`*-release.apk\`: release build (non-minified), signed with the project release key. Debug and release APKs use different keys, so installing one over the other requires uninstalling first.
           EOF
           )
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          existing=$(gh release view "$tag" --json isDraft,assets 2>/dev/null || true)
+          existing=$(gh release view "$tag" --json isDraft 2>/dev/null || true)
           if [[ ! -f dist/update.json ]]; then
             if [[ -z "$existing" ]]; then
               gh release create "$tag" dist/* --title "$title" --notes "$notes" --target "$GITHUB_SHA" --prerelease --latest=false
@@ -149,15 +141,12 @@ jobs:
             exit 0
           fi
 
-          latest_tag=$(gh release list --exclude-drafts --exclude-pre-releases --limit 100 --json isLatest,tagName \
-            --jq '.[] | select(.isLatest) | .tagName')
           if [[ -n "$existing" ]] && jq -e '.isDraft == false' <<< "$existing" > /dev/null; then
-            if [[ "$tag" == "$latest_tag" ]] && jq -e 'any(.assets[]; .name == "update.json")' <<< "$existing" > /dev/null; then
-              echo 'mirror=true' >> "$GITHUB_OUTPUT"
-            fi
             exit 0
           fi
 
+          latest_tag=$(gh release list --exclude-drafts --exclude-pre-releases --limit 100 --json isLatest,tagName \
+            --jq '.[] | select(.isLatest) | .tagName')
           latest=true
           if [[ "$latest_tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             latest_code=$(git show "refs/tags/$latest_tag:gradle.properties" | sed -n 's/^appVersionCode=//p')
@@ -175,37 +164,3 @@ jobs:
             gh release upload "$tag" dist/* --clobber
           fi
           gh release edit "$tag" --draft=false --latest="$latest"
-          if [[ "$latest" == true ]]; then echo 'mirror=true' >> "$GITHUB_OUTPUT"; fi
-
-      - name: Mirror stable release to Gitee
-        if: steps.publish.outputs.mirror == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GITEE_ACCESS_TOKEN: ${{ secrets.GITEE_ACCESS_TOKEN }}
-        shell: bash
-        run: bash .github/scripts/mirror-android-release.sh '${{ steps.publish.outputs.tag }}'
-
-  retry-gitee-mirror:
-    if: github.event_name == 'workflow_dispatch' && inputs.mirror_tag != ''
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v6
-      - name: Mirror existing stable release to Gitee
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GITEE_ACCESS_TOKEN: ${{ secrets.GITEE_ACCESS_TOKEN }}
-          MIRROR_TAG: ${{ inputs.mirror_tag }}
-        shell: bash
-        run: |
-          latest=$(gh release view --json tagName --jq '.tagName')
-          if [[ ! "$MIRROR_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ || "$MIRROR_TAG" != "$latest" ]]; then
-            echo '::error::Select the latest stable GitHub Release tag.'
-            exit 1
-          fi
-          if [[ -z "$GITEE_ACCESS_TOKEN" ]]; then
-            echo '::error::Configure the GITEE_ACCESS_TOKEN repository secret before retrying.'
-            exit 1
-          fi
-          bash .github/scripts/mirror-android-release.sh "$MIRROR_TAG"

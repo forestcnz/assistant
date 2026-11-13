@@ -7,22 +7,18 @@ import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
 import androidx.core.net.toUri
 import com.forest.android.assistant.BuildConfig
-import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.security.MessageDigest
 import java.util.UUID
 
-internal data class UpdateDownload(val id: Long, val fileName: String, val offers: List<UpdateOffer>) {
-    val offer get() = offers.first()
-}
+internal data class UpdateDownload(val id: Long, val fileName: String, val manifest: UpdateManifest)
 
 internal data class DownloadProgress(val status: Int, val received: Long = 0, val reason: Int = 0)
 
 internal class UpdateDownloads(
     private val context: Context,
     private val prefs: SharedPreferences,
-    private val repository: UpdateRepository,
 ) {
     private val manager = context.getSystemService(DownloadManager::class.java)
     private val packageManager = context.packageManager
@@ -36,42 +32,37 @@ internal class UpdateDownloads(
 
     fun restore(): UpdateDownload? {
         val saved = prefs.getString("download", null) ?: return null
+        var id = 0L
+        var name = ""
         return try {
             val json = JSONObject(saved)
-            val id = json.getLong("id")
-            val name = json.getString("fileName")
-            val items = json.getJSONArray("offers")
-            val offers = List(items.length()) { index ->
-                val item = items.getJSONObject(index)
-                val source = UpdateSource.valueOf(item.getString("source"))
-                UpdateOffer(source, UpdateManifest.parse(item.getJSONObject("manifest"), repository.releaseBase(source)))
-            }
-            require(id > 0 && name.matches(Regex("[0-9a-f-]{36}\\.apk")) && offers.isNotEmpty())
-            require(offers.all { it.manifest.matchesApk(offers.first().manifest) })
-            UpdateDownload(id, name, offers)
+            id = json.getLong("id")
+            name = json.getString("fileName")
+            require(id > 0 && fileNamePattern.matches(name))
+            // 旧记录的第一项对应 DownloadManager 实际下载的地址。
+            val manifest = json.optJSONObject("manifest")
+                ?: json.getJSONArray("offers").getJSONObject(0).getJSONObject("manifest")
+            UpdateDownload(id, name, UpdateManifest.parse(manifest))
         } catch (_: Exception) {
             prefs.edit().remove("download").apply()
+            if (id > 0 && fileNamePattern.matches(name)) removeFiles(id, name)
             null
         }
     }
 
-    fun start(offers: List<UpdateOffer>): UpdateDownload {
-        val offer = offers.first()
+    fun start(manifest: UpdateManifest): UpdateDownload {
         val fileName = "${UUID.randomUUID()}.apk"
         val directory = updateDirectory()
         check(directory.isDirectory || directory.mkdirs()) { "无法创建下载目录" }
-        val request = DownloadManager.Request(offer.manifest.apkUrl.toUri())
-            .setTitle("雕雕助手 ${offer.manifest.tag}")
-            .setDescription("从 ${offer.source.label} 下载更新")
+        val request = DownloadManager.Request(manifest.apkUrl.toUri())
+            .setTitle("雕雕助手 ${manifest.tag}")
+            .setDescription("从 GitHub 下载更新")
             .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE)
             .setDestinationInExternalFilesDir(context, null, "app-updates/$fileName")
-        val download = UpdateDownload(manager.enqueue(request), fileName, offers)
-        val items = JSONArray(offers.map {
-            JSONObject().put("source", it.source.name).put("manifest", it.manifest.toJson())
-        })
-        val json = JSONObject().put("id", download.id).put("fileName", fileName).put("offers", items)
+        val download = UpdateDownload(manager.enqueue(request), fileName, manifest)
+        val json = JSONObject().put("id", download.id).put("fileName", fileName).put("manifest", manifest.toJson())
         if (!prefs.edit().putString("download", json.toString()).commit()) {
-            removeFiles(download)
+            removeFiles(download.id, download.fileName)
             error("无法保存下载记录")
         }
         return download
@@ -89,17 +80,17 @@ internal class UpdateDownloads(
 
     fun clear(download: UpdateDownload) {
         prefs.edit().remove("download").commit()
-        removeFiles(download)
+        removeFiles(download.id, download.fileName)
     }
 
-    fun removeFiles(download: UpdateDownload) {
-        runCatching { manager.remove(download.id) }
-        runCatching { apkFile(download).delete() }
+    private fun removeFiles(id: Long, fileName: String) {
+        runCatching { manager.remove(id) }
+        runCatching { File(updateDirectory(), fileName).delete() }
     }
 
     fun verifiedApk(download: UpdateDownload): File {
-        val manifest = download.offer.manifest
-        val file = apkFile(download)
+        val manifest = download.manifest
+        val file = File(updateDirectory(), download.fileName)
         require(file.isFile && file.length() == manifest.sizeBytes) { "安装包大小不符" }
         val digest = MessageDigest.getInstance("SHA-256")
         file.inputStream().use { input ->
@@ -121,8 +112,6 @@ internal class UpdateDownloads(
         return file
     }
 
-    private fun apkFile(download: UpdateDownload): File = File(updateDirectory(), download.fileName)
-
     private fun updateDirectory(): File {
         val storage = requireNotNull(context.getExternalFilesDir(null)) { "应用存储不可用" }
         return File(storage, "app-updates")
@@ -131,4 +120,8 @@ internal class UpdateDownloads(
     private fun sha256(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256").digest(bytes).hex()
 
     private fun ByteArray.hex(): String = joinToString("") { "%02x".format(it) }
+
+    private companion object {
+        val fileNamePattern = Regex("[0-9a-f-]{36}\\.apk")
+    }
 }

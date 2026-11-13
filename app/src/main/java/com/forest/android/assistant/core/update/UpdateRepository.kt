@@ -1,10 +1,7 @@
 package com.forest.android.assistant.core.update
 
-import com.forest.android.assistant.BuildConfig
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.IOException
@@ -12,39 +9,8 @@ import java.net.URI
 import javax.net.ssl.HttpsURLConnection
 
 internal class UpdateRepository {
-    private val giteeRepository = BuildConfig.UPDATE_GITEE_REPOSITORY
-    private val sources = UpdateSource.entries.filter { it != UpdateSource.GITEE || giteeRepository.isNotEmpty() }
-
-    fun releaseBase(source: UpdateSource): String = when (source) {
-        UpdateSource.GITHUB -> "https://github.com/forestcnz/assistant/releases"
-        UpdateSource.GITEE -> "https://gitee.com/$giteeRepository/releases"
-    }
-
-    suspend fun check(): Map<UpdateSource, Result<UpdateOffer>> = coroutineScope {
-        sources.associateWith { source ->
-            async(Dispatchers.IO) {
-                try {
-                    Result.success(UpdateOffer(source, fetchManifest(source)))
-                } catch (error: CancellationException) {
-                    throw error
-                } catch (error: Exception) {
-                    Result.failure(error)
-                }
-            }
-        }.mapValues { it.value.await() }
-    }
-
-    private fun fetchManifest(source: UpdateSource): UpdateManifest {
-        val base = releaseBase(source)
-        if (source == UpdateSource.GITHUB) {
-            return UpdateManifest.parse(readJson("$base/latest/download/update.json"), base)
-        }
-        val release = readJson("https://gitee.com/api/v5/repos/$giteeRepository/releases/latest")
-        val tag = release.getString("tag_name")
-        require(tag.matches(Regex("v[0-9]+\\.[0-9]+\\.[0-9]+")) && !release.getBoolean("prerelease"))
-        val manifest = UpdateManifest.parse(readJson("$base/download/$tag/update.json"), base)
-        require(manifest.tag == tag)
-        return manifest
+    suspend fun check(): UpdateManifest = withContext(Dispatchers.IO) {
+        UpdateManifest.parse(readJson("$GITHUB_RELEASES/latest/download/update.json"))
     }
 
     private fun readJson(address: String): JSONObject {

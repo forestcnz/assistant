@@ -5,7 +5,7 @@ import org.json.JSONObject
 private val versionPattern = Regex("[0-9]+\\.[0-9]+\\.[0-9]+")
 private val sha256Pattern = Regex("[0-9a-f]{64}")
 
-internal enum class UpdateSource(val label: String) { GITHUB("GitHub"), GITEE("Gitee") }
+internal const val GITHUB_RELEASES = "https://github.com/forestcnz/assistant/releases"
 
 internal data class UpdateManifest(
     val versionCode: Long,
@@ -18,9 +18,6 @@ internal data class UpdateManifest(
 ) {
     val tag get() = "v$versionName"
 
-    fun matchesApk(other: UpdateManifest): Boolean = versionCode == other.versionCode &&
-        versionName == other.versionName && minSdk == other.minSdk && sizeBytes == other.sizeBytes && sha256 == other.sha256
-
     fun toJson(): JSONObject = JSONObject()
         .put("versionCode", versionCode)
         .put("versionName", versionName)
@@ -31,7 +28,7 @@ internal data class UpdateManifest(
         .put("apkUrl", apkUrl)
 
     companion object {
-        fun parse(json: JSONObject, releaseBase: String): UpdateManifest {
+        fun parse(json: JSONObject): UpdateManifest {
             val name = json.getString("versionName")
             val code = json.positiveInteger("versionCode")
             val sdk = json.positiveInteger("minSdk")
@@ -40,7 +37,7 @@ internal data class UpdateManifest(
             val url = json.getString("apkUrl")
             require(name.matches(versionPattern) && name.length <= 32 && sdk <= Int.MAX_VALUE)
             require(hash.matches(sha256Pattern))
-            require(url == "$releaseBase/download/v$name/assistant-v$name-release.apk")
+            require(url == "$GITHUB_RELEASES/download/v$name/assistant-v$name-release.apk")
             return UpdateManifest(code, name, sdk.toInt(), size, hash, json.getString("notes"), url)
         }
 
@@ -50,14 +47,4 @@ internal data class UpdateManifest(
             return (value as Number).toLong().also { require(it > 0) }
         }
     }
-}
-
-internal data class UpdateOffer(val source: UpdateSource, val manifest: UpdateManifest)
-
-/** 保留最高版本。同一版本的镜像只有字节一致时才参与切换。 */
-internal fun selectUpdateOffers(offers: List<UpdateOffer>, installedCode: Long, sdk: Int): List<UpdateOffer> {
-    val sorted = offers.sortedWith(compareByDescending<UpdateOffer> { it.manifest.versionCode }.thenBy { it.source })
-    val best = sorted.firstOrNull { it.manifest.versionCode > installedCode && it.manifest.minSdk <= sdk }
-        ?: return emptyList()
-    return sorted.filter { it.manifest.matchesApk(best.manifest) }
 }
