@@ -21,11 +21,17 @@ repo_api="https://gitee.com/api/v5/repos/${repository}"
 api="$repo_api/releases"
 jq --arg url "$base/download/$tag/$apk" '.apkUrl = $url' "$temp/update.json" > "$temp/gitee-update.json"
 
-curl_options=(--silent --show-error --connect-timeout 10 --max-time 240)
-status=$(curl "${curl_options[@]}" -o "$temp/release.json" -w '%{http_code}' "$api/tags/$tag")
+curl_options=(--silent --show-error --connect-timeout 30 --max-time 240)
+read_options=("${curl_options[@]}" --retry 3 --retry-connrefused --retry-max-time 180)
+
+echo "Looking up Gitee Release $tag"
+status=$(curl "${read_options[@]}" --max-time 45 -o "$temp/release.json" -w '%{http_code}' "$api/tags/$tag")
 if [[ "$status" == 404 ]] || { [[ "$status" == 200 ]] && jq -e 'type == "null"' "$temp/release.json" > /dev/null; }; then
-  target_branch=$(curl "${curl_options[@]}" --fail "$repo_api" | jq -er '.default_branch | strings | select(length > 0)')
+  echo 'Looking up the Gitee default branch'
+  curl "${read_options[@]}" --max-time 45 --fail -o "$temp/repo.json" "$repo_api"
+  target_branch=$(jq -er '.default_branch | strings | select(length > 0)' "$temp/repo.json")
   # 附件校验完成后再转为正式版。
+  echo "Creating Gitee prerelease $tag"
   curl "${curl_options[@]}" --fail -o "$temp/release.json" \
     --data-urlencode "access_token=$GITEE_ACCESS_TOKEN" \
     --data-urlencode "tag_name=$tag" --data-urlencode "target_commitish=$target_branch" \
@@ -37,7 +43,8 @@ elif [[ "$status" != 200 ]]; then
 fi
 
 release_id=$(jq -er '.id | numbers' "$temp/release.json")
-curl "${curl_options[@]}" --fail -o "$temp/assets.json" "$api/$release_id/attach_files"
+echo 'Listing Gitee Release attachments'
+curl "${read_options[@]}" --max-time 45 --fail -o "$temp/assets.json" "$api/$release_id/attach_files"
 for name in "$apk" update.json; do
   file="$temp/$name"
   if [[ "$name" == update.json ]]; then file="$temp/gitee-update.json"; fi
@@ -48,7 +55,8 @@ for name in "$apk" update.json; do
       --form-string "access_token=$GITEE_ACCESS_TOKEN" --form "file=@$file;filename=$name" \
       "$api/$release_id/attach_files"
   fi
-  curl "${curl_options[@]}" --retry 2 --fail --location -o "$temp/downloaded" "$base/download/$tag/$name"
+  echo "Verifying Gitee attachment $name"
+  curl "${read_options[@]}" --fail --location -o "$temp/downloaded" "$base/download/$tag/$name"
   if ! cmp -s "$file" "$temp/downloaded"; then
     echo "Gitee attachment $name differs from the release artifact"
     exit 1
@@ -56,6 +64,7 @@ for name in "$apk" update.json; do
 done
 
 if jq -e '.prerelease' "$temp/release.json" > /dev/null; then
+  echo "Publishing Gitee Release $tag"
   curl "${curl_options[@]}" --fail -o /dev/null -X PATCH \
     --data-urlencode "access_token=$GITEE_ACCESS_TOKEN" --data-urlencode 'prerelease=false' \
     --data-urlencode "tag_name=$tag" \
