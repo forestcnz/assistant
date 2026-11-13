@@ -133,10 +133,11 @@
     .update-card { display: grid; gap: 10px; padding: 16px; font-size: 14px; line-height: 22px; }
     .update-card h4 { font-size: 16px; line-height: 24px; font-weight: 650; margin: 0; }
     .current-version { color: var(--muted); font-size: 12px; line-height: 18px; margin-top: 2px; }
-    .update-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-    .update-actions:has(#check-update:not([hidden])) { justify-content: space-between; gap: 0; }
+    .update-status { height: 22px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+    .update-progress { height: 4px; }
+    .update-actions { display: flex; justify-content: space-between; align-items: center; min-height: 48px; }
+    .update-actions button { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
     .switch-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; min-height: 40px; }
-    .release-name { font-weight: 600; }
     .text-button {
       background: none; border: 0; border-radius: 22px; padding: 0 12px; min-height: 44px;
       color: var(--action); font-size: 14px; font-weight: 600; white-space: nowrap;
@@ -232,10 +233,10 @@
               <section class="card update-card" id="update-card" aria-labelledby="update-title">
                 <header><h4 id="update-title">应用更新</h4><p class="current-version" id="current-version">当前版本 0.1.8</p></header>
                 <div class="switch-row" id="automatic-row"><span id="automatic-label">自动检查更新</span><button type="button" class="switch" role="switch" aria-labelledby="automatic-label" aria-checked="true" id="automatic-switch" data-action="automatic"></button></div>
-                <p class="release-name" id="release-name">新版 v0.1.9 · 51 MB</p>
-                <p id="notice" role="status" hidden></p>
-                <p id="phase-text" hidden></p>
-                <div class="track" id="progress" role="progressbar" aria-label="安装包下载进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" hidden><div class="fill" id="progress-fill"></div></div>
+                <div>
+                  <p class="update-status" id="notice" role="status">新版 v0.1.9 · 51 MB</p>
+                  <div class="update-progress"><div class="track" id="progress" role="progressbar" aria-label="安装包下载进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" hidden><div class="fill" id="progress-fill"></div></div></div>
+                </div>
                 <div class="update-actions" id="update-actions">
                   <button type="button" class="text-button" id="check-update" data-action="check">检查更新</button>
                   <button type="button" class="text-button" id="confirm" data-action="download">从 GitHub 下载</button>
@@ -385,14 +386,12 @@
       get('current-version').textContent = `当前版本 ${current}`;
       get('automatic-row').hidden = !official;
       get('automatic-switch').setAttribute('aria-checked', String(state.automatic));
-      get('release-name').hidden = !update || !official;
-      get('notice').hidden = official && !notice;
-      get('notice').textContent = official ? notice : '应用内更新适用于正式签名版本。';
-      get('phase-text').hidden = !phaseText;
-      get('phase-text').textContent = phaseText || '';
+      const status = !official ? '应用内更新适用于正式签名版本。'
+        : checking ? '正在检查…' : notice || phaseText || (update ? '新版 v0.1.9 · 51 MB' : '');
+      get('notice').textContent = status;
+      get('notice').title = status;
       get('check-update').hidden = !official || !(idle || checking);
       get('check-update').disabled = checking;
-      get('check-update').textContent = checking ? '正在检查…' : '检查更新';
       get('progress').hidden = !transfer;
       get('progress').setAttribute('aria-valuenow', String(progress));
       get('progress-fill').style.width = `${progress}%`;
@@ -402,7 +401,7 @@
       get('confirm').className = ready ? 'primary-button' : 'text-button';
       get('confirm').textContent = ready ? '立即安装' : '从 GitHub 下载';
       get('confirm').dataset.action = ready ? 'install' : 'download';
-      get('update-actions').hidden = !official || !(idle || checking || transfer || ready);
+      get('update-actions').hidden = !official;
 
       const permission = system === 'permission';
       get('system-layer').hidden = !system;

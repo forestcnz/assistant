@@ -2,10 +2,12 @@ package com.forest.android.assistant.ui
 
 import android.text.format.Formatter
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.LinearProgressIndicator
@@ -17,6 +19,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.forest.android.assistant.core.update.AppUpdateModel
 import com.forest.android.assistant.core.update.AppUpdateState
@@ -29,8 +33,26 @@ internal fun AppUpdateCard(
     onInstall: () -> Unit,
 ) {
     val context = LocalContext.current
+    val statusStyle = MaterialTheme.typography.bodyMedium
+    val statusHeight = with(LocalDensity.current) { statusStyle.lineHeight.toDp() }
     val update = state.availableUpdate
     val phase = state.downloadPhase
+    val downloading = phase == DownloadPhase.DOWNLOADING
+    val progress = if (downloading) {
+        (state.receivedBytes.toDouble() / checkNotNull(update).sizeBytes).toFloat().coerceIn(0f, 1f)
+    } else 0f
+    val status = when {
+        state.official == false -> "应用内更新适用于正式签名版本。"
+        state.checking -> "正在检查…"
+        state.notice != null -> state.notice
+        phase == DownloadPhase.STARTING -> "正在准备下载…"
+        downloading && state.paused -> "下载已暂停，等待重试"
+        downloading -> "正在从 GitHub 下载 ${(progress * 100).toInt()}%"
+        phase == DownloadPhase.VERIFYING -> "正在校验安装包…"
+        phase == DownloadPhase.READY -> "下载完成，可以安装。"
+        update != null -> "新版 ${update.tag} · ${Formatter.formatShortFileSize(context, update.sizeBytes)}"
+        else -> ""
+    }
     WorkCard(Modifier.fillMaxWidth()) {
         Column(
             Modifier.fillMaxWidth().padding(16.dp),
@@ -51,44 +73,52 @@ internal fun AppUpdateCard(
                     Text("自动检查更新", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
                     Switch(checked = state.automatic, onCheckedChange = model::setAutomatic)
                 }
-                if (update != null) {
-                    Text(
-                        "新版 ${update.tag} · ${Formatter.formatShortFileSize(context, update.sizeBytes)}",
-                        style = MaterialTheme.typography.titleSmall,
-                    )
+            }
+            Column(Modifier.fillMaxWidth()) {
+                Box(Modifier.fillMaxWidth().height(statusHeight), contentAlignment = Alignment.CenterStart) {
+                    Text(status, style = statusStyle, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
-                state.notice?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
-                when (phase) {
-                    DownloadPhase.IDLE -> FlowRow(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                    ) {
-                        TextButton(onClick = { model.check(manual = true) }, enabled = !state.checking) {
-                            Text(if (state.checking) "正在检查…" else "检查更新")
-                        }
-                        if (update != null && !state.checking) {
-                            TextButton(onClick = model::startDownload) { Text("从 GitHub 下载") }
-                        }
-                    }
-                    DownloadPhase.STARTING -> Text("正在准备下载…")
-                    DownloadPhase.DOWNLOADING -> {
-                        val size = checkNotNull(update).sizeBytes
-                        val progress = (state.receivedBytes.toDouble() / size).toFloat().coerceIn(0f, 1f)
-                        Text(if (state.paused) "下载已暂停，等待重试" else "正在从 GitHub 下载 ${(progress * 100).toInt()}%")
+                Box(Modifier.fillMaxWidth().height(4.dp)) {
+                    if (downloading) {
                         LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
-                        TextButton(onClick = model::cancelDownload) { Text("取消下载") }
-                    }
-                    DownloadPhase.VERIFYING -> Text("正在校验安装包…")
-                    DownloadPhase.READY -> {
-                        Text("下载完成，可以安装。")
-                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button(onClick = onInstall) { Text("立即安装") }
-                            TextButton(onClick = model::cancelDownload) { Text("删除安装包") }
-                        }
                     }
                 }
-            } else if (state.official == false) {
-                Text("应用内更新适用于正式签名版本。", style = MaterialTheme.typography.bodyMedium)
+            }
+            if (state.official == true) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    when (phase) {
+                        DownloadPhase.IDLE -> {
+                            TextButton(
+                                onClick = { model.check(manual = true) },
+                                modifier = Modifier.weight(1f, fill = false),
+                                enabled = !state.checking,
+                            ) {
+                                Text("检查更新", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                            if (update != null && !state.checking) {
+                                TextButton(onClick = model::startDownload, modifier = Modifier.weight(1f, fill = false)) {
+                                    Text("从 GitHub 下载", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
+                            }
+                        }
+                        DownloadPhase.DOWNLOADING -> TextButton(onClick = model::cancelDownload) {
+                            Text("取消下载", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                        DownloadPhase.READY -> {
+                            Button(onClick = onInstall, modifier = Modifier.weight(1f, fill = false)) {
+                                Text("立即安装", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                            TextButton(onClick = model::cancelDownload, modifier = Modifier.weight(1f, fill = false)) {
+                                Text("删除安装包", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                        }
+                        DownloadPhase.STARTING, DownloadPhase.VERIFYING -> Unit
+                    }
+                }
             }
         }
     }
