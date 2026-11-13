@@ -74,7 +74,7 @@ object TaskManager {
     fun ensureBuiltinTasks(context: Context) {
         val assets = context.assets
         val root = tasksRoot(context)
-        TaskZip.recoverMarketImports(root)
+        TaskZip.recoverImports(root)
         val names = try {
             assets.list("tasks") ?: emptyArray()
         } catch (e: Exception) {

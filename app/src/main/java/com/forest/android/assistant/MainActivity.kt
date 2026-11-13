@@ -338,8 +338,14 @@ class MainActivity : ComponentActivity() {
                     val message = buildString {
                         append("成功导入 ${report.imported.size} 个任务")
                         if (report.imported.isNotEmpty()) append("：${report.imported.joinToString("、")}")
+                        if (report.overwritten.isNotEmpty()) {
+                            append("\n\n覆盖 ${report.overwritten.size} 个同名任务：${report.overwritten.joinToString("、")}")
+                        }
                         if (report.importedGroups.isNotEmpty()) {
                             append("\n\n恢复 ${report.importedGroups.size} 个分组：${report.importedGroups.joinToString("、")}")
+                        }
+                        if (report.overwrittenGroups.isNotEmpty()) {
+                            append("\n\n覆盖 ${report.overwrittenGroups.size} 个分组：${report.overwrittenGroups.joinToString("、")}")
                         }
                         if (report.skipped.isNotEmpty()) {
                             append("\n\n跳过或未恢复 ${report.skipped.size} 项：\n")
@@ -644,7 +650,7 @@ class MainActivity : ComponentActivity() {
         if (showTransferDialog) AlertDialog(containerColor = MaterialTheme.colorScheme.surface, onDismissRequest = { showTransferDialog = false },
             title = { Text("导入与导出") }, text = {
                 Column {
-                    DesignRow("导入任务 ZIP", "支持单任务和任务合集", R.drawable.ic_import, enabled = !taskTransferBusy) {
+                    DesignRow("导入任务 ZIP", "支持单任务和任务合集，可覆盖任务与分组", R.drawable.ic_import, enabled = !taskTransferBusy) {
                         showTransferDialog = false
                         importZipLauncher.launch(arrayOf("application/zip", "application/octet-stream", "*/*"))
                     }
@@ -1639,7 +1645,7 @@ class MainActivity : ComponentActivity() {
                 item { Column(Modifier.padding(top = 10.dp, bottom = 10.dp)) { SectionLabel("任务工具") } }
                 item {
                     WorkCard(Modifier.fillMaxWidth()) {
-                        DesignRow("导入任务", "支持单任务与任务合集 ZIP", R.drawable.ic_import,
+                        DesignRow("导入任务", "支持单任务与任务合集 ZIP，可覆盖任务与分组", R.drawable.ic_import,
                             enabled = !taskTransferBusy) {
                             importZipLauncher.launch(arrayOf("application/zip", "application/octet-stream", "*/*"))
                         }

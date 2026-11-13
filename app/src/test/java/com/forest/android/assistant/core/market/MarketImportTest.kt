@@ -84,6 +84,7 @@ class MarketImportTest {
         val incoming = files.newFolder("Incoming")
         File(incoming, "task.js").writeText("new script")
         File(incoming, "config.json").writeText("new config")
+        File(incoming, "history.jsonl").writeText("archive history")
 
         assertThrows(IllegalStateException::class.java) { TaskZip.installTask(incoming, original) }
         assertEquals("old script", File(original, "task.js").readText())
@@ -99,7 +100,7 @@ class MarketImportTest {
         val backup = files.newFolder(".deleted-market-backup-interrupted", "本地任务")
         File(backup, "task.js").writeText("old script")
 
-        TaskZip.recoverMarketImports(files.root)
+        TaskZip.recoverImports(files.root)
 
         assertEquals("old script", File(files.root, "本地任务/task.js").readText())
         assertFalse(File(files.root, ".deleted-market-backup-interrupted").exists())

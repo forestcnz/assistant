@@ -50,14 +50,30 @@ class TaskGroupTest {
         assertEquals(emptyList<String>(), plan.skipped)
     }
 
-    @Test fun repeatImportPreservesLocalGroupsAndTheirOrder() {
+    @Test fun sameIdOrNameOverwritesMembersAndKeepsLocalGroupIdentity() {
         val local = TaskGroup("a", "日常", listOf("签到", "竞技场"), revision = 8)
-        val incoming = listOf(local.copy(name = "旧名称", taskNames = local.taskNames.reversed()),
-            TaskGroup("b", "日常", listOf("通天塔")))
-        val plan = TaskGroupImport.plan(listOf(local), incoming, available)
-        assertEquals(listOf(local), plan.groups)
+        val other = TaskGroup("b", "战斗", listOf("竞技场"), revision = 3)
+        val incoming = listOf(
+            local.copy(name = "新日常", taskNames = local.taskNames.reversed()),
+            TaskGroup("c", "战斗", listOf("通天塔")),
+        )
+        val plan = TaskGroupImport.plan(listOf(local, other), incoming, available)
+        assertEquals(listOf(incoming.first().copy(revision = 9), other.copy(taskNames = listOf("通天塔"), revision = 4)), plan.groups)
+        assertEquals(listOf("新日常", "战斗"), plan.restored)
+        assertEquals(plan.restored, plan.overwritten)
+        assertEquals(emptyList<String>(), plan.skipped)
+        assertEquals(plan.groups, TaskGroupImport.plan(plan.groups, incoming, available).groups)
+    }
+
+    @Test fun conflictingIdAndNameDoNotReplaceEitherGroup() {
+        val first = TaskGroup("a", "日常", listOf("签到"))
+        val second = TaskGroup("b", "战斗", listOf("竞技场"))
+        val local = listOf(first, second)
+        val incoming = TaskGroup("a", "战斗", listOf("通天塔"))
+        val plan = TaskGroupImport.plan(local, listOf(incoming), available)
+        assertEquals(local, plan.groups)
         assertEquals(emptyList<String>(), plan.restored)
-        assertEquals(2, plan.skipped.size)
+        assertEquals(1, plan.skipped.size)
     }
 
     @Test fun failedTaskImportsDoNotLeaveDanglingMembers() {

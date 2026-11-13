@@ -29,23 +29,43 @@ data class TaskGroup(
 }
 
 object TaskGroupImport {
-    data class Plan(val groups: List<TaskGroup>, val restored: List<String>, val skipped: List<String>)
+    data class Plan(
+        val groups: List<TaskGroup>, val restored: List<String>, val skipped: List<String>,
+        val overwritten: List<String>,
+    )
 
-    /** 重复导入保留本机分组；新分组按备份顺序恢复，过滤未成功安装的任务。 */
+    /** 覆盖同 ID 或同名分组；新分组按备份顺序添加。 */
     fun plan(existing: List<TaskGroup>, incoming: List<TaskGroup>, available: Set<String>): Plan {
         val groups = existing.toMutableList()
+        val byId = existing.indices.associateBy { existing[it].id }
+        val byName = existing.indices.associateBy { existing[it].name }
+        val incomingIds = incoming.map { it.id }.toSet()
         val restored = mutableListOf<String>()
         val skipped = mutableListOf<String>()
+        val overwritten = mutableListOf<String>()
         for (group in incoming) {
-            if (groups.any { it.id == group.id || it.name == group.name }) {
-                skipped += "分组「${group.name}」已存在"
+            val idMatch = byId[group.id]
+            val nameMatch = byName[group.name]
+            val conflictingName = nameMatch != null && nameMatch != idMatch &&
+                (idMatch != null || existing[nameMatch].id in incomingIds)
+            if (conflictingName) {
+                skipped += "分组「${group.name}」的名称和 ID 匹配冲突"
                 continue
             }
             val members = group.taskNames.filter(available::contains)
             if (members.size != group.taskNames.size) skipped += "分组「${group.name}」的部分任务不可用，已跳过这些成员"
-            groups += group.copy(taskNames = members, revision = 1)
+            val index = idMatch ?: nameMatch
+            if (index == null) {
+                groups += group.copy(taskNames = members, revision = 1)
+            } else {
+                val local = existing[index]
+                if (local.name != group.name || local.taskNames != members) {
+                    groups[index] = local.copy(name = group.name, taskNames = members, revision = local.revision + 1)
+                }
+                overwritten += group.name
+            }
             restored += group.name
         }
-        return Plan(groups, restored, skipped)
+        return Plan(groups, restored, skipped, overwritten)
     }
 }

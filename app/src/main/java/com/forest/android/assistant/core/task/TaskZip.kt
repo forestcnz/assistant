@@ -27,10 +27,16 @@ object TaskZip {
     private const val BUNDLE_FORMAT = "assistant-task-bundle"
     private const val MAX_ENTRIES = 20_000
     private const val MAX_UNPACKED_BYTES = 2L * 1024 * 1024 * 1024
-    private const val MARKET_BACKUP_PREFIX = ".deleted-market-backup-"
+    private const val IMPORT_BACKUP_PREFIX = ".deleted-market-backup-"
 
     data class Result(val file: File, val sizeBytes: Long)
-    data class ImportResult(val imported: List<String>, val skipped: List<String>, val importedGroups: List<String> = emptyList())
+    data class ImportResult(
+        val imported: List<String>,
+        val skipped: List<String>,
+        val importedGroups: List<String> = emptyList(),
+        val overwritten: List<String> = emptyList(),
+        val overwrittenGroups: List<String> = emptyList(),
+    )
 
     fun exportDir(context: Context): File =
         File(context.getExternalFilesDir(null) ?: context.filesDir, "zip").apply { mkdirs() }
@@ -87,7 +93,7 @@ object TaskZip {
         }
     }
 
-    /** 导入单任务包或合集包；同名任务跳过，其余继续导入。 */
+    /** 导入单任务包或合集包，并覆盖同名任务。 */
     @Synchronized
     fun importArchive(context: Context, uri: Uri): ImportResult {
         val temp = File(context.cacheDir, "task-import-${UUID.randomUUID()}")
@@ -124,36 +130,42 @@ object TaskZip {
                 listOf(name to root)
             }
             val imported = mutableListOf<String>()
+            val overwritten = mutableListOf<String>()
             val skipped = mutableListOf<String>()
             candidates.forEach { (name, source) ->
                 if (!File(source, "task.js").isFile) {
                     skipped += "任务「$name」缺少 task.js"
-                } else {
-                    val target = TaskManager.taskDir(context, name)
-                    if (target.exists()) {
-                        skipped += "任务「$name」已存在"
-                    } else {
-                        try {
-                            installTask(source, target)
-                            imported += name
-                        } catch (e: Exception) {
-                            skipped += "任务「$name」导入失败：${e.message}"
+                    return@forEach
+                }
+                try {
+                    synchronized(TaskManager) {
+                        check(!name.startsWith(".deleted-")) { "任务名称不合法" }
+                        val target = TaskManager.checkedTaskDir(context, name)
+                        check(target.name == name) { "任务目录无效" }
+                        val overwrite = target.exists()
+                        if (overwrite) {
+                            check(File(target, "task.js").isFile) { "同名目录不是任务" }
+                            TaskManager.requireTasksIdle()
                         }
+                        installTask(source, target, overwrite)
+                        imported += name
+                        if (overwrite) overwritten += name
                     }
+                } catch (e: Exception) {
+                    skipped += "任务「$name」导入失败：${e.message}"
                 }
             }
-            val restoredGroups = if (archivedGroups.isNotEmpty()) {
+            val groupPlan = if (archivedGroups.isNotEmpty()) {
                 try {
-                    val plan = TaskGroups.restore(context, archivedGroups)
-                    skipped.addAll(plan.skipped)
-                    plan.restored
+                    TaskGroups.restore(context, archivedGroups).also { skipped.addAll(it.skipped) }
                 } catch (error: Exception) {
-                    skipped += "分组恢复失败：${error.message}；任务导入结果已保留，可重新导入以恢复分组"
-                    emptyList()
+                    skipped += "分组恢复失败：${error.message}"
+                    null
                 }
-            } else emptyList()
+            } else null
+            val restoredGroups = groupPlan?.restored.orEmpty()
             Log.i(TAG, "导入任务 ${imported.size} 个，恢复分组 ${restoredGroups.size} 个，跳过 ${skipped.size} 项")
-            return ImportResult(imported, skipped, restoredGroups)
+            return ImportResult(imported, skipped, restoredGroups, overwritten, groupPlan?.overwritten.orEmpty())
         } finally {
             temp.deleteRecursively()
         }
@@ -288,8 +300,8 @@ object TaskZip {
             check(source.copyRecursively(staging, overwrite = false)) { "无法复制任务文件" }
             if (overwrite) {
                 val history = File(target, RunHistory.FILE_NAME)
-                if (history.isFile) history.copyTo(File(staging, history.name))
-                replaceMarketTask(staging, target)
+                if (history.isFile) history.copyTo(File(staging, history.name), overwrite = true)
+                replaceTask(staging, target)
             } else {
                 check(!target.exists()) { "任务已存在" }
                 check(staging.renameTo(target)) { "无法保存任务" }
@@ -299,8 +311,8 @@ object TaskZip {
         }
     }
 
-    private fun replaceMarketTask(staging: File, target: File) {
-        val backup = File(target.parentFile, "$MARKET_BACKUP_PREFIX${UUID.randomUUID()}")
+    private fun replaceTask(staging: File, target: File) {
+        val backup = File(target.parentFile, "$IMPORT_BACKUP_PREFIX${UUID.randomUUID()}")
         check(backup.mkdir()) { "无法创建任务备份目录" }
         val original = File(backup, target.name)
         if (!target.renameTo(original)) {
@@ -316,8 +328,8 @@ object TaskZip {
     }
 
     // 应用可能在移走旧任务和保存新任务之间退出。
-    internal fun recoverMarketImports(root: File) {
-        root.listFiles { file -> file.isDirectory && file.name.startsWith(MARKET_BACKUP_PREFIX) }
+    internal fun recoverImports(root: File) {
+        root.listFiles { file -> file.isDirectory && file.name.startsWith(IMPORT_BACKUP_PREFIX) }
             ?.forEach { backup ->
                 val children = backup.listFiles() ?: return@forEach
                 if (children.isEmpty()) {
