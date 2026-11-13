@@ -1,5 +1,6 @@
 package com.forest.android.assistant.core.update
 
+import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
@@ -25,6 +26,22 @@ class UpdateManifestTest {
     fun parserIgnoresNotesInPreviouslyPublishedManifests() {
         val update = manifest()
         assertEquals(update, UpdateManifest.parse(update.toJson().put("notes", "- fix: internal release work")))
+    }
+
+    @Test
+    fun onlySmallerPatchesFromTheSameReleaseAreAccepted() {
+        val update = manifest()
+        val patch = UpdatePatch(7, "b".repeat(64), 256, "c".repeat(64),
+            "$GITHUB_RELEASES/download/v0.1.7/assistant-7-to-8.hdiff")
+        val entries = JSONArray()
+            .put(patch.toJson().put("format", "unknown"))
+            .put(patch.toJson().put("url", "https://example.com/assistant-7-to-8.hdiff"))
+            .put(patch.toJson().put("sizeBytes", 512))
+            .put(patch.toJson().put("fromVersionCode", update.versionCode))
+            .put(patch.toJson())
+        val parsed = UpdateManifest.parse(update.toJson().put("patches", entries))
+        assertEquals(listOf(patch), parsed.patches)
+        assertEquals(parsed, UpdateManifest.parse(JSONObject(parsed.toJson().toString())))
     }
 
     private fun manifest() = UpdateManifest(

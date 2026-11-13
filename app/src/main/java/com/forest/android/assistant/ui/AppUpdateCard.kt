@@ -39,7 +39,7 @@ internal fun AppUpdateCard(
     val phase = state.downloadPhase
     val downloading = phase == DownloadPhase.DOWNLOADING
     val progress = if (downloading) {
-        (state.receivedBytes.toDouble() / checkNotNull(update).sizeBytes).toFloat().coerceIn(0f, 1f)
+        (state.receivedBytes.toDouble() / state.downloadSizeBytes.coerceAtLeast(1L)).toFloat().coerceIn(0f, 1f)
     } else 0f
     val status = when {
         state.official == false -> "应用内更新适用于正式签名版本。"
@@ -47,7 +47,9 @@ internal fun AppUpdateCard(
         state.notice != null -> state.notice
         phase == DownloadPhase.STARTING -> "正在准备下载…"
         downloading && state.paused -> "下载已暂停，等待重试"
+        downloading && state.incremental -> "正在下载增量包 ${(progress * 100).toInt()}%"
         downloading -> "正在从 GitHub 下载 ${(progress * 100).toInt()}%"
+        phase == DownloadPhase.ASSEMBLING -> "正在合成安装包…"
         phase == DownloadPhase.VERIFYING -> "正在校验安装包…"
         phase == DownloadPhase.READY -> "下载完成，可以安装。"
         update != null -> "新版 ${update.tag} · ${Formatter.formatShortFileSize(context, update.sizeBytes)}"
@@ -101,7 +103,8 @@ internal fun AppUpdateCard(
                             }
                             if (update != null && !state.checking) {
                                 TextButton(onClick = model::startDownload, modifier = Modifier.weight(1f, fill = false)) {
-                                    Text("从 GitHub 下载", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    Text(if (state.useFullPackage) "下载完整包" else "从 GitHub 下载",
+                                        maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 }
                             }
                         }
@@ -116,7 +119,7 @@ internal fun AppUpdateCard(
                                 Text("删除安装包", maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
                         }
-                        DownloadPhase.STARTING, DownloadPhase.VERIFYING -> Unit
+                        DownloadPhase.STARTING, DownloadPhase.ASSEMBLING, DownloadPhase.VERIFYING -> Unit
                     }
                 }
             }

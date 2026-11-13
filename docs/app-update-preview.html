@@ -279,11 +279,11 @@
         ['incompatible', '系统版本过低'], ['debug', '非正式签名'],
       ]],
       ['下载安装包', [
-        ['starting', '准备下载'], ['downloading', '下载中'], ['paused', '下载暂停'], ['cancelled', '取消下载'],
-        ['download-error', '下载失败'], ['storage', '空间不足'],
+        ['starting', '准备下载'], ['downloading', '下载完整包'], ['patch-download', '下载增量包'], ['paused', '下载暂停'],
+        ['cancelled', '取消下载'], ['download-error', '下载失败'], ['storage', '空间不足'], ['patch-failed', '增量失败'],
       ]],
       ['校验与安装', [
-        ['verifying', '校验中'], ['invalid', '校验失败'], ['ready', '等待安装'], ['deleted', '已删除安装包'],
+        ['assembling', '合成安装包'], ['verifying', '校验中'], ['invalid', '校验失败'], ['ready', '等待安装'], ['deleted', '已删除安装包'],
         ['busy', '任务或录制中'], ['permission', '安装权限'], ['installer', '系统确认安装'], ['blocked', '系统限制安装'],
         ['installed', '升级完成'],
       ]],
@@ -300,10 +300,13 @@
       debug: { official: false },
       starting: { update: true, phase: 'starting' },
       downloading: { update: true, phase: 'downloading', progress: 42 },
+      'patch-download': { update: true, phase: 'downloading', progress: 42, incremental: true },
       paused: { update: true, phase: 'downloading', progress: 42, paused: true },
       cancelled: { update: true, notice: '已取消下载' },
       'download-error': { update: true, notice: 'GitHub 下载失败，请重试' },
       storage: { update: true, notice: '设备空间不足，请清理后重试' },
+      'patch-failed': { update: true, notice: '增量更新失败，请下载完整包', useFullPackage: true },
+      assembling: { update: true, phase: 'assembling' },
       verifying: { update: true, phase: 'verifying' },
       invalid: { update: true, notice: '安装包 SHA-256 校验失败' },
       ready: { update: true, phase: 'ready' },
@@ -352,7 +355,7 @@
       const atBottom = settings.scrollHeight - settings.clientHeight - settings.scrollTop <= 2;
       state = {
         id, official: true, automatic: true, allowed: true, current: '0.1.8',
-        update: false, phase: 'idle', notice: '', progress: 0, paused: false,
+        update: false, phase: 'idle', notice: '', progress: 0, paused: false, incremental: false, useFullPackage: false,
         system: '', busy: false, blocked: false,
         ...scenarios[id], ...overrides,
       };
@@ -361,8 +364,8 @@
     }
 
     function go(id, overrides = {}) {
-      const { automatic, allowed, current } = state;
-      select(id, { automatic, allowed, current, ...overrides });
+      const { automatic, allowed, current, useFullPackage } = state;
+      select(id, { automatic, allowed, current, useFullPackage, ...overrides });
     }
 
     function showVersionCard() {
@@ -378,7 +381,9 @@
       const checking = phase === 'checking';
       const phaseText = {
         starting: '正在准备下载…',
-        downloading: state.paused ? '下载已暂停，等待重试' : `正在从 GitHub 下载 ${progress}%`,
+        downloading: state.paused ? '下载已暂停，等待重试'
+          : state.incremental ? `正在下载增量包 ${progress}%` : `正在从 GitHub 下载 ${progress}%`,
+        assembling: '正在合成安装包…',
         verifying: '正在校验安装包…', ready: '下载完成，可以安装。',
       }[phase];
 
@@ -399,7 +404,7 @@
       get('cancel-download').textContent = ready ? '删除安装包' : '取消下载';
       get('confirm').hidden = !ready && !(idle && update);
       get('confirm').className = ready ? 'primary-button' : 'text-button';
-      get('confirm').textContent = ready ? '立即安装' : '从 GitHub 下载';
+      get('confirm').textContent = ready ? '立即安装' : state.useFullPackage ? '下载完整包' : '从 GitHub 下载';
       get('confirm').dataset.action = ready ? 'install' : 'download';
       get('update-actions').hidden = !official;
 
@@ -415,14 +420,15 @@
     }
 
     function animateDownload() {
-      go('downloading', { progress: 0 });
+      const incremental = !state.useFullPackage;
+      go(incremental ? 'patch-download' : 'downloading', { progress: 0 });
       const tick = () => {
         state.progress = Math.min(state.progress + 7, 100);
         render();
         if (state.progress < 100) {
           timer = setTimeout(tick, 180);
         } else {
-          go('verifying');
+          go(incremental ? 'assembling' : 'verifying');
           timer = setTimeout(() => go('ready'), 850);
         }
       };

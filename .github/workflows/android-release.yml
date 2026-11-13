@@ -98,6 +98,17 @@ jobs:
               "$aapt" "https://github.com/${GITHUB_REPOSITORY}/releases" "$release_name" > dist/update.json
           fi
 
+      - name: Generate incremental update
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          apksigner="${ANDROID_SDK_ROOT:-$ANDROID_HOME}/build-tools/37.0.0/apksigner"
+          if ! bash .github/scripts/android-release-patch.sh "$GITHUB_REF_NAME" "$apksigner"; then
+            echo '::warning::Incremental update generation failed. Publishing the complete APK.'
+          fi
+
       - name: Upload build artifact
         uses: actions/upload-artifact@v7
         with:

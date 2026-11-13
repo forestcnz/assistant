@@ -23,7 +23,7 @@ import java.io.IOException
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
 
-internal enum class DownloadPhase { IDLE, STARTING, DOWNLOADING, VERIFYING, READY }
+internal enum class DownloadPhase { IDLE, STARTING, DOWNLOADING, ASSEMBLING, VERIFYING, READY }
 
 internal data class AppUpdateState(
     val currentVersion: String = BuildConfig.VERSION_NAME,
@@ -35,6 +35,9 @@ internal data class AppUpdateState(
     val downloadPhase: DownloadPhase = DownloadPhase.IDLE,
     val receivedBytes: Long = 0,
     val paused: Boolean = false,
+    val downloadSizeBytes: Long = 0,
+    val incremental: Boolean = false,
+    val useFullPackage: Boolean = false,
 )
 
 internal class AppUpdateModel(application: Application) : AndroidViewModel(application) {
@@ -70,6 +73,9 @@ internal class AppUpdateModel(application: Application) : AndroidViewModel(appli
                     official = official,
                     availableUpdate = saved?.manifest,
                     downloadPhase = if (saved == null) DownloadPhase.IDLE else DownloadPhase.DOWNLOADING,
+                    downloadSizeBytes = saved?.sizeBytes ?: 0,
+                    incremental = saved?.patch != null,
+                    useFullPackage = saved?.manifest?.sha256 == failedPatchTarget(),
                 )
             }
         }
@@ -110,7 +116,10 @@ internal class AppUpdateModel(application: Application) : AndroidViewModel(appli
                 else -> null
             }
             val latest = manifest.takeIf { notice == null }
-            mutableState.update { it.copy(checking = false, availableUpdate = latest, notice = notice) }
+            mutableState.update {
+                it.copy(checking = false, availableUpdate = latest, notice = notice,
+                    useFullPackage = latest?.sha256 == failedPatchTarget())
+            }
         }
     }
 
@@ -126,12 +135,12 @@ internal class AppUpdateModel(application: Application) : AndroidViewModel(appli
                 val manifest = current.availableUpdate ?: return@withLock
                 showDownload(DownloadPhase.STARTING)
                 try {
-                    currentDownload = withContext(Dispatchers.IO) { downloads.start(manifest) }
+                    currentDownload = withContext(Dispatchers.IO) { downloads.start(manifest, current.useFullPackage) }
                     showDownload(DownloadPhase.DOWNLOADING)
                 } catch (error: CancellationException) {
                     throw error
-                } catch (_: Exception) {
-                    showDownload(DownloadPhase.IDLE, "无法开始下载，请重试")
+                } catch (error: Exception) {
+                    showDownload(DownloadPhase.IDLE, error.message ?: "无法开始下载，请重试")
                 }
             }
         }
@@ -168,9 +177,14 @@ internal class AppUpdateModel(application: Application) : AndroidViewModel(appli
             }
             when (progress.status) {
                 DownloadManager.STATUS_SUCCESSFUL -> {
-                    showDownload(DownloadPhase.VERIFYING)
                     try {
-                        withContext(Dispatchers.IO) { downloads.verifiedApk(download) }
+                        if (withContext(Dispatchers.IO) { downloads.needsAssembly(download) }) {
+                            showDownload(DownloadPhase.ASSEMBLING)
+                            withContext(Dispatchers.IO) { downloads.assembleApk(download) }
+                        } else {
+                            showDownload(DownloadPhase.VERIFYING)
+                            withContext(Dispatchers.IO) { downloads.verifiedApk(download) }
+                        }
                         showDownload(DownloadPhase.READY)
                     } catch (error: CancellationException) {
                         throw error
@@ -213,12 +227,22 @@ internal class AppUpdateModel(application: Application) : AndroidViewModel(appli
     private suspend fun failDownload(download: UpdateDownload, reason: String) {
         withContext(Dispatchers.IO) { downloads.clear(download) }
         currentDownload = null
-        showDownload(DownloadPhase.IDLE, reason)
+        if (download.patch != null) {
+            prefs.edit().putString("failed_patch_target", download.manifest.sha256).apply()
+            showDownload(DownloadPhase.IDLE, "增量更新失败，请下载完整包")
+        } else {
+            showDownload(DownloadPhase.IDLE, reason)
+        }
     }
+
+    private fun failedPatchTarget(): String = prefs.getString("failed_patch_target", "").orEmpty()
 
     private fun showDownload(phase: DownloadPhase, notice: String? = null) {
         mutableState.update {
-            it.copy(downloadPhase = phase, receivedBytes = 0, paused = false, notice = notice)
+            it.copy(downloadPhase = phase, receivedBytes = 0, paused = false, notice = notice,
+                downloadSizeBytes = currentDownload?.sizeBytes ?: 0,
+                incremental = currentDownload?.patch != null,
+                useFullPackage = it.availableUpdate?.sha256 == failedPatchTarget())
         }
     }
 
