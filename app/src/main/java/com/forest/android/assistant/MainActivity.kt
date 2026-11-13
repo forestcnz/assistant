@@ -55,10 +55,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarDuration
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -585,15 +581,6 @@ class MainActivity : ComponentActivity() {
         val launcherEnabled by ScriptRunner.launcherEnabled.collectAsState()
         val pageStates = rememberSaveableStateHolder()
         val updateState by appUpdate.state.collectAsState()
-        var showAppUpdate by rememberSaveable { mutableStateOf(false) }
-        val updateSnackbar = remember { SnackbarHostState() }
-
-        LaunchedEffect(updateState.announcement) {
-            val release = updateState.announcement ?: return@LaunchedEffect
-            if (!appUpdate.markAnnounced(release.versionCode) || showAppUpdate) return@LaunchedEffect
-            val action = updateSnackbar.showSnackbar("发现新版 ${release.tag}", "查看", duration = SnackbarDuration.Long)
-            if (action == SnackbarResult.ActionPerformed) showAppUpdate = true
-        }
 
         // 任务副标题（描述/目标应用）：任务集合变化时后台读取一次，避免每秒轮询做文件 IO
         LaunchedEffect(tasks, taskMetadataVersion) {
@@ -611,7 +598,6 @@ class MainActivity : ComponentActivity() {
         Scaffold(
             containerColor = MaterialTheme.colorScheme.background,
             bottomBar = { AppBottomNavigation(mainTab) { mainTab = it } },
-            snackbarHost = { SnackbarHost(updateSnackbar) },
         ) { padding ->
             // 内容在宽屏居中；各页面分别保存滚动位置。
             Column(
@@ -634,19 +620,13 @@ class MainActivity : ComponentActivity() {
                                 0 -> TaskWorkspace(runState)
                                 1 -> LogsTab(logs)
                                 2 -> PermissionsTab()
-                                else -> SettingsTab(launcherEnabled, updateState) { showAppUpdate = true }
+                                else -> SettingsTab(launcherEnabled, updateState)
                             }
                         }
                     }
                 }
             }
         }
-
-        if (showAppUpdate) {
-            AppUpdateDialog(updateState, appUpdate, ::installAppUpdate) { showAppUpdate = false }
-        }
-
-
 
         if (showTransferDialog) AlertDialog(containerColor = MaterialTheme.colorScheme.surface, onDismissRequest = { showTransferDialog = false },
             title = { Text("导入与导出") }, text = {
@@ -1672,7 +1652,7 @@ class MainActivity : ComponentActivity() {
 
     /** 设置页：悬浮球与截屏通道；屏幕拾取工具和悬浮日志入口统一收在悬浮窗面板中。 */
     @Composable
-    private fun SettingsTab(launcherEnabled: Boolean, update: AppUpdateState, onAppUpdate: () -> Unit) {
+    private fun SettingsTab(launcherEnabled: Boolean, update: AppUpdateState) {
         val webState by LanWebServer.state.collectAsState()
         var showWebEditor by remember { mutableStateOf(false) }
         Column(Modifier.fillMaxSize()) {
@@ -1708,15 +1688,7 @@ class MainActivity : ComponentActivity() {
                     ) { showWebEditor = true }
                 }
                 SectionLabel("版本")
-                WorkCard(Modifier.fillMaxWidth()) {
-                    val status = when (update.downloadPhase) {
-                        DownloadPhase.STARTING, DownloadPhase.DOWNLOADING -> "正在下载"
-                        DownloadPhase.VERIFYING -> "正在校验"
-                        DownloadPhase.READY -> "更新已下载"
-                        DownloadPhase.IDLE -> update.availableUpdate?.let { "发现新版 ${it.tag}" }
-                    }
-                    ToolRow("应用更新", status ?: "当前版本 ${update.currentVersion}", onClick = onAppUpdate)
-                }
+                AppUpdateCard(update, appUpdate, ::installAppUpdate)
             }
         }
         if (showWebEditor) {
@@ -1737,21 +1709,21 @@ class MainActivity : ComponentActivity() {
     private fun installAppUpdate() {
         fun taskBusy(): Boolean {
             if (!ScriptRunner.state.value.running && !RecordingService.active) return false
-            Toast.makeText(this, "请在任务或录制结束后安装", Toast.LENGTH_SHORT).show()
+            appUpdate.showNotice("请在任务或录制结束后安装")
             return true
         }
         if (taskBusy()) return
         try {
             if (!packageManager.canRequestPackageInstalls()) {
-                Toast.makeText(this, "允许来自此来源的应用后，返回并点击立即安装", Toast.LENGTH_LONG).show()
+                appUpdate.showNotice("允许来自此来源的应用后，返回并点击立即安装")
                 startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, "package:$packageName".toUri()))
                 return
             }
         } catch (_: ActivityNotFoundException) {
-            Toast.makeText(this, "系统无法打开安装来源设置", Toast.LENGTH_LONG).show()
+            appUpdate.showNotice("系统无法打开安装来源设置")
             return
         } catch (_: SecurityException) {
-            Toast.makeText(this, "系统限制了应用安装", Toast.LENGTH_LONG).show()
+            appUpdate.showNotice("系统限制了应用安装")
             return
         }
         lifecycleScope.launch {
@@ -1760,9 +1732,9 @@ class MainActivity : ComponentActivity() {
             try {
                 startActivity(installer)
             } catch (_: ActivityNotFoundException) {
-                Toast.makeText(this@MainActivity, "系统无法打开 APK 安装器", Toast.LENGTH_LONG).show()
+                appUpdate.showNotice("系统无法打开 APK 安装器")
             } catch (_: SecurityException) {
-                Toast.makeText(this@MainActivity, "系统限制了应用安装", Toast.LENGTH_LONG).show()
+                appUpdate.showNotice("系统限制了应用安装")
             }
         }
     }

@@ -7,7 +7,7 @@ from pathlib import Path
 
 
 def main():
-    apk_arg, aapt, release_base, tag, notes_file = sys.argv[1:]
+    apk_arg, aapt, release_base, tag = sys.argv[1:]
     apk = Path(apk_arg)
     badging = subprocess.check_output([aapt, "dump", "badging", str(apk)], encoding="utf-8")
     package = re.search(r"^package: name='([^']+)' versionCode='(\d+)' versionName='([^']+)'", badging, re.M)
@@ -29,7 +29,8 @@ def main():
         "sizeBytes": apk.stat().st_size,
         "sha256": sha256,
         "apkUrl": f"{release_base}/download/{tag}/{apk.name}",
-        "notes": Path(notes_file).read_text(encoding="utf-8").strip(),
+        # Older app versions require a string in this field.
+        "notes": "",
     }
     print(json.dumps(manifest, ensure_ascii=False, indent=2))
 

@@ -35,7 +35,6 @@ internal data class AppUpdateState(
     val downloadPhase: DownloadPhase = DownloadPhase.IDLE,
     val receivedBytes: Long = 0,
     val paused: Boolean = false,
-    val announcement: UpdateManifest? = null,
 )
 
 internal class AppUpdateModel(application: Application) : AndroidViewModel(application) {
@@ -78,7 +77,7 @@ internal class AppUpdateModel(application: Application) : AndroidViewModel(appli
 
     fun setAutomatic(enabled: Boolean) {
         prefs.edit().putBoolean("automatic", enabled).apply()
-        mutableState.update { it.copy(automatic = enabled, announcement = if (enabled) it.announcement else null) }
+        mutableState.update { it.copy(automatic = enabled) }
         if (enabled) check(manual = false)
     }
 
@@ -102,7 +101,7 @@ internal class AppUpdateModel(application: Application) : AndroidViewModel(appli
                     is IOException -> error.message?.take(100) ?: "网络请求失败"
                     else -> "更新清单无效"
                 }
-                mutableState.update { it.copy(checking = false, availableUpdate = null, notice = "GitHub：$message", announcement = null) }
+                mutableState.update { it.copy(checking = false, availableUpdate = null, notice = "GitHub：$message") }
                 return@launch
             }
             val notice = when {
@@ -111,19 +110,12 @@ internal class AppUpdateModel(application: Application) : AndroidViewModel(appli
                 else -> null
             }
             val latest = manifest.takeIf { notice == null }
-            mutableState.update {
-                val announcement = latest?.takeIf { release ->
-                    !manual && it.automatic && release.versionCode > prefs.getLong("announced_version", 0)
-                }
-                it.copy(checking = false, availableUpdate = latest, notice = notice, announcement = announcement)
-            }
+            mutableState.update { it.copy(checking = false, availableUpdate = latest, notice = notice) }
         }
     }
 
-    fun markAnnounced(versionCode: Long): Boolean {
-        if (prefs.getLong("announced_version", 0) >= versionCode) return false
-        prefs.edit().putLong("announced_version", versionCode).apply()
-        return true
+    fun showNotice(message: String) {
+        mutableState.update { it.copy(notice = message) }
     }
 
     fun startDownload() {

@@ -93,15 +93,9 @@ jobs:
           (cd dist && sha256sum *.apk > SHA256SUMS.txt)
 
           if [[ "$GITHUB_REF_TYPE" == "tag" && "$release_name" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            previous=$(git describe --tags --match 'v[0-9]*' --exclude '*-*' --abbrev=0 "$GITHUB_SHA^" 2>/dev/null || true)
-            range="$GITHUB_SHA"
-            if [[ -n "$previous" ]]; then range="$previous..$GITHUB_SHA"; fi
-            notes_file="$RUNNER_TEMP/android-update-notes.txt"
-            git log -8 --no-merges --invert-grep --grep='\[skip version bump\]' --format='- %s' "$range" > "$notes_file"
-            if [[ ! -s "$notes_file" ]]; then echo "雕雕助手 $release_name" > "$notes_file"; fi
             aapt="${ANDROID_SDK_ROOT:-$ANDROID_HOME}/build-tools/37.0.0/aapt2"
             python3 .github/scripts/android-update-manifest.py "dist/assistant-${safe_release_name}-release.apk" \
-              "$aapt" "https://github.com/${GITHUB_REPOSITORY}/releases" "$release_name" "$notes_file" > dist/update.json
+              "$aapt" "https://github.com/${GITHUB_REPOSITORY}/releases" "$release_name" > dist/update.json
           fi
 
       - name: Upload build artifact

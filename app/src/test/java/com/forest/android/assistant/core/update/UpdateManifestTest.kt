@@ -21,8 +21,14 @@ class UpdateManifestTest {
         }
     }
 
+    @Test
+    fun parserIgnoresNotesInPreviouslyPublishedManifests() {
+        val update = manifest()
+        assertEquals(update, UpdateManifest.parse(update.toJson().put("notes", "- fix: internal release work")))
+    }
+
     private fun manifest() = UpdateManifest(
         versionCode = 8, versionName = "0.1.7", minSdk = 29, sizeBytes = 1024,
-        sha256 = "a".repeat(64), notes = "更新说明", apkUrl = "$GITHUB_RELEASES/download/v0.1.7/assistant-v0.1.7-release.apk",
+        sha256 = "a".repeat(64), apkUrl = "$GITHUB_RELEASES/download/v0.1.7/assistant-v0.1.7-release.apk",
     )
 }

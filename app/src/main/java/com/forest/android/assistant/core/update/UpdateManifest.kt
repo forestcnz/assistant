@@ -13,7 +13,6 @@ internal data class UpdateManifest(
     val minSdk: Int,
     val sizeBytes: Long,
     val sha256: String,
-    val notes: String,
     val apkUrl: String,
 ) {
     val tag get() = "v$versionName"
@@ -24,7 +23,6 @@ internal data class UpdateManifest(
         .put("minSdk", minSdk)
         .put("sizeBytes", sizeBytes)
         .put("sha256", sha256)
-        .put("notes", notes)
         .put("apkUrl", apkUrl)
 
     companion object {
@@ -38,7 +36,7 @@ internal data class UpdateManifest(
             require(name.matches(versionPattern) && name.length <= 32 && sdk <= Int.MAX_VALUE)
             require(hash.matches(sha256Pattern))
             require(url == "$GITHUB_RELEASES/download/v$name/assistant-v$name-release.apk")
-            return UpdateManifest(code, name, sdk.toInt(), size, hash, json.getString("notes"), url)
+            return UpdateManifest(code, name, sdk.toInt(), size, hash, url)
         }
 
         private fun JSONObject.positiveInteger(key: String): Long {
