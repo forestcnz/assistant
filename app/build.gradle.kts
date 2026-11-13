@@ -18,7 +18,7 @@ android {
         targetSdk = 37
         testInstrumentationRunner = "com.forest.android.assistant.core.image.ImageApiInstrumentation"
         versionCode = providers.gradleProperty("appVersionCode").orElse("1").get().toInt()
-        versionName = providers.gradleProperty("appVersionName").orElse("0.1.11").get()
+        versionName = providers.gradleProperty("appVersionName").orElse("0.1.12").get()
         val releaseCertificate = providers.gradleProperty("appReleaseCertificateSha256").get()
         buildConfigField("String", "RELEASE_CERTIFICATE_SHA256", "\"$releaseCertificate\"")
     }
