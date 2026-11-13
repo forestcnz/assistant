@@ -28,10 +28,11 @@ for host in api.gitee.com gitee.com; do
   api="$repo_api/releases"
   echo "Looking up Gitee Release $tag via $host"
   if status=$(curl "${curl_options[@]}" --connect-timeout 15 --max-time 30 --retry 1 \
-    -o "$temp/release.json" -w '%{http_code}' "$api/tags/$tag") && [[ "$status" == 200 || "$status" == 404 ]]; then
+    -o "$temp/release.json" -w '%{http_code}' "$api/tags/$tag"); then
     break
   fi
   echo "Gitee lookup via $host failed (HTTP $status)"
+  status=000
 done
 if [[ "$status" == 404 ]] || { [[ "$status" == 200 ]] && jq -e 'type == "null"' "$temp/release.json" > /dev/null; }; then
   echo 'Looking up the Gitee default branch'
@@ -51,20 +52,36 @@ fi
 
 release_id=$(jq -er '.id | numbers' "$temp/release.json")
 attachments="$api/$release_id/attach_files"
+
+list_attachments() {
+  curl "${read_options[@]}" --max-time 45 --fail -o "$temp/assets.json" "$attachments"
+}
+
 echo 'Listing Gitee Release attachments'
-curl "${read_options[@]}" --max-time 45 --fail -o "$temp/assets.json" "$attachments"
+list_attachments
 for name in "$apk" update.json; do
   file="$temp/$name"
   if [[ "$name" == update.json ]]; then file="$temp/gitee-update.json"; fi
-  if ! jq -e --arg name "$name" 'any(.[]; .name == $name)' "$temp/assets.json" > /dev/null; then
-    echo "Uploading $name to Gitee"
-    curl "${curl_options[@]}" --max-time 7200 --speed-limit 1024 --speed-time 180 --fail -o /dev/null \
+  for attempt in 1 2 3; do
+    if jq -e --arg name "$name" 'any(.[]; .name == $name)' "$temp/assets.json" > /dev/null; then break; fi
+    echo "Uploading $name to Gitee (attempt $attempt)"
+    if curl "${curl_options[@]}" --max-time 7200 --speed-limit 1024 --speed-time 180 --fail -o /dev/null \
       --write-out 'Gitee upload returned HTTP %{http_code} after %{time_total}s (%{size_upload} bytes sent)\n' \
       --form-string "access_token=$GITEE_ACCESS_TOKEN" --form "file=@$file;filename=$name" \
-      "$attachments"
-    curl "${read_options[@]}" --max-time 45 --fail -o "$temp/assets.json" "$attachments"
+      "$attachments"; then
+      list_attachments
+      break
+    else
+      result=$?
+      if [[ "$result" != 7 && "$result" != 28 && "$result" != 55 && "$result" != 56 ]]; then exit "$result"; fi
+    fi
+    # 请求可能已在服务端完成，重试前确认附件状态。
+    list_attachments
+  done
+  if ! attachment_id=$(jq -er --arg name "$name" '.[] | select(.name == $name) | .id | numbers' "$temp/assets.json"); then
+    echo "Gitee attachment $name is missing after upload"
+    exit 1
   fi
-  attachment_id=$(jq -er --arg name "$name" '.[] | select(.name == $name) | .id | numbers' "$temp/assets.json")
   echo "Verifying Gitee attachment $name"
   curl "${read_options[@]}" --fail --location -o "$temp/downloaded" "$attachments/$attachment_id/download"
   if ! cmp -s "$file" "$temp/downloaded"; then
@@ -75,7 +92,7 @@ done
 
 if jq -e '.prerelease' "$temp/release.json" > /dev/null; then
   echo "Publishing Gitee Release $tag"
-  curl "${curl_options[@]}" --fail -o /dev/null -X PATCH \
+  curl "${read_options[@]}" --max-time 45 --fail -o /dev/null -X PATCH \
     --data-urlencode "access_token=$GITEE_ACCESS_TOKEN" --data-urlencode 'prerelease=false' \
     --data-urlencode "tag_name=$tag" \
     --data-urlencode "name=雕雕助手 $tag" \
