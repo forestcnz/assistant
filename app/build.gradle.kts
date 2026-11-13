@@ -18,7 +18,7 @@ android {
         targetSdk = 37
         testInstrumentationRunner = "com.forest.android.assistant.core.image.ImageApiInstrumentation"
         versionCode = providers.gradleProperty("appVersionCode").orElse("1").get().toInt()
-        versionName = providers.gradleProperty("appVersionName").orElse("0.1.6").get()
+        versionName = providers.gradleProperty("appVersionName").orElse("0.1.8").get()
         val giteeRepository = providers.gradleProperty("appUpdateGiteeRepository").orElse("").get()
         require(giteeRepository.isEmpty() || giteeRepository.matches(Regex("[A-Za-z0-9_-]+/[A-Za-z0-9_.-]+"))) {
             "appUpdateGiteeRepository must be a Gitee owner/repository path"
