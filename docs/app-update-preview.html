@@ -241,6 +241,7 @@
                   <button type="button" class="text-button" id="check-update" data-action="check">检查更新</button>
                   <button type="button" class="text-button" id="confirm" data-action="download">从 GitHub 下载</button>
                   <button type="button" class="text-button" id="cancel-download" data-action="cancel-download" hidden>取消下载</button>
+                  <button type="button" class="primary-button" id="retry-download" data-action="retry-download" hidden>立即重试</button>
                 </div>
               </section>
             </div>
@@ -301,9 +302,9 @@
       starting: { update: true, phase: 'starting' },
       downloading: { update: true, phase: 'downloading', progress: 42 },
       'patch-download': { update: true, phase: 'downloading', progress: 42, incremental: true },
-      paused: { update: true, phase: 'downloading', progress: 42, paused: true },
+      paused: { update: true, phase: 'interrupted', progress: 42 },
       cancelled: { update: true, notice: '已取消下载' },
-      'download-error': { update: true, notice: 'GitHub 下载失败，请重试' },
+      'download-error': { update: true, phase: 'interrupted' },
       storage: { update: true, notice: '设备空间不足，请清理后重试' },
       'patch-failed': { update: true, notice: '增量更新失败，请下载完整包', useFullPackage: true },
       assembling: { update: true, phase: 'assembling' },
@@ -355,7 +356,7 @@
       const atBottom = settings.scrollHeight - settings.clientHeight - settings.scrollTop <= 2;
       state = {
         id, official: true, automatic: true, allowed: true, current: '0.1.8',
-        update: false, phase: 'idle', notice: '', progress: 0, paused: false, incremental: false, useFullPackage: false,
+        update: false, phase: 'idle', notice: '', progress: 0, incremental: false, useFullPackage: false,
         system: '', busy: false, blocked: false,
         ...scenarios[id], ...overrides,
       };
@@ -375,14 +376,15 @@
 
     function render() {
       const { phase, update, official, notice, system, current, progress } = state;
-      const transfer = phase === 'downloading';
+      const interrupted = phase === 'interrupted';
+      const transfer = phase === 'downloading' || interrupted;
       const ready = phase === 'ready';
       const idle = phase === 'idle';
       const checking = phase === 'checking';
       const phaseText = {
         starting: '正在准备下载…',
-        downloading: state.paused ? '下载已暂停，等待重试'
-          : state.incremental ? `正在下载增量包 ${progress}%` : `正在从 GitHub 下载 ${progress}%`,
+        downloading: state.incremental ? `正在下载增量包 ${progress}%` : `正在从 GitHub 下载 ${progress}%`,
+        interrupted: 'GitHub 下载中断，可立即重试',
         assembling: '正在合成安装包…',
         verifying: '正在校验安装包…', ready: '下载完成，可以安装。',
       }[phase];
@@ -402,6 +404,7 @@
       get('progress-fill').style.width = `${progress}%`;
       get('cancel-download').hidden = !transfer && !ready;
       get('cancel-download').textContent = ready ? '删除安装包' : '取消下载';
+      get('retry-download').hidden = !interrupted;
       get('confirm').hidden = !ready && !(idle && update);
       get('confirm').className = ready ? 'primary-button' : 'text-button';
       get('confirm').textContent = ready ? '立即安装' : state.useFullPackage ? '下载完整包' : '从 GitHub 下载';
@@ -419,9 +422,8 @@
       for (const [id, button] of scenarioButtons) button.setAttribute('aria-pressed', String(id === state.id));
     }
 
-    function animateDownload() {
-      const incremental = !state.useFullPackage;
-      go(incremental ? 'patch-download' : 'downloading', { progress: 0 });
+    function animateDownload(progress = 0, incremental = !state.useFullPackage) {
+      go(incremental ? 'patch-download' : 'downloading', { progress });
       const tick = () => {
         state.progress = Math.min(state.progress + 7, 100);
         render();
@@ -450,6 +452,9 @@
         case 'download':
           go('starting');
           timer = setTimeout(animateDownload, 550);
+          break;
+        case 'retry-download':
+          animateDownload(state.progress, state.incremental);
           break;
         case 'cancel-download':
           go(state.phase === 'ready' ? 'deleted' : 'cancelled');

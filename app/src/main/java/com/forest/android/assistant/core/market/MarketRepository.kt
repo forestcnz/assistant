@@ -41,7 +41,7 @@ internal class MarketRepository(private val context: Context) {
         }
     }
 
-    suspend fun importTask(release: MarketRelease, name: String): String = withContext(Dispatchers.IO) {
+    suspend fun importTask(release: MarketRelease, name: String, overwrite: Boolean): String = withContext(Dispatchers.IO) {
         require(BuildConfig.VERSION_CODE >= release.minAppVersionCode) { "请先更新雕雕助手" }
         val current = load().firstOrNull { it.source == release.source }
             ?: error("脚本已下架，请返回市场刷新")
@@ -68,7 +68,7 @@ internal class MarketRepository(private val context: Context) {
             val sha = digest.digest().joinToString("") { "%02x".format(it) }
             require(size == release.sizeBytes && sha == release.sha256) { "文件校验失败，请刷新市场后重试" }
             job.ensureActive()
-            TaskZip.importMarketTask(context, archive, release, name)
+            TaskZip.importMarketTask(context, archive, release, name, overwrite)
         } finally {
             archive.delete()
         }

@@ -34,6 +34,7 @@ internal data class MarketRelease(
     val capabilities: List<String>,
     val changes: String,
     val updatedAt: LocalDate,
+    val version: Int,
     val minAppVersionCode: Int,
     val sizeBytes: Long,
     val sha256: String,
@@ -64,6 +65,8 @@ internal object MarketCatalog {
         val size = json.getLong("sizeBytes")
         val sha = json.getString("sha256")
         val revision = json.getString("revision")
+        // 旧目录未提供脚本版本，视为首版。
+        val version = if (json.has("version")) json.get("version") else 1
         val minVersion = json.getInt("minAppVersionCode")
         val targetApp = json.optionalText("targetApp", 80)?.also(::validateDirectoryName)
         val targetPackage = json.optionalText("targetPackage", 160)
@@ -72,6 +75,7 @@ internal object MarketCatalog {
             "市场包校验信息无效"
         }
         require(minVersion > 0) { "最低助手版本无效" }
+        require(version is Int && version > 0) { "脚本版本号无效" }
         require(targetPackage == null || (targetApp != null && packagePattern.matches(targetPackage))) {
             "目标应用信息无效"
         }
@@ -93,6 +97,7 @@ internal object MarketCatalog {
             },
             changes = json.requiredText("changes", 500),
             updatedAt = LocalDate.parse(json.getString("updatedAt")),
+            version = version,
             minAppVersionCode = minVersion,
             sizeBytes = size,
             sha256 = sha,

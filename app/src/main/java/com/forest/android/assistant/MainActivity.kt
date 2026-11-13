@@ -456,7 +456,7 @@ class MainActivity : ComponentActivity() {
                 appUpdate.state.first { it.official != null }
                 appUpdate.check(manual = false)
                 appUpdate.state.map { it.downloadPhase }.distinctUntilChanged().collectLatest { phase ->
-                    if (phase == DownloadPhase.DOWNLOADING) {
+                    if (phase == DownloadPhase.DOWNLOADING || phase == DownloadPhase.INTERRUPTED) {
                         while (true) {
                             appUpdate.refreshDownload()
                             delay(1000)

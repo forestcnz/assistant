@@ -1,7 +1,6 @@
 package com.forest.android.assistant.core.update
 
 import android.app.Application
-import android.app.DownloadManager
 import android.content.Context
 import android.content.Intent
 import android.os.Build
@@ -23,7 +22,7 @@ import java.io.IOException
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
 
-internal enum class DownloadPhase { IDLE, STARTING, DOWNLOADING, ASSEMBLING, VERIFYING, READY }
+internal enum class DownloadPhase { IDLE, STARTING, DOWNLOADING, INTERRUPTED, ASSEMBLING, VERIFYING, READY }
 
 internal data class AppUpdateState(
     val currentVersion: String = BuildConfig.VERSION_NAME,
@@ -34,7 +33,6 @@ internal data class AppUpdateState(
     val notice: String? = null,
     val downloadPhase: DownloadPhase = DownloadPhase.IDLE,
     val receivedBytes: Long = 0,
-    val paused: Boolean = false,
     val downloadSizeBytes: Long = 0,
     val incremental: Boolean = false,
     val useFullPackage: Boolean = false,
@@ -135,14 +133,49 @@ internal class AppUpdateModel(application: Application) : AndroidViewModel(appli
                 val manifest = current.availableUpdate ?: return@withLock
                 showDownload(DownloadPhase.STARTING)
                 try {
-                    currentDownload = withContext(Dispatchers.IO) { downloads.start(manifest, current.useFullPackage) }
-                    showDownload(DownloadPhase.DOWNLOADING)
+                    val download = withContext(Dispatchers.IO) { downloads.start(manifest, current.useFullPackage) }
+                    currentDownload = download
+                    enqueue(download)
                 } catch (error: CancellationException) {
                     throw error
                 } catch (error: Exception) {
                     showDownload(DownloadPhase.IDLE, error.message ?: "无法开始下载，请重试")
                 }
             }
+        }
+    }
+
+    fun retryDownload() {
+        viewModelScope.launch {
+            downloadMutex.withLock {
+                val saved = currentDownload ?: return@withLock
+                val current = state.value
+                if (current.downloadPhase != DownloadPhase.INTERRUPTED) return@withLock
+                try {
+                    val download = if (saved.legacyId == null) saved else withContext(Dispatchers.IO) {
+                        if (downloads.status(saved).status == DownloadStatus.COMPLETE) saved else downloads.replaceLegacy(saved)
+                    }
+                    currentDownload = download
+                    if (download.legacyId != null) showDownload(DownloadPhase.DOWNLOADING) else enqueue(download)
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Exception) {
+                    showDownload(DownloadPhase.INTERRUPTED, error.message ?: "无法重试下载", current.receivedBytes)
+                }
+            }
+        }
+    }
+
+    private suspend fun enqueue(download: UpdateDownload) {
+        val received = state.value.receivedBytes
+        showDownload(DownloadPhase.STARTING, receivedBytes = received)
+        try {
+            downloads.enqueue(download)
+            showDownload(DownloadPhase.DOWNLOADING, receivedBytes = received)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            showDownload(DownloadPhase.INTERRUPTED, "无法启动下载，请重试", received)
         }
     }
 
@@ -166,17 +199,18 @@ internal class AppUpdateModel(application: Application) : AndroidViewModel(appli
     private suspend fun readDownloadProgress() {
         downloadMutex.withLock {
             val download = currentDownload ?: return
-            if (state.value.downloadPhase != DownloadPhase.DOWNLOADING) return
+            val phase = state.value.downloadPhase
+            if (phase != DownloadPhase.DOWNLOADING && (phase != DownloadPhase.INTERRUPTED || download.legacyId == null)) return
             val progress = try {
                 withContext(Dispatchers.IO) { downloads.status(download) }
             } catch (error: CancellationException) {
                 throw error
             } catch (_: Exception) {
-                failDownload(download, "无法读取下载状态，请重试")
+                showDownload(DownloadPhase.INTERRUPTED, "无法读取下载状态，请重试", state.value.receivedBytes)
                 return
             }
             when (progress.status) {
-                DownloadManager.STATUS_SUCCESSFUL -> {
+                DownloadStatus.COMPLETE -> {
                     try {
                         if (withContext(Dispatchers.IO) { downloads.needsAssembly(download) }) {
                             showDownload(DownloadPhase.ASSEMBLING)
@@ -192,14 +226,18 @@ internal class AppUpdateModel(application: Application) : AndroidViewModel(appli
                         failDownload(download, error.message ?: "安装包校验失败")
                     }
                 }
-                DownloadManager.STATUS_FAILED -> {
-                    val noSpace = progress.reason == DownloadManager.ERROR_INSUFFICIENT_SPACE
-                    val reason = if (noSpace) "设备空间不足，请清理后重试" else "GitHub 下载失败，请重试"
-                    failDownload(download, reason)
+                DownloadStatus.INTERRUPTED -> {
+                    if (progress.assetMissing && download.patch != null) {
+                        failDownload(download, "增量包不可用")
+                    } else {
+                        val message = when {
+                            progress.assetMissing -> "GitHub 安装包暂不可用"
+                            else -> progress.message ?: "GitHub 下载中断，可立即重试"
+                        }
+                        showDownload(DownloadPhase.INTERRUPTED, message, progress.received)
+                    }
                 }
-                else -> mutableState.update {
-                    it.copy(receivedBytes = progress.received, paused = progress.status == DownloadManager.STATUS_PAUSED)
-                }
+                DownloadStatus.ACTIVE -> showDownload(DownloadPhase.DOWNLOADING, receivedBytes = progress.received)
             }
         }
     }
@@ -237,9 +275,9 @@ internal class AppUpdateModel(application: Application) : AndroidViewModel(appli
 
     private fun failedPatchTarget(): String = prefs.getString("failed_patch_target", "").orEmpty()
 
-    private fun showDownload(phase: DownloadPhase, notice: String? = null) {
+    private fun showDownload(phase: DownloadPhase, notice: String? = null, receivedBytes: Long = 0) {
         mutableState.update {
-            it.copy(downloadPhase = phase, receivedBytes = 0, paused = false, notice = notice,
+            it.copy(downloadPhase = phase, receivedBytes = receivedBytes, notice = notice,
                 downloadSizeBytes = currentDownload?.sizeBytes ?: 0,
                 incremental = currentDownload?.patch != null,
                 useFullPackage = it.availableUpdate?.sha256 == failedPatchTarget())

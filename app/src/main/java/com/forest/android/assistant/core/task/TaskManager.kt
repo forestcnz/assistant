@@ -74,6 +74,7 @@ object TaskManager {
     fun ensureBuiltinTasks(context: Context) {
         val assets = context.assets
         val root = tasksRoot(context)
+        TaskZip.recoverMarketImports(root)
         val names = try {
             assets.list("tasks") ?: emptyArray()
         } catch (e: Exception) {
@@ -278,13 +279,13 @@ object TaskManager {
         return File(root, ".builtin-suppressed-$digest")
     }
 
-    private fun requireTasksIdle() {
+    internal fun requireTasksIdle() {
         check(!com.forest.android.assistant.core.recording.RecordingService.active && !com.forest.android.assistant.core.engine.ScriptRunner.state.value.running) {
             "请先完成录制或停止正在运行的任务"
         }
     }
 
-    private fun checkedTaskDir(context: Context, name: String): File {
+    internal fun checkedTaskDir(context: Context, name: String): File {
         require(name.isNotBlank() && name.length <= 50 && name != "." && name != ".." &&
             name.none { it == '/' || it == '\\' || it.isISOControl() }) { "任务名称不合法" }
         val root = tasksRoot(context).canonicalFile

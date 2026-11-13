@@ -16,7 +16,7 @@ import java.util.Locale
 object RunHistory {
 
     private const val TAG = "ScriptJs"
-    private const val FILE_NAME = "history.jsonl"
+    internal const val FILE_NAME = "history.jsonl"
     private const val MAX_ENTRIES = 50
 
     /** 退出原因 */

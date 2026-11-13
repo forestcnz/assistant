@@ -125,7 +125,6 @@ internal fun ScriptMarket(taskNames: List<String>, onBack: () -> Unit, onOpenTas
     val compatible = BuildConfig.VERSION_CODE >= release.minAppVersionCode
     val button = when {
         importing -> "正在导入…"
-        localTask != null -> "打开本地任务"
         !compatible -> "请先更新雕雕助手"
         else -> "导入到任务"
     }
@@ -136,7 +135,7 @@ internal fun ScriptMarket(taskNames: List<String>, onBack: () -> Unit, onOpenTas
 
     DetailPage(
         title = release.title,
-        subtitle = release.author,
+        subtitle = "${release.author} · 版本 ${release.version}",
         onBack = {
             if (!importing) {
                 selectedId = null
@@ -147,14 +146,11 @@ internal fun ScriptMarket(taskNames: List<String>, onBack: () -> Unit, onOpenTas
         footer = {
             PrimaryAction(
                 button,
-                enabled = !importing && installed != null && (localTask != null || (compatible && loadError == null))
+                enabled = !importing && installed != null && compatible && loadError == null,
             ) {
-                if (localTask != null) onOpenTask(localTask)
-                else {
-                    name = availableMarketName(release.title, taskNames)
-                    importError = null
-                    confirmImport = true
-                }
+                name = localTask ?: availableMarketName(release.title, taskNames)
+                importError = null
+                confirmImport = true
             }
         }
     ) {
@@ -163,6 +159,9 @@ internal fun ScriptMarket(taskNames: List<String>, onBack: () -> Unit, onOpenTas
         MarketSection("适配环境", "${release.targetApp ?: "通用"}\n${release.environment}\n最低助手版本号 ${release.minAppVersionCode}")
         MarketSection("脚本能力", release.capabilities.joinToString("、").ifEmpty { "无需额外权限" })
         MarketSection("更新说明", "${release.updatedAt}\n${release.changes}")
+        if (localTask != null) {
+            TextButton(enabled = !importing, onClick = { onOpenTask(localTask) }) { Text("打开本地任务") }
+        }
         Row {
             TextButton(onClick = { openMarketLink(context, release.sourceUrl) }) { Text("查看源码和素材") }
             TextButton(onClick = { openMarketLink(context, feedback) }) { Text("反馈问题") }
@@ -171,25 +170,29 @@ internal fun ScriptMarket(taskNames: List<String>, onBack: () -> Unit, onOpenTas
     }
 
     if (confirmImport) {
-        val normalized = name.trim()
-        val validName = normalized.isNotEmpty() && normalized.length <= 50 && normalized !in taskNames &&
+        val normalized = localTask ?: name.trim()
+        val validName = localTask != null || (normalized.isNotEmpty() && normalized.length <= 50 && normalized !in taskNames &&
             normalized !in listOf(".", "..") && !normalized.startsWith(".deleted-") &&
-            normalized.none { it == '/' || it == '\\' || it.isISOControl() }
+            normalized.none { it == '/' || it == '\\' || it.isISOControl() })
         AlertDialog(
             onDismissRequest = { if (!importing) confirmImport = false },
             title = { Text("导入到任务") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text("${(release.sizeBytes + 1023) / 1024} KB")
-                    OutlinedTextField(
-                        value = name, onValueChange = { name = it; importError = null }, singleLine = true,
-                        label = { Text("本地任务名称") }, enabled = !importing,
-                        isError = normalized.isNotEmpty() && !validName,
-                        supportingText = {
-                            if (normalized in taskNames) Text("该任务名称已存在")
-                            else if (normalized.isNotEmpty() && !validName) Text("请输入合法任务名，最多 50 字")
-                        }
-                    )
+                    if (localTask != null) {
+                        Text("导入后会覆盖「$localTask」的脚本、素材和配置。")
+                    } else {
+                        OutlinedTextField(
+                            value = name, onValueChange = { name = it; importError = null }, singleLine = true,
+                            label = { Text("本地任务名称") }, enabled = !importing,
+                            isError = normalized.isNotEmpty() && !validName,
+                            supportingText = {
+                                if (normalized in taskNames) Text("该任务名称已存在")
+                                else if (normalized.isNotEmpty() && !validName) Text("请输入合法任务名，最多 50 字")
+                            },
+                        )
+                    }
                     importError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                 }
             },
@@ -199,7 +202,7 @@ internal fun ScriptMarket(taskNames: List<String>, onBack: () -> Unit, onOpenTas
                     importError = null
                     scope.launch {
                         try {
-                            val taskName = repository.importTask(release, normalized)
+                            val taskName = repository.importTask(release, normalized, overwrite = localTask != null)
                             confirmImport = false
                             onOpenTask(taskName)
                         } catch (error: CancellationException) {

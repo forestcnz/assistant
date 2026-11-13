@@ -27,6 +27,7 @@ object TaskZip {
     private const val BUNDLE_FORMAT = "assistant-task-bundle"
     private const val MAX_ENTRIES = 20_000
     private const val MAX_UNPACKED_BYTES = 2L * 1024 * 1024 * 1024
+    private const val MARKET_BACKUP_PREFIX = ".deleted-market-backup-"
 
     data class Result(val file: File, val sizeBytes: Long)
     data class ImportResult(val imported: List<String>, val skipped: List<String>, val importedGroups: List<String> = emptyList())
@@ -133,7 +134,7 @@ object TaskZip {
                         skipped += "任务「$name」已存在"
                     } else {
                         try {
-                            installTask(context, source, target)
+                            installTask(source, target)
                             imported += name
                         } catch (e: Exception) {
                             skipped += "任务「$name」导入失败：${e.message}"
@@ -159,7 +160,9 @@ object TaskZip {
     }
 
     @Synchronized
-    internal fun importMarketTask(context: Context, file: File, release: MarketRelease, rawName: String): String {
+    internal fun importMarketTask(
+        context: Context, file: File, release: MarketRelease, rawName: String, overwrite: Boolean,
+    ): String {
         val temp = File(context.cacheDir, "market-import-${UUID.randomUUID()}")
         try {
             check(temp.mkdirs()) { "无法创建导入临时目录" }
@@ -176,13 +179,20 @@ object TaskZip {
             }
 
             return synchronized(TaskManager) {
-                val existing = TaskManager.listTasks(context).firstOrNull {
-                    marketSource(TaskManager.taskDir(context, it.name)) == release.source
+                val target = TaskManager.checkedTaskDir(context, name)
+                check(target.name == name) { "任务目录无效" }
+                if (overwrite) {
+                    TaskManager.requireTasksIdle()
+                    check(File(target, "task.js").isFile && marketSource(target) == release.source) {
+                        "对应的本地任务已变更，请返回市场后重试"
+                    }
+                } else {
+                    val existing = TaskManager.listTasks(context).firstOrNull {
+                        marketSource(TaskManager.taskDir(context, it.name)) == release.source
+                    }
+                    if (existing != null) return@synchronized existing.name
                 }
-                if (existing != null) return@synchronized existing.name
-                val target = TaskManager.taskDir(context, name)
-                check(!target.exists()) { "该任务名称已存在" }
-                installTask(context, temp, target)
+                installTask(temp, target, overwrite)
                 name
             }
         } finally {
@@ -202,7 +212,7 @@ object TaskZip {
         val config = JSONObject()
             .put("name", name)
             .put("desc", release.description)
-            .put("marketSource", release.source.toJson())
+            .put("marketSource", release.source.toJson().put("version", release.version))
         release.targetPackage?.let { config.put("target", it) }
         original.optJSONArray("designSize")?.let { size ->
             require(size.length() == 2 && size.getInt(0) > 0 && size.getInt(1) > 0) { "任务设计尺寸无效" }
@@ -271,15 +281,54 @@ object TaskZip {
             name.substringAfterLast('.').lowercase() in setOf("png", "jpg", "jpeg", "webp")
     }
 
-    private fun installTask(context: Context, source: File, target: File) {
-        val staging = File(TaskManager.tasksRoot(context), ".deleted-import-${UUID.randomUUID()}")
+    internal fun installTask(source: File, target: File, overwrite: Boolean = false) {
+        val root = requireNotNull(target.parentFile)
+        val staging = File(root, ".deleted-import-${UUID.randomUUID()}")
         try {
             check(source.copyRecursively(staging, overwrite = false)) { "无法复制任务文件" }
-            check(!target.exists()) { "任务已存在" }
-            check(staging.renameTo(target)) { "无法保存任务" }
+            if (overwrite) {
+                val history = File(target, RunHistory.FILE_NAME)
+                if (history.isFile) history.copyTo(File(staging, history.name))
+                replaceMarketTask(staging, target)
+            } else {
+                check(!target.exists()) { "任务已存在" }
+                check(staging.renameTo(target)) { "无法保存任务" }
+            }
         } finally {
             staging.deleteRecursively()
         }
+    }
+
+    private fun replaceMarketTask(staging: File, target: File) {
+        val backup = File(target.parentFile, "$MARKET_BACKUP_PREFIX${UUID.randomUUID()}")
+        check(backup.mkdir()) { "无法创建任务备份目录" }
+        val original = File(backup, target.name)
+        if (!target.renameTo(original)) {
+            backup.delete()
+            error("无法暂存原任务")
+        }
+        if (staging.renameTo(target)) {
+            backup.deleteRecursively()
+            return
+        }
+        if (original.renameTo(target)) backup.delete()
+        error("无法保存任务")
+    }
+
+    // 应用可能在移走旧任务和保存新任务之间退出。
+    internal fun recoverMarketImports(root: File) {
+        root.listFiles { file -> file.isDirectory && file.name.startsWith(MARKET_BACKUP_PREFIX) }
+            ?.forEach { backup ->
+                val children = backup.listFiles() ?: return@forEach
+                if (children.isEmpty()) {
+                    backup.delete()
+                    return@forEach
+                }
+                val original = children.singleOrNull()?.takeIf { validName(it.name) && it.isDirectory }
+                    ?: return@forEach
+                val target = File(root, original.name)
+                if (target.exists() || original.renameTo(target)) backup.deleteRecursively()
+            }
     }
 
     private fun resolveSingleRoot(temp: File): File {

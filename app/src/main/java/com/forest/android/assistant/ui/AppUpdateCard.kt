@@ -38,7 +38,9 @@ internal fun AppUpdateCard(
     val update = state.availableUpdate
     val phase = state.downloadPhase
     val downloading = phase == DownloadPhase.DOWNLOADING
-    val progress = if (downloading) {
+    val interrupted = phase == DownloadPhase.INTERRUPTED
+    val showProgress = downloading || interrupted
+    val progress = if (showProgress) {
         (state.receivedBytes.toDouble() / state.downloadSizeBytes.coerceAtLeast(1L)).toFloat().coerceIn(0f, 1f)
     } else 0f
     val status = when {
@@ -46,7 +48,6 @@ internal fun AppUpdateCard(
         state.checking -> "正在检查…"
         state.notice != null -> state.notice
         phase == DownloadPhase.STARTING -> "正在准备下载…"
-        downloading && state.paused -> "下载已暂停，等待重试"
         downloading && state.incremental -> "正在下载增量包 ${(progress * 100).toInt()}%"
         downloading -> "正在从 GitHub 下载 ${(progress * 100).toInt()}%"
         phase == DownloadPhase.ASSEMBLING -> "正在合成安装包…"
@@ -81,7 +82,7 @@ internal fun AppUpdateCard(
                     Text(status, style = statusStyle, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 Box(Modifier.fillMaxWidth().height(4.dp)) {
-                    if (downloading) {
+                    if (showProgress) {
                         LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
                     }
                 }
@@ -108,8 +109,15 @@ internal fun AppUpdateCard(
                                 }
                             }
                         }
-                        DownloadPhase.DOWNLOADING -> TextButton(onClick = model::cancelDownload) {
-                            Text("取消下载", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        DownloadPhase.DOWNLOADING, DownloadPhase.INTERRUPTED -> {
+                            TextButton(onClick = model::cancelDownload) {
+                                Text("取消下载", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                            if (interrupted) {
+                                Button(onClick = model::retryDownload) {
+                                    Text("立即重试", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
+                            }
                         }
                         DownloadPhase.READY -> {
                             Button(onClick = onInstall, modifier = Modifier.weight(1f, fill = false)) {

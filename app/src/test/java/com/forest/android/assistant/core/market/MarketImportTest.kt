@@ -45,8 +45,18 @@ class MarketImportTest {
         }
     }
 
+    @Test fun readsScriptVersionAndAcceptsLegacyCatalogs() {
+        assertEquals(1, MarketCatalog.parse(catalog(entry())).single().version)
+        assertEquals(3, MarketCatalog.parse(catalog(entry().put("version", 3))).single().version)
+        for (invalid in listOf(0, -1, "2", 2.5, Int.MAX_VALUE.toLong() + 1, JSONObject.NULL)) {
+            assertThrows(IllegalArgumentException::class.java) {
+                MarketCatalog.parse(catalog(entry().put("version", invalid)))
+            }
+        }
+    }
+
     @Test fun importsFlowFromSourceAndOnlyRetainsPublicConfiguration() {
-        val release = MarketCatalog.parse(catalog(entry())).single()
+        val release = MarketCatalog.parse(catalog(entry().put("version", 3))).single()
         val archive = archive(
             "task.js" to "log('packaged script');",
             "flow.json" to """{"schemaVersion":1,"nodes":[{"id":"start","type":"log","props":{"text":"flow step"}}]}""",
@@ -60,9 +70,39 @@ class MarketImportTest {
         assertFalse(config.has("loop"))
         assertFalse(config.has("target"))
         assertEquals(release.source, TaskZip.marketSource(dir))
+        assertEquals(3, config.getJSONObject("marketSource").getInt("version"))
         assertTrue(File(dir, "flow.json").isFile)
         assertTrue(File(dir, "task.js").readText().contains("flow step"))
         assertFalse(File(dir, "task.js").readText().contains("packaged script"))
+    }
+
+    @Test fun overwriteReplacesTaskFilesAndKeepsHistory() {
+        val original = files.newFolder("Imported")
+        File(original, "task.js").writeText("old script")
+        File(original, "flow.json").writeText("old flow")
+        File(original, "history.jsonl").writeText("old history")
+        val incoming = files.newFolder("Incoming")
+        File(incoming, "task.js").writeText("new script")
+        File(incoming, "config.json").writeText("new config")
+
+        assertThrows(IllegalStateException::class.java) { TaskZip.installTask(incoming, original) }
+        assertEquals("old script", File(original, "task.js").readText())
+        TaskZip.installTask(incoming, original, overwrite = true)
+
+        assertEquals("new script", File(original, "task.js").readText())
+        assertEquals("new config", File(original, "config.json").readText())
+        assertEquals("old history", File(original, "history.jsonl").readText())
+        assertFalse(File(original, "flow.json").exists())
+    }
+
+    @Test fun restoresOriginalTaskAfterAnInterruptedOverwrite() {
+        val backup = files.newFolder(".deleted-market-backup-interrupted", "本地任务")
+        File(backup, "task.js").writeText("old script")
+
+        TaskZip.recoverMarketImports(files.root)
+
+        assertEquals("old script", File(files.root, "本地任务/task.js").readText())
+        assertFalse(File(files.root, ".deleted-market-backup-interrupted").exists())
     }
 
     @Test fun rejectsTraversalAndPrivateFilesInMarketPackages() {
