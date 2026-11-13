@@ -35,7 +35,8 @@ object ScriptEngine {
         val requestScreenCapture: () -> Boolean,
         val screenCaptureReady: () -> Boolean,
         /** Capture after the host has temporarily hidden its own floating controls. */
-        val captureScreen: () -> Bitmap?
+        val captureScreen: () -> Bitmap?,
+        val restrictImagePaths: Boolean = false
     )
 
     enum class OutcomeKind { FINISHED, EXITED, STOPPED, ERROR }
@@ -483,6 +484,12 @@ object ScriptEngine {
 
         // —— 截屏与图像（API 第 3 节；由 PRELUDE 组装成手册形态，这里只收标量参数）——
         val scriptDir = File(env.scriptPath).parentFile ?: File("/")
+        fun readImage(path: String) = ImageApi.read(path, scriptDir, env.restrictImagePaths)
+        fun resolveTemplate(arg: Any?): Int? = when (arg) {
+            is Number -> arg.toInt().takeIf { it > 0 }
+            is String -> readImage(arg)
+            else -> null
+        }
         guard("__capture_ready") { _ -> env.screenCaptureReady() }
         guard("__request_capture") { _ -> env.requestScreenCapture() }
         guard("__img_capture") { _ ->
@@ -508,7 +515,7 @@ object ScriptEngine {
         }
         guard("__img_read") { args ->
             val path = args.getOrNull(0)?.toString() ?: return@guard -1L
-            val id = ImageApi.read(path, scriptDir)
+            val id = readImage(path)
             if (id == null) {
                 env.onLog('W', "读图失败: $path")
                 -1L
@@ -521,7 +528,7 @@ object ScriptEngine {
             val path = args.getOrNull(1)?.toString() ?: return@guard false
             val format = args.getOrNull(2) as? String
             val quality = (args.getOrNull(3) as? Number)?.toInt() ?: 100
-            ImageApi.save(id, path, scriptDir, format, quality)
+            ImageApi.save(id, path, scriptDir, format, quality, env.restrictImagePaths)
         }
         guard("__img_clip") { args ->
             val id = (args.getOrNull(0) as? Number)?.toInt() ?: return@guard -1L
@@ -555,14 +562,14 @@ object ScriptEngine {
         }
         guard("__img_find") { args ->
             val imageId = (args.getOrNull(0) as? Number)?.toInt() ?: return@guard null
-            val tplId = resolveTemplate(args.getOrNull(1), scriptDir) ?: return@guard null
+            val tplId = resolveTemplate(args.getOrNull(1)) ?: return@guard null
             val threshold = (args.getOrNull(2) as? Number)?.toDouble() ?: return@guard null
             val region = regionOf(args, 3)
             ImageApi.findImage(imageId, tplId, threshold, region, scalesOf(args, 7))?.let { pt(it) }
         }
         guard("__img_find_all") { args ->
             val imageId = (args.getOrNull(0) as? Number)?.toInt() ?: return@guard emptyList<Any>()
-            val tplId = resolveTemplate(args.getOrNull(1), scriptDir) ?: return@guard emptyList<Any>()
+            val tplId = resolveTemplate(args.getOrNull(1)) ?: return@guard emptyList<Any>()
             val threshold = (args.getOrNull(2) as? Number)?.toDouble() ?: return@guard emptyList<Any>()
             val region = regionOf(args, 3)
             val max = (args.getOrNull(7) as? Number)?.toInt() ?: 5
@@ -592,13 +599,13 @@ object ScriptEngine {
         }
         guard("__img_exists") { args ->
             val imageId = (args.getOrNull(0) as? Number)?.toInt() ?: return@guard false
-            val tplId = resolveTemplate(args.getOrNull(1), scriptDir) ?: return@guard false
+            val tplId = resolveTemplate(args.getOrNull(1)) ?: return@guard false
             val threshold = (args.getOrNull(2) as? Number)?.toDouble() ?: return@guard false
             ImageApi.existsImage(imageId, tplId, threshold, regionOf(args, 3), scalesOf(args, 7))
         }
         guard("__img_find_with_text") { args ->
             val imageId = (args.getOrNull(0) as? Number)?.toInt() ?: return@guard null
-            val tplId = resolveTemplate(args.getOrNull(1), scriptDir) ?: return@guard null
+            val tplId = resolveTemplate(args.getOrNull(1)) ?: return@guard null
             val threshold = (args.getOrNull(2) as? Number)?.toDouble() ?: return@guard null
             val region = regionOf(args, 3)
             val padding = (args.getOrNull(7) as? Number)?.toInt() ?: 0
@@ -628,8 +635,8 @@ object ScriptEngine {
         // 参数顺序：imageId, tplA, tplB, thresholdA, thresholdB, rx, ry, rw, rh, rowTolerance
         guard("__img_find_pair") { args ->
             val imageId = (args.getOrNull(0) as? Number)?.toInt() ?: return@guard null
-            val tplA = resolveTemplate(args.getOrNull(1), scriptDir) ?: return@guard null
-            val tplB = resolveTemplate(args.getOrNull(2), scriptDir) ?: return@guard null
+            val tplA = resolveTemplate(args.getOrNull(1)) ?: return@guard null
+            val tplB = resolveTemplate(args.getOrNull(2)) ?: return@guard null
             val thresholdA = (args.getOrNull(3) as? Number)?.toDouble() ?: 0.9
             val thresholdB = (args.getOrNull(4) as? Number)?.toDouble() ?: 0.9
             val region = regionOf(args, 5)              // 读取 5..8 四个分量
@@ -701,13 +708,6 @@ object ScriptEngine {
     private fun flattenStrings(arg: Any?): List<String> = when (arg) {
         is List<*> -> arg.mapNotNull { it?.toString()?.takeIf(String::isNotEmpty) }
         else -> emptyList()
-    }
-
-    /** 模板引用：数字 = Image 句柄，字符串 = 相对脚本目录的路径 */
-    private fun resolveTemplate(arg: Any?, scriptDir: File): Int? = when (arg) {
-        is Number -> arg.toInt().takeIf { it > 0 }
-        is String -> ImageApi.read(arg, scriptDir)
-        else -> null
     }
 
     /** 坐标结果：真机坐标换算回设计坐标（未启用适配时原样） */

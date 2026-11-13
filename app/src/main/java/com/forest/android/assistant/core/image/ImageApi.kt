@@ -74,8 +74,8 @@ object ImageApi {
     // ==================== 文件读写 ====================
 
     /** 读图（相对路径基于脚本目录解析）；记录文件名，便于日志定位模板 */
-    fun read(path: String, scriptDir: File): Int? {
-        val f = resolve(path, scriptDir) ?: return null
+    fun read(path: String, scriptDir: File, restrictToTask: Boolean = false): Int? {
+        val f = resolve(path, scriptDir, restrictToTask) ?: return null
         if (!f.isFile) return null
         val bmp = BitmapFactory.decodeFile(f.absolutePath) ?: return null
         return storeImage(bmp, f.name)
@@ -87,10 +87,12 @@ object ImageApi {
         path: String,
         scriptDir: File,
         format: String? = null,
-        quality: Int = 100
+        quality: Int = 100,
+        restrictToTask: Boolean = false
     ): Boolean {
         val bmp = image(imageId) ?: return false
-        val f = resolve(path, scriptDir) ?: return false
+        val f = resolve(path, scriptDir, restrictToTask) ?: return false
+        if (restrictToTask && f.extension.lowercase() !in setOf("png", "jpg", "jpeg", "webp")) return false
         f.parentFile?.mkdirs()
         val fmt = format?.lowercase()
             ?: if (f.extension.equals("jpg", true) || f.extension.equals("jpeg", true)) "jpg" else "png"
@@ -647,10 +649,17 @@ object ImageApi {
 
     // ==================== 内部工具 ====================
 
-    private fun resolve(path: String, scriptDir: File): File? {
+    internal fun resolve(path: String, scriptDir: File, restrictToTask: Boolean): File? {
         if (path.isBlank()) return null
         val f = File(path)
-        return if (f.isAbsolute) f else File(scriptDir, path)
+        if (!restrictToTask) return if (f.isAbsolute) f else File(scriptDir, path)
+        if (f.isAbsolute) return null
+        return runCatching {
+            val root = scriptDir.canonicalFile.toPath()
+            File(scriptDir, path).canonicalFile.takeIf {
+                it.toPath() != root && it.toPath().startsWith(root)
+            }
+        }.getOrNull()
     }
 
     /** region 为 [x, y, w, h]；非法/越界自动裁剪 */

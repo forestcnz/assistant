@@ -1,9 +1,14 @@
 package com.forest.android.assistant.core.task
 
 import android.content.Context
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.provider.OpenableColumns
 import android.util.Log
+import com.forest.android.assistant.core.flow.FlowCompiler
+import com.forest.android.assistant.core.market.MarketRelease
+import com.forest.android.assistant.core.market.MarketSource
+import java.io.InputStream
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -87,7 +92,8 @@ object TaskZip {
         val temp = File(context.cacheDir, "task-import-${UUID.randomUUID()}")
         try {
             check(temp.mkdirs()) { "无法创建导入临时目录" }
-            extract(context, uri, temp)
+            val input = context.contentResolver.openInputStream(uri) ?: error("无法读取所选文件")
+            extract(input, temp)
             val bundle = File(temp, BUNDLE_ENTRY)
             var archivedGroups = emptyList<TaskGroup>()
             val candidates = if (bundle.isFile) {
@@ -152,18 +158,83 @@ object TaskZip {
         }
     }
 
-    private fun extract(context: Context, uri: Uri, temp: File) {
+    @Synchronized
+    internal fun importMarketTask(context: Context, file: File, release: MarketRelease, rawName: String): String {
+        val temp = File(context.cacheDir, "market-import-${UUID.randomUUID()}")
+        try {
+            check(temp.mkdirs()) { "无法创建导入临时目录" }
+            val name = rawName.trim()
+            require(validName(name) && !name.startsWith(".deleted-")) { "任务名称不合法" }
+            prepareMarketTask(file, temp, release, name)
+            File(temp, "images").listFiles()?.forEach { image ->
+                val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                BitmapFactory.decodeFile(image.absolutePath, bounds)
+                require(bounds.outWidth in 1..8192 && bounds.outHeight in 1..8192 &&
+                    bounds.outWidth.toLong() * bounds.outHeight <= 16_777_216L) {
+                    "市场包图片无效或尺寸过大：${image.name}"
+                }
+            }
+
+            return synchronized(TaskManager) {
+                val existing = TaskManager.listTasks(context).firstOrNull {
+                    marketSource(TaskManager.taskDir(context, it.name)) == release.source
+                }
+                if (existing != null) return@synchronized existing.name
+                val target = TaskManager.taskDir(context, name)
+                check(!target.exists()) { "该任务名称已存在" }
+                installTask(context, temp, target)
+                name
+            }
+        } finally {
+            temp.deleteRecursively()
+        }
+    }
+
+    internal fun prepareMarketTask(file: File, temp: File, release: MarketRelease, name: String) {
+        extract(file.inputStream(), temp, market = true)
+        val script = File(temp, "task.js")
+        require(script.isFile && script.length() > 0) { "市场包缺少 task.js" }
+        val flow = File(temp, "flow.json")
+        if (flow.isFile) script.writeText(FlowCompiler.compile(JSONObject(flow.readText())))
+
+        val configFile = File(temp, "config.json")
+        val original = if (configFile.isFile) JSONObject(configFile.readText()) else JSONObject()
+        val config = JSONObject()
+            .put("name", name)
+            .put("desc", release.description)
+            .put("marketSource", release.source.toJson())
+        release.targetPackage?.let { config.put("target", it) }
+        original.optJSONArray("designSize")?.let { size ->
+            require(size.length() == 2 && size.getInt(0) > 0 && size.getInt(1) > 0) { "任务设计尺寸无效" }
+            config.put("designSize", size)
+        }
+        configFile.writeText(config.toString(2) + "\n")
+    }
+
+    internal fun marketSource(directory: File): MarketSource? =
+        runCatching {
+            val config = File(directory, "config.json")
+            if (!config.isFile || config.length() > 64 * 1024) return null
+            JSONObject(config.readText()).optJSONObject("marketSource")?.let(MarketSource::parse)
+        }.getOrNull()
+
+    private fun extract(input: InputStream, temp: File, market: Boolean = false) {
         var entries = 0
         var totalBytes = 0L
         val seen = hashSetOf<String>()
-        val input = context.contentResolver.openInputStream(uri) ?: error("无法读取所选文件")
+        val maxEntries = if (market) 200 else MAX_ENTRIES
+        val maxBytes = if (market) 40L * 1024 * 1024 else MAX_UNPACKED_BYTES
         ZipInputStream(input.buffered()).use { zip ->
             var entry = zip.nextEntry
             while (entry != null) {
                 val name = entry.name.replace('\\', '/')
                 check(!unsafePath(name, entry.isDirectory)) { "压缩包包含非法路径：$name" }
                 entries++
-                check(entries <= MAX_ENTRIES) { "压缩包文件过多" }
+                check(entries <= maxEntries) { "压缩包文件过多" }
+                if (market) {
+                    require(marketEntryAllowed(name, entry.isDirectory)) { "市场包包含不支持的文件：$name" }
+                    if (entry.isDirectory) require(zip.read() == -1) { "市场包目录条目包含数据" }
+                }
                 if (!entry.isDirectory) {
                     check(seen.add(name)) { "压缩包包含重复路径：$name" }
                     val target = File(temp, name)
@@ -171,11 +242,17 @@ object TaskZip {
                     check(target.parentFile?.mkdirs() == true || target.parentFile?.isDirectory == true) { "无法创建临时目录" }
                     target.outputStream().use { output ->
                         val buffer = ByteArray(8192)
+                        var fileBytes = 0L
                         while (true) {
                             val count = zip.read(buffer)
                             if (count < 0) break
                             totalBytes += count
-                            check(totalBytes <= MAX_UNPACKED_BYTES) { "压缩包解压后过大" }
+                            check(totalBytes <= maxBytes) { "压缩包解压后过大" }
+                            fileBytes += count
+                            if (market) {
+                                val limit = if (name.startsWith("images/")) 8L * 1024 * 1024 else 2_000_000L
+                                check(fileBytes <= limit) { "市场包文件过大：$name" }
+                            }
                             output.write(buffer, 0, count)
                         }
                     }
@@ -187,8 +264,15 @@ object TaskZip {
         check(entries > 0) { "压缩包为空" }
     }
 
+    private fun marketEntryAllowed(name: String, directory: Boolean): Boolean {
+        if (directory) return name == "images/"
+        if (name == "task.js" || name == "config.json" || name == "flow.json") return true
+        return name.startsWith("images/") && name.count { it == '/' } == 1 &&
+            name.substringAfterLast('.').lowercase() in setOf("png", "jpg", "jpeg", "webp")
+    }
+
     private fun installTask(context: Context, source: File, target: File) {
-        val staging = File(TaskManager.tasksRoot(context), ".import-${UUID.randomUUID()}")
+        val staging = File(TaskManager.tasksRoot(context), ".deleted-import-${UUID.randomUUID()}")
         try {
             check(source.copyRecursively(staging, overwrite = false)) { "无法复制任务文件" }
             check(!target.exists()) { "任务已存在" }

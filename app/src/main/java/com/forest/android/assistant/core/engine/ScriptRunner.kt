@@ -17,6 +17,7 @@ import com.forest.android.assistant.core.image.ScreenCapture
 import com.forest.android.assistant.core.runner.ScriptForegroundService
 import com.forest.android.assistant.core.task.RunHistory
 import com.forest.android.assistant.core.task.TaskManager
+import com.forest.android.assistant.core.task.TaskZip
 import com.forest.android.assistant.core.task.TaskLoop
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -614,7 +615,8 @@ object ScriptRunner {
                 }
             },
             screenCaptureReady = { app?.let(ScreenCapture::captureAvailable) ?: false },
-            captureScreen = { captureScreenForScript(app) }
+            captureScreen = { captureScreenForScript(app) },
+            restrictImagePaths = app != null && TaskZip.marketSource(TaskManager.taskDir(app, taskName)) != null
         )
     }
 

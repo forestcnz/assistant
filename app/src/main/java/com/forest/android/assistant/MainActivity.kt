@@ -164,6 +164,7 @@ class MainActivity : ComponentActivity() {
 
     /** 任务操作菜单/素材管理 */
     private var showTransferDialog by mutableStateOf(false)
+    private var showScriptMarket by mutableStateOf(false)
     private var menuTask by mutableStateOf<String?>(null)
     private var renamingTask by mutableStateOf<String?>(null)
     private var deletingTask by mutableStateOf<String?>(null)
@@ -405,6 +406,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         pendingExportFile = savedInstanceState?.getString("pending_export_file")?.let(::File)
         menuTask = savedInstanceState?.getString("detail_task")
+        showScriptMarket = savedInstanceState?.getBoolean("script_market") ?: false
         assetsTask = savedInstanceState?.getString("assets_task")
         assetsTask?.let { assets = TaskManager.imageInfos(this, it) }
         taskTransferBusy = pendingExportFile != null
@@ -540,6 +542,7 @@ class MainActivity : ComponentActivity() {
         outState.putString("history_task", historyTask)
         outState.putString("preview_image", previewAsset?.file?.name)
         outState.putString("detail_task", menuTask)
+        outState.putBoolean("script_market", showScriptMarket)
         outState.putString("assets_task", assetsTask)
         outState.putInt("main_tab", mainTab)
         outState.putBoolean("create_dialog", showCreateDialog)
@@ -624,6 +627,16 @@ class MainActivity : ComponentActivity() {
                             }
                         }
                     }
+                }
+            }
+        }
+
+        if (showScriptMarket) {
+            ScriptMarket(tasks.map { it.name }, onBack = { showScriptMarket = false }) { name ->
+                showScriptMarket = false
+                menuTask = name
+                lifecycleScope.launch {
+                    tasks = withContext(Dispatchers.IO) { TaskManager.listTasks(this@MainActivity) }
                 }
             }
         }
@@ -1546,6 +1559,15 @@ class MainActivity : ComponentActivity() {
                         IconButton(onClick = { showCreateDialog = true }) { AppIcon(R.drawable.ic_add, "新建任务") }
                         IconButton(onClick = { showTransferDialog = true }) { AppIcon(R.drawable.ic_more, "导入与导出") }
                         IconButton(onClick = onSwitchToGroups) { AppIcon(R.drawable.ic_switch_lists, "切换到分组列表") }
+                    }
+                }
+                item {
+                    Surface(
+                        modifier = Modifier.padding(bottom = 12.dp),
+                        shape = RoundedCornerShape(14.dp),
+                        color = MaterialTheme.colorScheme.surface
+                    ) {
+                        DesignRow("脚本市场", "浏览和导入社区脚本", R.drawable.ic_code) { showScriptMarket = true }
                     }
                 }
                 if (tasks.isEmpty()) item {
