@@ -1568,7 +1568,7 @@ class MainActivity : ComponentActivity() {
                     Row(Modifier.fillMaxWidth().padding(bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
                             Text("全部任务", style = MaterialTheme.typography.titleMedium)
-                            Text("${tasks.size} 个任务 · 长按图标排序 · 右滑删除", style = MaterialTheme.typography.bodySmall,
+                            Text("${tasks.size} 个任务 · 长按图标排序 · 左滑删除", style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         IconButton(onClick = { showCreateDialog = true }) { AppIcon(R.drawable.ic_add, "新建任务") }

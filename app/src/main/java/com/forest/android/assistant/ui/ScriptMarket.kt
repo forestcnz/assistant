@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
@@ -27,6 +28,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
@@ -58,6 +60,12 @@ internal fun ScriptMarket(
     var name by rememberSaveable { mutableStateOf("") }
     var importing by remember { mutableStateOf(false) }
     var importError by remember { mutableStateOf<String?>(null) }
+    // 多选按脚本 ID 保存，搜索和筛选切换时保留已选项目。
+    var batchMode by rememberSaveable { mutableStateOf(false) }
+    var batchIds by rememberSaveable { mutableStateOf(emptyList<String>()) }
+    var batchPlan by remember { mutableStateOf<List<MarketBatchItem>?>(null) }
+    var batchProgress by remember { mutableStateOf<MarketBatchProgress?>(null) }
+    var batchResults by remember { mutableStateOf<List<MarketBatchResult>?>(null) }
 
     LaunchedEffect(refresh) {
         loading = true
@@ -72,7 +80,10 @@ internal fun ScriptMarket(
             loading = false
         }
     }
-    LaunchedEffect(taskNames) { installed = repository.installedTasks(taskNames) }
+    LaunchedEffect(taskNames, importing) {
+        // 导入过程中以成功回调更新状态，避免旧的任务快照覆盖批量导入结果。
+        if (!importing) installed = repository.installedTasks(taskNames)
+    }
 
     val release = catalog.orEmpty().firstOrNull { it.source.scriptId == selectedId }
     if (release == null) {
@@ -83,17 +94,57 @@ internal fun ScriptMarket(
                         .any { it.contains(query.trim(), ignoreCase = true) }
             }
         }
-        DetailPage("脚本市场", onBack = onBack, actions = {
-            TextButton(enabled = !loading, onClick = { refresh++ }) { Text("刷新") }
+        val selected = catalog.orEmpty().filter {
+            it.source.scriptId in batchIds && BuildConfig.VERSION_CODE >= it.minAppVersionCode
+        }
+        val selectableIds = visible.filter { BuildConfig.VERSION_CODE >= it.minAppVersionCode }.map { it.source.scriptId }
+        val allVisibleSelected = selectableIds.isNotEmpty() && selectableIds.all { it in batchIds }
+        fun prepareBatch(releases: List<MarketRelease>) {
+            // 同批名称立即预留；与其他本地任务重名时沿用单项导入的自动命名规则。
+            val taken = (taskNames + installed.orEmpty().values).distinct().toMutableList()
+            batchPlan = releases.map { item ->
+                val local = installed?.get(item.source)
+                val target = local ?: availableMarketName(item.title, taken)
+                if (target !in taken) taken.add(target)
+                MarketBatchItem(item, target, overwrite = local != null)
+            }
+        }
+        DetailPage("脚本市场", onBack = {
+            if (!importing) {
+                if (batchMode) { batchMode = false; batchIds = emptyList() } else onBack()
+            }
+        }, actions = {
+            TextButton(enabled = !importing && (batchMode || (!loading && installed != null && loadError == null && !catalog.isNullOrEmpty())),
+                onClick = { batchMode = !batchMode; batchIds = emptyList() }) {
+                Text(if (batchMode) "取消多选" else "批量导入")
+            }
+            TextButton(enabled = !loading && !importing, onClick = { refresh++ }) { Text("刷新") }
+        }, footer = {
+            if (batchMode) PrimaryAction("导入所选（${selected.size}）",
+                enabled = selected.isNotEmpty() && installed != null && !loading && !importing && loadError == null) {
+                prepareBatch(selected)
+            }
         }) {
             OutlinedTextField(
                 value = query, onValueChange = { query = it }, singleLine = true,
-                label = { Text("搜索脚本、应用或作者") }, modifier = Modifier.fillMaxWidth()
+                label = { Text("搜索脚本、应用或作者") }, modifier = Modifier.fillMaxWidth(), enabled = !importing
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf("全部", "按应用", "通用").forEachIndexed { index, label ->
-                    FilterChip(selected = filter == index, onClick = { filter = index }, label = { Text(label) })
+                    FilterChip(selected = filter == index, onClick = { filter = index }, label = { Text(label) }, enabled = !importing)
                 }
+            }
+            if (batchMode) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Text("已选 ${selected.size} 个", style = MaterialTheme.typography.titleSmall)
+                    TextButton(enabled = selectableIds.isNotEmpty() && !loading && !importing, onClick = {
+                        batchIds = if (allVisibleSelected) batchIds - selectableIds.toSet()
+                            else (batchIds + selectableIds).distinct()
+                    }) { Text(if (allVisibleSelected) "取消全选" else "全选当前列表") }
+                }
+                Text("可跨搜索和筛选多选；需更新助手的脚本暂不可选。",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             loadError?.let {
                 Text("市场加载失败。$it", color = MaterialTheme.colorScheme.error)
@@ -104,21 +155,73 @@ internal fun ScriptMarket(
                 Text(if (catalog.isNullOrEmpty()) "暂无上架脚本" else "没有匹配的脚本")
             }
             visible.forEach { item ->
+                val checked = item.source.scriptId in batchIds
+                val canSelect = BuildConfig.VERSION_CODE >= item.minAppVersionCode && installed != null && !loading
                 val status = when {
                     installed?.containsKey(item.source) == true -> "已导入"
                     BuildConfig.VERSION_CODE < item.minAppVersionCode -> "需更新助手"
                     else -> null
                 }
-                Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surface) {
+                Surface(shape = RoundedCornerShape(12.dp),
+                    color = if (batchMode && checked) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface) {
                     DesignRow(
                         item.title, "${item.description}\n${item.targetApp ?: "通用"} · ${item.author}",
-                        R.drawable.ic_code, trailing = status?.let { label -> { StatusBadge(label) } }
+                        R.drawable.ic_code, enabled = !importing && (!batchMode || canSelect),
+                        trailing = if (batchMode) {
+                            {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    status?.let { StatusBadge(it) }
+                                    Checkbox(checked = checked, enabled = canSelect && !importing, onCheckedChange = null)
+                                }
+                            }
+                        } else status?.let { label -> { StatusBadge(label) } }
                     ) {
-                        selectedId = item.source.scriptId
+                        if (batchMode) batchIds = if (checked) batchIds - item.source.scriptId else batchIds + item.source.scriptId
+                        else selectedId = item.source.scriptId
                     }
                 }
             }
             TextButton(onClick = { openMarketLink(context, "$MARKET_REPO#投稿") }) { Text("投稿说明") }
+        }
+        batchPlan?.let { plan ->
+            MarketBatchConfirmDialog(plan, onDismiss = { batchPlan = null }, onConfirm = {
+                batchPlan = null
+                importing = true
+                scope.launch {
+                    val results = mutableListOf<MarketBatchResult>()
+                    try {
+                        // 逐项复用下载、校验和覆盖检查；某项失败只记录原因，继续处理后续脚本。
+                        plan.forEachIndexed { index, item ->
+                            batchProgress = MarketBatchProgress(index + 1, plan.size, item.release.title)
+                            val result = try {
+                                MarketBatchResult(item, taskName = repository.importTask(item.release, item.taskName, item.overwrite))
+                            } catch (error: CancellationException) {
+                                throw error
+                            } catch (error: Exception) {
+                                MarketBatchResult(item, error = error.localizedMessage ?: "导入失败，请重试")
+                            }
+                            results.add(result)
+                            result.taskName?.let { taskName ->
+                                installed = installed.orEmpty() + (item.release.source to taskName)
+                                batchIds = batchIds - item.release.source.scriptId
+                                onImported(taskName)
+                            }
+                        }
+                        batchResults = results.toList()
+                        batchMode = results.any { it.taskName == null }
+                    } finally {
+                        importing = false
+                        batchProgress = null
+                    }
+                }
+            })
+        }
+        batchProgress?.let { MarketBatchProgressDialog(it) }
+        batchResults?.let { results ->
+            MarketBatchResultDialog(results, onDismiss = { batchResults = null }, onRetry = {
+                batchResults = null
+                prepareBatch(results.filter { it.taskName == null }.map { it.item.release })
+            })
         }
         return
     }

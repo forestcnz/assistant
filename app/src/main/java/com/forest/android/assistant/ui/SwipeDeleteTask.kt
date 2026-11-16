@@ -15,14 +15,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 
-/** 右滑仅请求删除确认，行随即复位；实际删除由外层确认弹窗处理。 */
+/** 左滑达到行宽的 1/3 后请求删除确认，行随即复位；实际删除由外层确认弹窗处理。 */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun SwipeDeleteTask(
@@ -33,8 +32,7 @@ internal fun SwipeDeleteTask(
     content: @Composable () -> Unit
 ) {
     val scope = rememberCoroutineScope()
-    val threshold = with(LocalDensity.current) { 96.dp.toPx() }
-    val state = rememberSwipeToDismissBoxState(positionalThreshold = { width -> minOf(width * .35f, threshold) })
+    val state = rememberSwipeToDismissBoxState(positionalThreshold = { width -> width / 3f })
     SwipeToDismissBox(
         state = state,
         modifier = modifier.fillMaxWidth().semantics {
@@ -43,17 +41,17 @@ internal fun SwipeDeleteTask(
                 enabled
             })
         },
-        enableDismissFromStartToEnd = true,
-        enableDismissFromEndToStart = false,
+        enableDismissFromStartToEnd = false,
+        enableDismissFromEndToStart = true,
         gesturesEnabled = enabled,
         onDismiss = { direction ->
-            if (direction == SwipeToDismissBoxValue.StartToEnd && enabled) onDelete()
+            if (direction == SwipeToDismissBoxValue.EndToStart && enabled) onDelete()
             scope.launch { state.reset() }
         },
         backgroundContent = {
             Box(
                 Modifier.fillMaxSize().background(MaterialTheme.colorScheme.errorContainer).padding(horizontal = 20.dp),
-                contentAlignment = Alignment.CenterStart
+                contentAlignment = Alignment.CenterEnd
             ) {
                 Text("删除任务", color = MaterialTheme.colorScheme.onErrorContainer, style = MaterialTheme.typography.labelLarge)
             }
