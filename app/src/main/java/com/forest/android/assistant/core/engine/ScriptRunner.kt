@@ -16,6 +16,7 @@ import com.forest.android.assistant.core.floaty.PickerOverlay
 import com.forest.android.assistant.core.image.ScreenCapture
 import com.forest.android.assistant.core.runner.ScriptForegroundService
 import com.forest.android.assistant.core.task.RunHistory
+import com.forest.android.assistant.core.task.TaskExecutionSettings
 import com.forest.android.assistant.core.task.TaskManager
 import com.forest.android.assistant.core.task.TaskZip
 import com.forest.android.assistant.core.task.TaskLoop
@@ -289,6 +290,8 @@ object ScriptRunner {
         if (queueMode) addLog('I', "▶ 顺序执行 ${queue.size} 个任务：${queue.joinToString(" → ")}")
         var executed = false
         try {
+            // 每次启动队列时读取设置，运行中的队列保持同一间隔。
+            val queueIntervalSec = TaskExecutionSettings.queueIntervalSec(app)
             for ((index, taskName) in queue.withIndex()) {
                 if (stopRequested.get() || runJob?.isCancelled == true) break
                 val result = runSingleTask(app, taskName, source, stopRequested, index + 1, queue.size)
@@ -300,6 +303,11 @@ object ScriptRunner {
                         addLog('W', "队列中止，未执行：${remaining.joinToString("、")}")
                     }
                     break
+                }
+                // 只在任务正常完成且还有下一项时等待；协程取消可立即打断间隔。
+                if (result == TaskResult.DONE && index < queue.lastIndex && queueIntervalSec > 0) {
+                    addLog('I', "任务间隔：等待 $queueIntervalSec 秒后执行「${queue[index + 1]}」")
+                    delay(queueIntervalSec * 1000L)
                 }
             }
         } finally {

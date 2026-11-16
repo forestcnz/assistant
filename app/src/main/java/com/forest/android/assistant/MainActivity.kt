@@ -109,6 +109,7 @@ import com.forest.android.assistant.core.image.ScreenCapture
 import com.forest.android.assistant.core.recording.RecordingService
 import com.forest.android.assistant.core.task.ScheduleManager
 import com.forest.android.assistant.core.task.RunHistory
+import com.forest.android.assistant.core.task.TaskExecutionSettings
 import com.forest.android.assistant.core.task.TaskManager
 import com.forest.android.assistant.core.task.TaskLoop
 import com.forest.android.assistant.core.task.TaskOrder
@@ -1699,6 +1700,10 @@ class MainActivity : ComponentActivity() {
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                     AutoSnapRow()
                 }
+                SectionLabel("任务执行")
+                WorkCard(Modifier.fillMaxWidth()) {
+                    TaskQueueIntervalRow()
+                }
                 SectionLabel("截图与识别")
                 WorkCard(Modifier.fillMaxWidth()) {
                     ToolRow("截屏通道设置", ScreenCapture.mode(this@MainActivity).label + " · 点击更换并测试",
@@ -1845,6 +1850,60 @@ class MainActivity : ComponentActivity() {
         DesignRow("自动贴边", "拖动后吸附到屏幕左右边缘", R.drawable.ic_tool_point,
             trailing = { Switch(checked = autoSnap, onCheckedChange = apply,
                 colors = SwitchDefaults.colors(checkedTrackColor = Color(AppPalette.SUCCESS))) }) { apply(!autoSnap) }
+    }
+
+    /** 多任务间隔以秒保存，未确认的输入在旋转屏幕后继续保留。 */
+    @Composable
+    private fun TaskQueueIntervalRow() {
+        var intervalSec by remember { mutableStateOf(TaskExecutionSettings.queueIntervalSec(this@MainActivity)) }
+        var showDialog by rememberSaveable { mutableStateOf(false) }
+        var intervalValue by rememberSaveable { mutableStateOf(intervalSec.toString()) }
+        ToolRow(
+            "多任务执行间隔",
+            if (intervalSec == 0) "0 秒 · 完成后立即执行下一个任务" else "$intervalSec 秒 · 两个任务之间等待",
+            R.drawable.ic_clock
+        ) {
+            intervalValue = intervalSec.toString()
+            showDialog = true
+        }
+        if (showDialog) {
+            val seconds = intervalValue.trim().toIntOrNull()?.takeIf { it >= 0 }
+            AlertDialog(
+                containerColor = MaterialTheme.colorScheme.surface,
+                onDismissRequest = { showDialog = false },
+                title = { Text("多任务执行间隔") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text("多选任务和分组任务按顺序执行时，每个任务完成后等待，再执行下一个。保存后从下次启动队列生效。",
+                            style = MaterialTheme.typography.bodySmall)
+                        OutlinedTextField(
+                            value = intervalValue,
+                            onValueChange = { intervalValue = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { Text("间隔时间 · 秒") },
+                            supportingText = {
+                                Text(if (seconds == null && intervalValue.isNotEmpty()) "请输入有效的非负整数"
+                                    else "0 表示立即执行下一个任务")
+                            },
+                            isError = seconds == null && intervalValue.isNotEmpty(),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            singleLine = true
+                        )
+                    }
+                },
+                confirmButton = {
+                    TextButton(enabled = seconds != null, onClick = {
+                        seconds?.let {
+                            TaskExecutionSettings.setQueueIntervalSec(this@MainActivity, it)
+                            intervalSec = it
+                            showDialog = false
+                            Toast.makeText(this@MainActivity, "多任务执行间隔已保存：$it 秒", Toast.LENGTH_SHORT).show()
+                        }
+                    }) { Text("保存") }
+                },
+                dismissButton = { TextButton(onClick = { showDialog = false }) { Text("取消") } }
+            )
+        }
     }
 
     /** 日志页：独立显示实时输出。 */
