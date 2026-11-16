@@ -40,7 +40,9 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
 @Composable
-internal fun ScriptMarket(taskNames: List<String>, onBack: () -> Unit, onOpenTask: (String) -> Unit) {
+internal fun ScriptMarket(
+    taskNames: List<String>, onBack: () -> Unit, onImported: (String) -> Unit, onOpenTask: (String) -> Unit
+) {
     val context = LocalContext.current
     val repository = remember(context) { MarketRepository(context.applicationContext) }
     val scope = rememberCoroutineScope()
@@ -203,8 +205,12 @@ internal fun ScriptMarket(taskNames: List<String>, onBack: () -> Unit, onOpenTas
                     scope.launch {
                         try {
                             val taskName = repository.importTask(release, normalized, overwrite = localTask != null)
+                            // 导入成功后返回市场列表，保留搜索和筛选条件并同步本地任务状态。
+                            installed = installed.orEmpty() + (release.source to taskName)
                             confirmImport = false
-                            onOpenTask(taskName)
+                            selectedId = null
+                            onImported(taskName)
+                            Toast.makeText(context, "已导入任务「$taskName」", Toast.LENGTH_SHORT).show()
                         } catch (error: CancellationException) {
                             throw error
                         } catch (error: Exception) {

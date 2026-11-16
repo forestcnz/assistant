@@ -639,7 +639,14 @@ class MainActivity : ComponentActivity() {
         }
 
         if (showScriptMarket) {
-            ScriptMarket(tasks.map { it.name }, onBack = { showScriptMarket = false }) { name ->
+            ScriptMarket(tasks.map { it.name }, onBack = { showScriptMarket = false }, onImported = { name ->
+                // 刷新本地任务与详情缓存，导入成功后继续留在脚本市场。
+                taskMetadataVersion++
+                ScriptRunner.appendLog("已从脚本市场导入任务: $name")
+                lifecycleScope.launch {
+                    tasks = withContext(Dispatchers.IO) { TaskManager.listTasks(this@MainActivity) }
+                }
+            }) { name ->
                 showScriptMarket = false
                 menuTask = name
                 lifecycleScope.launch {
@@ -718,13 +725,14 @@ class MainActivity : ComponentActivity() {
 
         renamingTask?.let { name -> RenameTaskDialog(name) }
         deletingTask?.let { name ->
+            val canDelete = !runState.running && !RecordingService.active && !taskMutationBusy && !taskTransferBusy
             AlertDialog(
             containerColor = MaterialTheme.colorScheme.surface,
                 onDismissRequest = { if (!taskMutationBusy) deletingTask = null },
                 title = { Text("删除任务") },
                 text = { Text("确定删除「$name」？脚本、素材、录制范围图和运行历史都会删除，定时任务也会取消。此操作无法撤销。") },
                 confirmButton = {
-                    TextButton(enabled = !taskMutationBusy, onClick = {
+                    TextButton(enabled = canDelete, onClick = {
                         performTaskChange({ TaskManager.deleteTask(this, name) }, "已删除任务「$name」") { deletingTask = null; menuTask = null }
                     }) { Text(if (taskMutationBusy) "正在删除…" else "删除", color = MaterialTheme.colorScheme.error) }
                 },
@@ -1560,7 +1568,7 @@ class MainActivity : ComponentActivity() {
                     Row(Modifier.fillMaxWidth().padding(bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
                             Text("全部任务", style = MaterialTheme.typography.titleMedium)
-                            Text("${tasks.size} 个任务 · 长按任务图标拖动排序", style = MaterialTheme.typography.bodySmall,
+                            Text("${tasks.size} 个任务 · 长按图标排序 · 右滑删除", style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         IconButton(onClick = { showCreateDialog = true }) { AppIcon(R.drawable.ic_add, "新建任务") }
@@ -1589,57 +1597,65 @@ class MainActivity : ComponentActivity() {
                     val dragEnabled = !taskMutationBusy && !taskTransferBusy
                     // 被拖起的行高亮并浮起；其余行平滑移动，拖动过程更直观。
                     val isDragging = dragging == name
-                    Surface(Modifier.fillMaxWidth().then(if (isDragging) Modifier else Modifier.animateItem()),
-                        color = if (isDragging) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface,
-                        shadowElevation = if (isDragging) 8.dp else 0.dp,
-                        shape = RoundedCornerShape(topStart = if (index == 0) 18.dp else 0.dp,
-                            topEnd = if (index == 0) 18.dp else 0.dp,
-                            bottomStart = if (index == taskNames.lastIndex) 18.dp else 0.dp,
-                            bottomEnd = if (index == taskNames.lastIndex) 18.dp else 0.dp)) {
-                        Column {
-                            TaskRow(task, runState, iconDragModifier = Modifier
-                                .semantics { contentDescription = "长按「$name」的图标拖动排序" }
-                                .onGloballyPositioned { iconTop = it.positionInRoot().y }
-                                .pointerInput(name, dragEnabled) {
-                                    if (dragEnabled) detectDragGesturesAfterLongPress(
-                                        onDragStart = { offset ->
-                                            // 长按触发时给一次触感反馈，确认已进入拖动状态。
-                                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                            dragRevision = taskOrderRevision
-                                            orderDraft = latestTasks.map { it.name }
-                                            dragging = name
-                                            pointerY = iconTop - listTop + offset.y
-                                        },
-                                        onDrag = { change, amount ->
-                                            change.consume()
-                                            pointerY += amount.y
-                                            reorderAtPointer()
-                                        },
-                                        onDragEnd = {
-                                            val result = orderDraft
-                                            val revision = dragRevision
-                                            val before = latestTasks.map { it.name }
-                                            dragging = null
-                                            if (result != null && result != before) {
-                                                scope.launch {
-                                                    val failure = withContext(Dispatchers.IO) {
-                                                        runCatching { TaskOrder.save(this@MainActivity, revision, result) }
-                                                            .exceptionOrNull()
+                    val shape = RoundedCornerShape(topStart = if (index == 0) 18.dp else 0.dp,
+                        topEnd = if (index == 0) 18.dp else 0.dp,
+                        bottomStart = if (index == taskNames.lastIndex) 18.dp else 0.dp,
+                        bottomEnd = if (index == taskNames.lastIndex) 18.dp else 0.dp)
+                    SwipeDeleteTask(
+                        taskName = name,
+                        enabled = dragEnabled && dragging == null && !runState.running && !RecordingService.active && deletingTask == null,
+                        modifier = Modifier.then(if (isDragging) Modifier else Modifier.animateItem()).clip(shape),
+                        onDelete = { deletingTask = name }
+                    ) {
+                        Surface(Modifier.fillMaxWidth(),
+                            color = if (isDragging) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface,
+                            shadowElevation = if (isDragging) 8.dp else 0.dp,
+                            shape = shape) {
+                            Column {
+                                TaskRow(task, runState, iconDragModifier = Modifier
+                                    .semantics { contentDescription = "长按「$name」的图标拖动排序" }
+                                    .onGloballyPositioned { iconTop = it.positionInRoot().y }
+                                    .pointerInput(name, dragEnabled) {
+                                        if (dragEnabled) detectDragGesturesAfterLongPress(
+                                            onDragStart = { offset ->
+                                                // 长按触发时给一次触感反馈，确认已进入拖动状态。
+                                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                dragRevision = taskOrderRevision
+                                                orderDraft = latestTasks.map { it.name }
+                                                dragging = name
+                                                pointerY = iconTop - listTop + offset.y
+                                            },
+                                            onDrag = { change, amount ->
+                                                change.consume()
+                                                pointerY += amount.y
+                                                reorderAtPointer()
+                                            },
+                                            onDragEnd = {
+                                                val result = orderDraft
+                                                val revision = dragRevision
+                                                val before = latestTasks.map { it.name }
+                                                dragging = null
+                                                if (result != null && result != before) {
+                                                    scope.launch {
+                                                        val failure = withContext(Dispatchers.IO) {
+                                                            runCatching { TaskOrder.save(this@MainActivity, revision, result) }
+                                                                .exceptionOrNull()
+                                                        }
+                                                        // 成功或冲突都重新读取，界面始终展示已保存顺序。
+                                                        tasks = withContext(Dispatchers.IO) { TaskManager.listTasks(this@MainActivity) }
+                                                        taskOrderRevision = withContext(Dispatchers.IO) { TaskOrder.read(this@MainActivity).revision }
+                                                        orderDraft = null
+                                                        Toast.makeText(this@MainActivity,
+                                                            failure?.message ?: "任务顺序已保存",
+                                                            if (failure == null) Toast.LENGTH_SHORT else Toast.LENGTH_LONG).show()
                                                     }
-                                                    // 成功或冲突都重新读取，界面始终展示已保存顺序。
-                                                    tasks = withContext(Dispatchers.IO) { TaskManager.listTasks(this@MainActivity) }
-                                                    taskOrderRevision = withContext(Dispatchers.IO) { TaskOrder.read(this@MainActivity).revision }
-                                                    orderDraft = null
-                                                    Toast.makeText(this@MainActivity,
-                                                        failure?.message ?: "任务顺序已保存",
-                                                        if (failure == null) Toast.LENGTH_SHORT else Toast.LENGTH_LONG).show()
-                                                }
-                                            } else orderDraft = null
-                                        },
-                                        onDragCancel = { dragging = null; orderDraft = null }
-                                    )
-                                })
-                            if (index < taskNames.lastIndex) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                                                } else orderDraft = null
+                                            },
+                                            onDragCancel = { dragging = null; orderDraft = null }
+                                        )
+                                    })
+                                if (index < taskNames.lastIndex) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                            }
                         }
                     }
                 }
