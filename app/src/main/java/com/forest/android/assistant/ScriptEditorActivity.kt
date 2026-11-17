@@ -1,7 +1,5 @@
 package com.forest.android.assistant
 
-import android.content.ClipData
-import android.content.ClipboardManager
 import android.os.Bundle
 import com.forest.android.assistant.ui.AppToast as Toast
 import androidx.activity.ComponentActivity
@@ -12,8 +10,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
@@ -54,7 +50,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -66,12 +61,10 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
-import com.forest.android.assistant.core.editor.ApiExamplePage
 import com.forest.android.assistant.core.editor.ApiDocs
 import com.forest.android.assistant.core.editor.Edits
 import com.forest.android.assistant.core.editor.JsHighlighter
 import com.forest.android.assistant.core.editor.LineIndex
-import com.forest.android.assistant.core.editor.ScriptExamplesDialog
 import com.forest.android.assistant.core.engine.ScriptRunner
 import com.forest.android.assistant.core.flow.FlowCompiler
 import com.forest.android.assistant.core.task.TaskManager
@@ -192,9 +185,6 @@ class ScriptEditorActivity : ComponentActivity() {
     @OptIn(ExperimentalMaterial3Api::class)
     @Composable
     private fun EditorScreen() {
-        var apiHelp by remember { mutableStateOf<ApiDocs.Item?>(null) }
-        var showExamples by remember { mutableStateOf(false) }
-        val keyboard = LocalSoftwareKeyboardController.current
         val codeScroll = rememberScrollState()
         val codeHorizontalScroll = rememberScrollState()
         BackHandler { finish() }
@@ -219,10 +209,6 @@ class ScriptEditorActivity : ComponentActivity() {
                             }
                         },
                         actions = {
-                            TextButton(onClick = {
-                                keyboard?.hide()
-                                showExamples = true
-                            }, enabled = contentLoaded) { Text("示例") }
                             TextButton(onClick = { save(showToast = true) }, enabled = contentLoaded && !saving) {
                                 Text(if (saving) "保存中…" else "保存", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
                             }
@@ -275,12 +261,6 @@ class ScriptEditorActivity : ComponentActivity() {
                         )
                     }
                 }
-
-                SuggestionBar(
-                    prefix = JsHighlighter.wordBefore(content.text, content.selection.start)?.first,
-                    onPick = { snippet -> insertAtCursor(snippet, completeWord = !JsHighlighter.wordBefore(content.text, content.selection.start)?.first.isNullOrBlank()) },
-                    onInspect = { apiHelp = it }
-                )
 
                 // 代码卡片：顶部文件名与语言标签只做信息展示，编辑区域仍为原来的输入框。
                 Column(
@@ -342,54 +322,14 @@ class ScriptEditorActivity : ComponentActivity() {
                 }
                 Row(Modifier.fillMaxWidth().background(Color(0xFF182535)).padding(horizontal = 12.dp),
                     verticalAlignment = Alignment.CenterVertically) {
-                    val lineIndex = remember(content.text) { LineIndex.from(content.text) }
-                    val position = remember(lineIndex, content.selection.start) {
-                        lineIndex.position(content.selection.start.coerceIn(0, content.text.length))
-                    }
-                    Text("Ln ${position.first}, Col ${position.second}",
-                        style = MaterialTheme.typography.bodySmall, color = Color(AppPalette.INVERSE_SUBTLE), fontFamily = FontFamily.Monospace)
-                    Spacer(Modifier.weight(1f))
                     Text(if (dirty) "待保存" else "已保存",
                         style = MaterialTheme.typography.bodySmall, color = Color(AppPalette.INVERSE_SUBTLE),
                         modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    TextButton(onClick = { keyboard?.hide(); showExamples = true }) {
-                        Text("API 帮助", color = Color(AppPalette.INVERSE_ACCENT))
-                    }
                     TextButton(onClick = { showClearDialog = true }, enabled = contentLoaded && content.text.isNotEmpty()) {
                         Text("清空", color = Color(AppPalette.INVERSE_ACCENT))
                     }
                 }
-                // 移动端常用符号不覆盖代码区；插入位置沿用当前选区。
-                Row(Modifier.fillMaxWidth().background(Color(AppPalette.SURFACE_CONTAINER)).padding(8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                    listOf("(", ")", "{", "}", "[", "]", ";", "\"").forEach { symbol ->
-                        Surface(onClick = { insertAtCursor(symbol, completeWord = false) },
-                            shape = RoundedCornerShape(6.dp), color = Color.White,
-                            modifier = Modifier.weight(1f).heightIn(min = 36.dp)) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Text(symbol, fontFamily = FontFamily.Monospace, fontSize = 13.sp)
-                            }
-                        }
-                    }
-                }
             }
-        }
-        if (showExamples) {
-            ScriptExamplesDialog(
-                onDismiss = { showExamples = false },
-                onCopy = { title, code ->
-                    if (copyExample(title, code)) showExamples = false
-                },
-                onInsert = { code, completeScript ->
-                    insertAtCursor(code, completeWord = false, block = completeScript)
-                    showExamples = false
-                },
-                onPermissions = ::openPermissions
-            )
-        }
-        apiHelp?.let { item ->
-            ApiExamplePage(item.name, item.signature, item.doc, item.snippet, { apiHelp = null },
-                { copyExample(item.name, item.snippet) }, { insertAtCursor(item.snippet); apiHelp = null }, ::openPermissions)
         }
         if (showClearDialog) {
             AlertDialog(
@@ -418,78 +358,6 @@ class ScriptEditorActivity : ComponentActivity() {
             "确认保存后，此任务不能再使用可视化流程编辑。想继续编排流程，请在局域网 Web 编辑器中修改。",
             "确认转换并保存", onDismiss = { showConvertDialog = false },
             onConfirm = { showConvertDialog = false; save(showToast = true, allowConversion = true) })
-    }
-
-    /** 复制不修改编辑内容、光标或保存状态，交由用户选择粘贴位置。 */
-    private fun copyExample(title: String, code: String): Boolean {
-        return try {
-            val clipboard = getSystemService(ClipboardManager::class.java)
-                ?: error("系统剪贴板不可用")
-            clipboard.setPrimaryClip(ClipData.newPlainText(title, code))
-            Toast.makeText(this, "已复制代码，可长按编辑器粘贴", Toast.LENGTH_SHORT).show()
-            true
-        } catch (_: Exception) {
-            Toast.makeText(this, "复制失败，请重试", Toast.LENGTH_SHORT).show()
-            false
-        }
-    }
-
-    /** API 补全条：仅在输入了标识符前缀时出现，避免误触把片段插入脚本 */
-    @OptIn(ExperimentalFoundationApi::class)
-    @Composable
-    private fun SuggestionBar(prefix: String?, onPick: (String) -> Unit, onInspect: (ApiDocs.Item) -> Unit) {
-        val items = remember(prefix) {
-            if (prefix.isNullOrBlank()) ApiDocs.items.filter { it.name in listOf("click", "images.findImage", "log") }
-            else ApiDocs.suggestions(prefix, limit = 8)
-        }
-        if (items.isEmpty()) return
-        Text(
-            "API 补全：点击插入 · 长按查看用法",
-            modifier = Modifier.padding(horizontal = 12.dp),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState())
-                .padding(horizontal = 8.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            items.forEach { item ->
-                Text(
-                    item.name.substringAfterLast('.'),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier
-                        .combinedClickable(
-                            onClick = { onPick(item.snippet) },
-                            onLongClickLabel = "查看用法",
-                            onLongClick = { onInspect(item) }
-                        )
-                        .background(MaterialTheme.colorScheme.primaryContainer, MaterialTheme.shapes.extraSmall)
-                        .padding(horizontal = 12.dp, vertical = 10.dp)
-                )
-            }
-        }
-    }
-
-    /** 补全替换前缀；示例按普通插入处理选区，完整脚本两侧补换行。 */
-    private fun insertAtCursor(snippet: String, completeWord: Boolean = true, block: Boolean = false) {
-        val text = content.text
-        val cursor = content.selection.min.coerceIn(0, text.length)
-        val end = content.selection.max.coerceIn(cursor, text.length)
-        val word = if (completeWord && content.selection.collapsed) JsHighlighter.wordBefore(text, cursor) else null
-        val start = word?.second ?: cursor
-        val insertion = if (block) {
-            (if (start > 0 && text[start - 1] != '\n') "\n" else "") + snippet.trimEnd() + "\n"
-        } else snippet
-        val newText = text.substring(0, start) + insertion + text.substring(end)
-        val newCursor = start + insertion.length
-        content = TextFieldValue(newText, TextRange(newCursor))
-        dirty = true
-        contentVersion++
     }
 
     /** 后台串行保存快照；旧请求不能覆盖更新的保存请求。 */
@@ -557,11 +425,6 @@ class ScriptEditorActivity : ComponentActivity() {
         // 清空及其后续编辑必须由用户手动保存，离开或切后台时保留磁盘上的脚本。
         // 所有编辑现在都显式保存，后台切换不再绕过未保存和流程转换确认。
         super.onPause()
-    }
-
-    /** 另开权限页面，编辑器草稿保留在原 Activity，返回后可继续编辑。 */
-    private fun openPermissions() {
-        startActivity(android.content.Intent(this, MainActivity::class.java).putExtra("open_permissions", true))
     }
 
     override fun finish() {

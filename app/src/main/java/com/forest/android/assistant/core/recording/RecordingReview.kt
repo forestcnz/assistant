@@ -8,7 +8,7 @@ import java.io.File
 /** 摘要标记保留在任务目录，进程退出也不会丢失已完成的快照。 */
 object RecordingReview {
     data class Summary(val steps: Int, val durationMs: Long, val mode: String)
-    private const val MARKER = "recording-review.json"
+    private const val MARKER = TaskManager.PENDING_REVIEW_MARKER
 
     fun prepare(context: Context, task: RecordingTask) {
         val steps = task.steps

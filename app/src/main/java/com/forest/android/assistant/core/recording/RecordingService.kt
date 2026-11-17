@@ -243,15 +243,17 @@ class RecordingService : Service() {
                     current?.persist(); current?.discardIfEmpty()
                     if (current != null && current.steps.isNotEmpty()) RecordingReview.prepare(this@RecordingService, current)
                 }
-                val message = if (current?.steps.isNullOrEmpty()) "录制结束：没有操作，未生成空任务"
-                    else "录制已完成，共 ${current.steps.size} 步，请确认保存"
-                Toast.makeText(this@RecordingService, message, Toast.LENGTH_LONG).show()
-                ScriptRunner.appendLog(message)
+                // 结束时直接进入悬浮摘要弹窗确认保存；完成提示不再额外弹出。
+                if (current != null && current.steps.isNotEmpty()) {
+                    ScriptRunner.appendLog("录制已完成，共 ${current.steps.size} 步，等待确认保存")
+                    reviewTaskToOpen = current.name
+                } else {
+                    val message = "录制结束：没有操作，未生成空任务"
+                    Toast.makeText(this@RecordingService, message, Toast.LENGTH_LONG).show()
+                    ScriptRunner.appendLog(message)
+                }
                 // 完成后停留在当前应用，不再跳回 App 内；任务可在 App 任务列表查看
                 // 新版完成流程进入独立摘要页；快照已落盘，停止服务后才允许改名和放弃。
-                if (current != null && current.steps.isNotEmpty()) {
-                    reviewTaskToOpen = current.name
-                }
                 stopSelf()
             } catch (e: Exception) {
                 finishRequested = false
@@ -306,13 +308,17 @@ class RecordingService : Service() {
         scope.cancel()
         task?.discardIfEmpty()
         active = false
-        reviewTaskToOpen?.let { name ->
-            runCatching {
-                startActivity(Intent(this, com.forest.android.assistant.RecordingSummaryActivity::class.java)
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra("task_name", name))
-            }.onFailure { notifyError("可返回任务详情，继续完成录制保存") }
-        }
         ScriptRunner.ensureLauncher(this)
+        reviewTaskToOpen?.let { name ->
+            // 确认保存改为悬浮弹窗：停留在目标应用，不把用户拉回 App 页面。
+            val shown = runCatching { RecordingSummaryOverlay.show(this, name) }.getOrDefault(false)
+            if (!shown) {
+                runCatching {
+                    startActivity(Intent(this, com.forest.android.assistant.RecordingSummaryActivity::class.java)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra("task_name", name))
+                }.onFailure { notifyError("可返回任务详情，继续完成录制保存") }
+            }
+        }
         super.onDestroy()
     }
 
