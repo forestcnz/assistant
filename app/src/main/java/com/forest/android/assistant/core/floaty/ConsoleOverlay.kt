@@ -120,15 +120,6 @@ object ConsoleOverlay {
         Log.i(TAG, "屏幕尺寸变化：控制台已收回屏内 (${lp.x}, ${lp.y})")
     }
 
-    /** 开关控制台；返回操作后是否处于显示状态 */
-    fun toggle(context: Context): Boolean {
-        if (isShowing()) {
-            hide()
-            return false
-        }
-        return show(context)
-    }
-
     @SuppressLint("SetTextI18n")
     fun show(context: Context): Boolean {
         if (rootView != null) return true

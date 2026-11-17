@@ -27,7 +27,6 @@ object AppPalette {
     const val ERROR_CONTAINER = 0xFFF9E9E6.toInt()
 
     // 品牌沙色点缀，呼应雕雕形象；只作少量强调，不承担状态语义。
-    const val SAND = 0xFFEBD9B4.toInt()
     const val SAND_CONTAINER = 0xFFF7EEDC.toInt()
     const val ON_SAND_CONTAINER = 0xFF92713E.toInt()
     const val AMBER_CONTAINER = 0xFFFBF2DF.toInt()
@@ -37,5 +36,4 @@ object AppPalette {
     const val INVERSE_ON_SURFACE = 0xFFD1DEEE.toInt()
     const val INVERSE_SUBTLE = 0xFFB7C8DD.toInt()
     const val INVERSE_ACCENT = 0xFFEBD9B4.toInt()
-    const val RECORDING_INDICATOR = 0xFFBE6754.toInt()
 }

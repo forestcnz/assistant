@@ -14,27 +14,18 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import com.forest.android.assistant.ui.PrimaryAction
 import com.forest.android.assistant.ui.AppBackButton
 import androidx.compose.material3.Surface
-import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
@@ -44,31 +35,17 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.style.TextOverflow
 import com.forest.android.assistant.core.image.ScreenCapture
 import com.forest.android.assistant.core.task.TaskManager
 import com.forest.android.assistant.ui.ScriptTheme
-import com.forest.android.assistant.ui.AppIcon
 import com.forest.android.assistant.ui.AppPalette
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
 import java.io.File
-import java.io.FileOutputStream
-import kotlin.math.max
-import kotlin.math.min
-import kotlin.math.roundToInt
 import com.forest.android.assistant.ui.*
 import com.forest.android.assistant.core.image.AssetCropper
 import com.forest.android.assistant.core.image.CropRegion
@@ -77,7 +54,6 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.ui.unit.sp
 
 /**
  * 模板截取工具：截取当前屏幕 → 拖拽框选区域 → 裁剪并保存为任务素材（images/）。
@@ -97,10 +73,6 @@ class TemplateCaptureActivity : ComponentActivity() {
         set(value) { model.fileName = value }
     private val saving get() = model.saving
     private var showOverwrite by mutableStateOf(false)
-    private var backRequestedWhileSaving = false
-
-    /** 记录截图里“点击任务运行按钮”等元素位置无关；仅用于坐标系换算 */
-    private var viewSize by mutableStateOf(IntSize.Zero)
 
     private val taskName: String by lazy { intent.getStringExtra(EXTRA_TASK) ?: "" }
 
@@ -114,7 +86,7 @@ class TemplateCaptureActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
-                if (saving) backRequestedWhileSaving = true else finish()
+                if (!saving) finish()
             }
         })
         ScreenCapture.bind(this) { intent -> projectionLauncher.launch(intent) }
@@ -162,7 +134,7 @@ class TemplateCaptureActivity : ComponentActivity() {
                 TopAppBar(
                     colors = androidx.compose.material3.TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
                     navigationIcon = {
-                        AppBackButton(onClick = { if (saving) backRequestedWhileSaving = true else finish() }, enabled = !saving)
+                        AppBackButton(onClick = { if (!saving) finish() }, enabled = !saving)
                     },
                     title = {
                         Column {
@@ -187,8 +159,7 @@ class TemplateCaptureActivity : ComponentActivity() {
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(320.dp).clip(MaterialTheme.shapes.medium)
-                        .checkerboardBackground()
-                        .onSizeChanged { viewSize = it },
+                        .checkerboardBackground(),
                     contentAlignment = Alignment.Center
                 ) {
                     val bmp = bitmap
@@ -242,29 +213,6 @@ class TemplateCaptureActivity : ComponentActivity() {
         if (showOverwrite) ConfirmActionSheet("覆盖同名素材？", "「${AssetCropper.templateName(fileName)}」已存在。旧图片将保留在历史素材中。",
             "覆盖并保存", onDismiss = { showOverwrite = false }, busy = saving,
             onConfirm = { showOverwrite = false; saveSelection(overwrite = true) })
-    }
-
-    private var lastStart: Offset? = null
-
-    /** 拖动起点（用于 onDrag 时计算矩形） */
-    private fun toBitmapRect(start: Offset, end: Offset, bmp: Bitmap): android.graphics.Rect {
-        lastStart = start
-        val scale = fitScale(bmp.width, bmp.height, viewSize.width.toFloat(), viewSize.height.toFloat())
-        if (scale <= 0f) return android.graphics.Rect()
-        val offX = (viewSize.width - bmp.width * scale) / 2f
-        val offY = (viewSize.height - bmp.height * scale) / 2f
-        fun bx(x: Float) = ((x - offX) / scale).roundToInt().coerceIn(0, bmp.width)
-        fun by(y: Float) = ((y - offY) / scale).roundToInt().coerceIn(0, bmp.height)
-        val x1 = bx(min(start.x, end.x))
-        val y1 = by(min(start.y, end.y))
-        val x2 = bx(max(start.x, end.x))
-        val y2 = by(max(start.y, end.y))
-        return android.graphics.Rect(x1, y1, x2, y2)
-    }
-
-    private fun fitScale(iw: Int, ih: Int, cw: Float, ch: Float): Float {
-        if (iw <= 0 || ih <= 0 || cw <= 0f || ch <= 0f) return 0f
-        return min(cw / iw, ch / ih)
     }
 
     private fun openSaveDialog() {

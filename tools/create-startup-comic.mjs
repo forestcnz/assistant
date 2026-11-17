@@ -11,7 +11,8 @@ const pngPath = path.join(root, 'app/src/main/res/drawable-nodpi/startup_comic.p
 const brandSvgPath = path.join(root, 'docs/branding/brand-mark.svg');
 const brandPngPath = path.join(root, 'app/src/main/res/drawable-nodpi/ic_brand_mark.png');
 const runningSvgPath = path.join(root, 'docs/branding/running-bird.svg');
-const runningPngPath = path.join(root, 'app/src/main/res/drawable-nodpi/ic_running_bird.png');
+// 运行态红色图已不参与 App 界面，导出的设计预览保存在文档目录，避免重新进入 APK。
+const runningPngPath = path.join(root, 'docs/branding/running-bird.png');
 const brandOnly = process.argv.includes('--brand-only');
 const ink = '#49352E';
 const stroke = `stroke="${ink}" stroke-width="5" stroke-linejoin="round" stroke-linecap="round"`;

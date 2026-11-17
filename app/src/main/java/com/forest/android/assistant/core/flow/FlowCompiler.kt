@@ -15,13 +15,6 @@ object FlowCompiler {
     fun draftFile(context: Context, taskName: String): File =
         File(TaskManager.taskDir(context, taskName), "flow.draft.json")
 
-    @Synchronized
-    fun saveDraft(context: Context, taskName: String, source: String) {
-        require(source.length <= 2_000_000) { "流程草稿过大" }
-        JSONObject(source).getJSONArray("nodes")
-        writeAtomic(draftFile(context, taskName), source)
-    }
-
     fun isVisual(context: Context, taskName: String): Boolean = sourceFile(context, taskName).isFile
 
     /** 保存原生 task.js 后，流程任务正式转换为普通脚本任务。 */

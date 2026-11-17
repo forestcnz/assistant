@@ -7,11 +7,8 @@ import androidx.core.net.toUri
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import com.forest.android.assistant.MainActivity.DurationUnit
-import com.forest.android.assistant.R
 import com.forest.android.assistant.core.engine.ScriptRunner
-import com.forest.android.assistant.core.floaty.ConsoleOverlay
 import com.forest.android.assistant.core.floaty.FloatyManager
-import com.forest.android.assistant.core.floaty.PickerOverlay
 import com.forest.android.assistant.core.image.ScreenCapture
 import com.forest.android.assistant.core.recording.RecordingService
 import com.forest.android.assistant.core.task.RunHistory
@@ -242,42 +239,6 @@ internal fun MainActivity.applyCaptureMode(mode: ScreenCapture.Mode) {
             captureModeTesting = false
         }
     }
-}
-
-/** 开关悬浮控制台（可滚动日志面板，需悬浮窗权限） */
-internal fun MainActivity.toggleConsole() {
-    if (!overlayGranted) {
-        FloatyManager.requestOverlayPermission(this)
-        return
-    }
-    ConsoleOverlay.toggle(this)
-}
-
-/** 打开屏幕拾取工具（需要悬浮窗权限；取色和截图还需截屏授权） */
-internal fun MainActivity.showPicker(mode: PickerOverlay.Mode) {
-    if (!overlayGranted) {
-        FloatyManager.requestOverlayPermission(this)
-        return
-    }
-    if ((mode == PickerOverlay.Mode.COLOR || mode == PickerOverlay.Mode.SCREENSHOT) &&
-        ScreenCapture.mode(this) == ScreenCapture.Mode.UNSELECTED
-    ) {
-        openCaptureDialog()
-        return
-    }
-    if (mode == PickerOverlay.Mode.COLOR && !ScreenCapture.captureAvailableCached(this)) {
-        // 取色依赖截屏：先弹授权，成功后再打开拾取层
-        lifecycleScope.launch {
-            val ok = withContext(Dispatchers.IO) { ScreenCapture.requestBlocking() }
-            if (ok) {
-                PickerOverlay.show(this@showPicker, mode)
-            } else {
-                Toast.makeText(this@showPicker, "取色需要截屏授权", Toast.LENGTH_LONG).show()
-            }
-        }
-        return
-    }
-    PickerOverlay.show(this, mode)
 }
 
 internal fun MainActivity.performTaskChange(operation: () -> Result<*>, successMessage: String, onSuccess: () -> Unit) {

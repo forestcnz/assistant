@@ -9,7 +9,6 @@ import android.graphics.BitmapFactory
 import android.graphics.PixelFormat
 import android.graphics.Typeface
 import android.graphics.drawable.Drawable
-import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.RippleDrawable
 import android.net.Uri
 import android.os.Build
@@ -60,7 +59,6 @@ object FloatyManager {
     private const val KEY_X = "x"
     private const val KEY_Y = "y"
     private const val KEY_PANEL_GROUPS = "panelGroups"
-    private var requestedGroupId: String? = null
 
     /** 用户是否希望显示悬浮球（默认 true = 首次启动自动开启） */
     private const val KEY_ENABLED = "enabled"
@@ -235,14 +233,6 @@ object FloatyManager {
         val wm = windowManager ?: return false
         toggleTaskPanel(context.applicationContext, wm)
         return panelView != null
-    }
-
-    /** 分组详情的执行入口直接进入对应分组，沿用保存顺序并默认全选。 */
-    fun showTaskGroupPanel(context: Context, groupId: String): Boolean {
-        if (!hasOverlayPermission(context)) return false
-        hideTaskPanel(immediate = true)
-        requestedGroupId = groupId
-        return showTaskPanel(context)
     }
 
     /**
@@ -815,18 +805,6 @@ object FloatyManager {
         if (strokePx > 0f) setStroke(strokePx.toInt().coerceAtLeast(1), strokeColor)
     }
 
-    /** 与录制悬浮窗共用的视觉语言：暖白卡片、深绿灰标题栏、深蓝主按钮。 */
-    private fun panelGradient(
-        top: Int,
-        bottom: Int,
-        radiusPx: Float,
-        strokePx: Float = 0f,
-        strokeColor: Int = 0
-    ) = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(top, bottom)).apply {
-        cornerRadius = radiusPx
-        if (strokePx > 0f) setStroke(strokePx.toInt().coerceAtLeast(1), strokeColor)
-    }
-
     /** 按钮和任务格子使用有界水波纹，让点选反馈与圆角轮廓一致。 */
     private fun panelTouchBackground(background: Drawable): Drawable =
         RippleDrawable(ColorStateList.valueOf(0x1A1D3557), background, null)
@@ -1005,10 +983,9 @@ object FloatyManager {
             Toast.makeText(context, "读取任务分组失败：${it.message}", Toast.LENGTH_LONG).show()
             emptyList()
         }.map { it.copy(taskNames = it.taskNames.filter(availableTasks::contains)) }
-        var activeGroup: TaskGroup? = groups.firstOrNull { it.id == requestedGroupId }
-        requestedGroupId = null
-        var showingGroups = activeGroup != null || prefs(context).getBoolean(KEY_PANEL_GROUPS, false)
-        var visibleTasks = activeGroup?.taskNames ?: if (showingGroups) emptyList() else tasks
+        var activeGroup: TaskGroup? = null
+        var showingGroups = prefs(context).getBoolean(KEY_PANEL_GROUPS, false)
+        var visibleTasks = if (showingGroups) emptyList() else tasks
         val d = context.resources.displayMetrics.density
         Log.i(TAG, "展开面板, 任务数=${tasks.size}, 运行中=${runningTask ?: "无"}")
 

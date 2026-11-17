@@ -7,17 +7,14 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.material3.Button
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
@@ -28,8 +25,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.forest.android.assistant.core.update.AppUpdateModel
 import com.forest.android.assistant.core.update.AppUpdateState
@@ -43,8 +38,6 @@ internal fun AppUpdatePage(
     onBack: () -> Unit,
 ) {
     val context = LocalContext.current
-    val statusStyle = MaterialTheme.typography.bodyMedium
-    val statusHeight = with(LocalDensity.current) { statusStyle.lineHeight.toDp() }
     val update = state.availableUpdate
     val phase = state.downloadPhase
     val downloading = phase == DownloadPhase.DOWNLOADING

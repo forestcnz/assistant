@@ -97,7 +97,6 @@ dependencies {
     implementation("com.google.mlkit:text-recognition-chinese:16.0.1")
 
     implementation("androidx.compose.ui:ui")
-    implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
 
     // 局域网浏览器编辑器：轻量嵌入式 HTTP 服务
