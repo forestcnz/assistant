@@ -6,6 +6,8 @@
 
 ## 维护参考
 
+- [APP 全页面 UI 设计稿](app-ui-redesign.html)：53 个页面／浮层、78 个状态，包含可交互手机预览；[覆盖范围与源文件说明](ui-redesign/README.md)。
+- [APP UI 设计稿 · 雾蓝暖白版](app-ui-redesign-blue.html)：保留原方案的独立配色副本；[配色说明](ui-redesign-blue/README.md)。
 - [局域网 Web 编辑器](lan-web-editor-design.md)：服务结构、任务文件和接口。
 - [品牌素材](branding/startup-comic.md)：启动漫画、应用图标和运行图标的源文件与生成方式。
 

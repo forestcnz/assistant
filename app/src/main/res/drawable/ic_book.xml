@@ -1,0 +1,4 @@
+<!-- 阅读任务的语义图标。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
+    <path android:pathData="M3,3H10L12,5L14,3H21V20H14L12,22L10,20H3Z M12,5V22" android:fillColor="@android:color/transparent" android:strokeColor="#223047" android:strokeWidth="1.7" android:strokeLineCap="round" android:strokeLineJoin="round" />
+</vector>

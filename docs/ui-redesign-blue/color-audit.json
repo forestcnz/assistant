@@ -1,0 +1,60 @@
+{
+  "originalsUnchanged": {
+    "app-ui-redesign.html": true,
+    "ui-redesign/prototype.css": true,
+    "ui-redesign/prototype.js": true,
+    "ui-redesign/build.mjs": true
+  },
+  "contrast": [
+    {
+      "role": "主按钮白字",
+      "foreground": "#ffffff",
+      "background": "#3566a0",
+      "ratio": 5.9,
+      "passesAA": true
+    },
+    {
+      "role": "标题",
+      "foreground": "#223047",
+      "background": "#faf9f6",
+      "ratio": 12.61,
+      "passesAA": true
+    },
+    {
+      "role": "次级文字",
+      "foreground": "#616e80",
+      "background": "#faf9f6",
+      "ratio": 4.92,
+      "passesAA": true
+    },
+    {
+      "role": "成功标签",
+      "foreground": "#36735b",
+      "background": "#edf5f1",
+      "ratio": 5.03,
+      "passesAA": true
+    },
+    {
+      "role": "警告标签",
+      "foreground": "#94601f",
+      "background": "#fbf2df",
+      "ratio": 4.77,
+      "passesAA": true
+    },
+    {
+      "role": "错误标签",
+      "foreground": "#ae4647",
+      "background": "#f8e7e3",
+      "ratio": 4.65,
+      "passesAA": true
+    },
+    {
+      "role": "代码编辑区",
+      "foreground": "#d1deee",
+      "background": "#202d3d",
+      "ratio": 10.23,
+      "passesAA": true
+    }
+  ],
+  "unexpectedPurple": []
+}

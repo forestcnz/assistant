@@ -10,7 +10,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
-import android.widget.Toast
+import com.forest.android.assistant.ui.AppToast as Toast
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
@@ -119,7 +119,7 @@ object ScreenCapture {
         Log.i(TAG, "截屏方式已设为：" + newMode.label)
     }
 
-    data class ModeTestResult(val success: Boolean, val message: String)
+    data class ModeTestResult(val success: Boolean, val message: String, val width: Int = 0, val height: Int = 0)
 
     /** 测试候选通道的真实截图，成功后才保存选择；失败保留原设置。 */
     suspend fun testAndSelectMode(context: Context, candidate: Mode): ModeTestResult = withContext(Dispatchers.IO) {
@@ -153,7 +153,7 @@ object ScreenCapture {
                 setMode(context, candidate)
                 if (candidate == Mode.ROOT) rootProbed = 1
                 confirmed = true
-                ModeTestResult(true, "截图测试通过，已选择：" + candidate.label)
+                ModeTestResult(true, "截图测试通过，已选择：" + candidate.label, frame.width, frame.height)
             } finally {
                 // 超级权限截图由本次测试独占；系统投影帧由服务管理，不能回收。
                 if (candidate == Mode.ROOT && !frame.isRecycled) frame.recycle()

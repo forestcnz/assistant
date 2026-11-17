@@ -23,7 +23,7 @@ import android.view.WindowManager
 import android.window.OnBackInvokedCallback
 import android.window.OnBackInvokedDispatcher
 import java.io.File
-import android.widget.Toast
+import com.forest.android.assistant.ui.AppToast as Toast
 import com.forest.android.assistant.core.image.ScreenCapture
 import com.forest.android.assistant.ui.AppPalette
 import com.forest.android.assistant.ScreenshotExportActivity
@@ -337,7 +337,7 @@ object PickerOverlay {
 
         private val readoutRect = RectF()
         private val readoutPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = 0xA6202E33.toInt()
+            color = 0xE8223047.toInt()
         }
         private val readoutTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.WHITE
@@ -362,7 +362,7 @@ object PickerOverlay {
             style = Paint.Style.FILL
         }
         private val dimPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = 0x99000000.toInt()
+            color = 0x1A14243B
             style = Paint.Style.FILL
         }
         private val bitmapPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)

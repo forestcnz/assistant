@@ -162,8 +162,10 @@ object ConsoleOverlay {
         }
         header.addView(title, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         header.addView(actionText(context, "清空") {
-            onClear?.invoke()
-            rebuild()
+            OverlayConfirm.show(context, "清空运行日志？", "清空当前实时输出，已保存的任务运行历史不受影响。", "清空日志") {
+                onClear?.invoke()
+                rebuild()
+            }
         })
         header.addView(actionText(context, "✕") { hide() })
         root.addView(header)
@@ -199,6 +201,16 @@ object ConsoleOverlay {
         )
         linesContainer = lines
         scrollView = scroll
+        // 停止跟随滚动后，也能通过固定入口回到最新日志。
+        root.addView(actionText(context, "回到最新") {
+            scroll.post { scroll.fullScroll(View.FOCUS_DOWN) }
+        }.apply {
+            gravity = Gravity.CENTER
+            minimumHeight = (45*d).toInt()
+            background = rounded(AppPalette.SURFACE_CONTAINER, 12*d, 0f, 0)
+        }, LinearLayout.LayoutParams(-1, -2).apply {
+            leftMargin = (14*d).toInt(); rightMargin = (14*d).toInt(); topMargin = (10*d).toInt(); bottomMargin = (12*d).toInt()
+        })
 
         // —— 底部运行态停止条（空闲时隐藏） ——
         val footer = LinearLayout(context).apply {

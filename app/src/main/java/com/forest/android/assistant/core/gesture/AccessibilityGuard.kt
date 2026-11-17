@@ -9,7 +9,7 @@ import android.os.Looper
 import android.provider.Settings
 import android.util.Log
 import android.view.accessibility.AccessibilityManager
-import android.widget.Toast
+import com.forest.android.assistant.ui.AppToast as Toast
 import com.forest.android.assistant.core.engine.ScriptRunner
 
 /**

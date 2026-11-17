@@ -14,6 +14,41 @@ object AssetCropper {
 
     private const val MAX_CROP_PIXELS = 16_000_000L
 
+    /** 模板只写 PNG，拒绝路径及隐藏文件名；最终目标仍需在任务素材目录内。 */
+    fun templateName(rawName: String): String {
+        val value = rawName.trim()
+        require(value.isNotBlank() && !value.startsWith('.') && value.length <= 120 &&
+            rawName.none { it == '/' || it == '\\' || it.isISOControl() }) { "请输入合法文件名，最多 120 个字符，不能包含路径分隔符" }
+        return if (value.endsWith(".png", true)) value else "$value.png"
+    }
+
+    fun templateTarget(context: Context, task: String, name: String): File {
+        val directory = ImageHistory.imagesDirectory(context, task)
+        val file = File(directory, templateName(name)).canonicalFile
+        require(file.parentFile == directory && (!file.exists() || file.isFile)) { "素材名称不可用" }
+        return file
+    }
+
+    /** 完整编码后才移动文件，同名覆盖沿用裁剪历史，写入失败时保留旧图。 */
+    @Synchronized
+    fun saveTemplate(context: Context, task: String, name: String, bitmap: Bitmap, region: CropRegion, overwrite: Boolean): File {
+        require(region.isValid(bitmap.width, bitmap.height) && region.width >= 8 && region.height >= 8) { "模板选区至少为 8 × 8 px" }
+        require(region.width.toLong() * region.height <= MAX_CROP_PIXELS) { "选区过大，请缩小到 1600 万像素以内" }
+        val target = templateTarget(context, task, name)
+        require(overwrite || !target.exists()) { "同名素材已存在，请确认覆盖后重试" }
+        val pending = ImageHistory.createPendingFile(context, task)
+        val cropped = Bitmap.createBitmap(bitmap, region.left, region.top, region.width, region.height)
+        try {
+            pending.outputStream().use { check(cropped.compress(Bitmap.CompressFormat.PNG, 100, it)) { "图片编码失败" } }
+            if (target.exists()) return ImageHistory.replace(context, task, target.name, pending)
+            check(pending.renameTo(target)) { "保存失败，请重试" }
+            return target
+        } finally {
+            pending.delete()
+            if (cropped !== bitmap) cropped.recycle()
+        }
+    }
+
     fun load(context: Context, taskName: String, imageName: String): Preview {
         val file = ImageHistory.source(context, taskName, imageName)
         val bounds = bounds(file)

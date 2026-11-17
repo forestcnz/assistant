@@ -16,6 +16,9 @@ import java.net.URI
 import java.security.MessageDigest
 import javax.net.ssl.HttpsURLConnection
 
+/** 下载字节和阶段来自实际操作，回调在 IO 线程，界面负责切回主线程。 */
+internal data class MarketImportProgress(val phase: String, val receivedBytes: Long = 0, val totalBytes: Long = 0)
+
 internal class MarketRepository(private val context: Context) {
     suspend fun load(): List<MarketRelease> = withContext(Dispatchers.IO) {
         val bytes = download("$MARKET_RELEASES/latest/download/catalog.json") { input ->
@@ -41,7 +44,9 @@ internal class MarketRepository(private val context: Context) {
         }
     }
 
-    suspend fun importTask(release: MarketRelease, name: String, overwrite: Boolean): String = withContext(Dispatchers.IO) {
+    suspend fun importTask(release: MarketRelease, name: String, overwrite: Boolean,
+        onProgress: (MarketImportProgress) -> Unit = {}): String = withContext(Dispatchers.IO) {
+        onProgress(MarketImportProgress("检查脚本信息"))
         require(BuildConfig.VERSION_CODE >= release.minAppVersionCode) { "请先更新雕雕助手" }
         val current = load().firstOrNull { it.source == release.source }
             ?: error("脚本已下架，请返回市场刷新")
@@ -51,6 +56,8 @@ internal class MarketRepository(private val context: Context) {
         try {
             val digest = MessageDigest.getInstance("SHA-256")
             var size = 0L
+            var lastReported = 0L
+            onProgress(MarketImportProgress("正在下载", 0, release.sizeBytes))
             download(current.downloadUrl) { input ->
                 archive.outputStream().buffered().use { output ->
                     val buffer = ByteArray(8192)
@@ -62,12 +69,18 @@ internal class MarketRepository(private val context: Context) {
                         require(size <= release.sizeBytes) { "下载文件超过预期大小" }
                         digest.update(buffer, 0, count)
                         output.write(buffer, 0, count)
+                        if (size - lastReported >= 64 * 1024 || size == release.sizeBytes) {
+                            lastReported = size
+                            onProgress(MarketImportProgress("正在下载", size, release.sizeBytes))
+                        }
                     }
                 }
             }
+            onProgress(MarketImportProgress("校验文件", size, release.sizeBytes))
             val sha = digest.digest().joinToString("") { "%02x".format(it) }
             require(size == release.sizeBytes && sha == release.sha256) { "文件校验失败，请刷新市场后重试" }
             job.ensureActive()
+            onProgress(MarketImportProgress("导入任务", size, release.sizeBytes))
             TaskZip.importMarketTask(context, archive, release, name, overwrite)
         } finally {
             archive.delete()

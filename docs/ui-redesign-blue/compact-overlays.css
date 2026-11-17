@@ -1,0 +1,31 @@
+/* Screen tools follow PickerOverlay / RecordingOverlay: readouts, not panels. */
+.phone:has([data-compact-picker]) .phone-body,
+.phone:has([data-compact-recording]) .phone-body{overflow:hidden}
+.compact-stage{position:relative;height:100%;min-height:0;padding:20px;background:#eef1f5;overflow:hidden;touch-action:none;user-select:none}
+.compact-stage .sample-app{min-height:100%;pointer-events:none}
+.compact-stage .sample-app .sample-block:last-child{margin-bottom:0}
+.native-crosshair{position:absolute;width:92px;height:92px;transform:translate(-50%,-50%);pointer-events:none;z-index:2;color:#3566a0}
+.native-crosshair svg{width:100%;height:100%;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round}
+.native-readout{position:absolute;z-index:4;max-width:calc(100% - 12px);padding:4px 8px;border:1px solid #ffffff28;border-radius:6px;background:#223047e8;color:#fff;box-shadow:0 2px 8px #14243b12;font:11px/16px Consolas,"Microsoft YaHei",monospace;white-space:nowrap;text-align:center;touch-action:none}
+.native-readout:hover{background:#223047}
+.native-readout:focus-visible{outline:2px solid #86a8d3;outline-offset:3px}
+.native-readout span{display:block}
+.native-readout .native-color-line{display:flex;align-items:center;justify-content:center;gap:6px}
+.native-color-dot{display:inline-block;width:11px;height:11px;background:#588c68;border:1px solid #ffffffc0;border-radius:2px;flex-shrink:0}
+.native-readout .native-inline-action{display:inline;color:#e7d7b7;font:inherit}
+.native-selection{position:absolute;border:1.5px solid #3566a0;box-shadow:0 0 0 1600px #14243b1a;pointer-events:none;z-index:1}
+.native-selection[hidden]{display:none}
+.native-picker-cancel{position:absolute;z-index:5;right:10px;top:10px;width:48px;height:36px;border:1px solid #ffffff28;border-radius:7px;background:#223047e8;color:#fff;font-size:11px}
+.native-system-back{position:absolute;left:12px;bottom:0;height:22px;width:30px;display:grid;place-items:center;border:0;background:none;color:#7c8796;padding:0}
+.native-system-back .ico{width:15px;height:15px}
+.phone:has([data-compact-picker]) .home-indicator{height:24px;position:relative}
+.native-record-bar{position:absolute;left:8px;bottom:12px;z-index:4;width:144px;height:34px;display:flex;align-items:center;gap:3px;padding:3px 3px 3px 5px;border:1px solid #d6dee8;border-radius:11px;background:#fff;box-shadow:0 3px 12px #2230471c;touch-action:none}
+.native-record-handle{min-width:0;flex:1;display:flex;align-items:center;gap:4px;cursor:grab;font-size:11px;font-weight:650;line-height:28px;color:#223047;white-space:nowrap;overflow:hidden}
+.native-record-handle:active{cursor:grabbing}
+.native-record-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.native-record-dot{height:4px;width:4px;border-radius:50%;background:#be6754;flex-shrink:0}
+.native-record-bar[data-paused="true"] .native-record-dot{background:#a18351}
+.native-record-button{width:34px;height:28px;padding:0;flex-shrink:0;border:1px solid #e2e5ea;border-radius:8px;background:#edf2f8;color:#223047;font-size:11px;font-weight:600}
+.native-record-button.finish{background:#3566a0;border-color:#3566a0;color:#fff}
+.native-record-bar.is-dragging{box-shadow:0 5px 16px #2230472a}
+.compact-demo-note{font-size:11px;line-height:1.9;color:#616e80;border-left:2px solid #cbd8e8;padding-left:12px;margin:10px 0}

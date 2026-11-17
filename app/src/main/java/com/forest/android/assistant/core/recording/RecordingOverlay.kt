@@ -73,7 +73,7 @@ class RecordingOverlay(
         setTextColor(textColor)
         minimumHeight = dp(28)
         includeFontPadding = false
-        background = solid(AppPalette.SECONDARY_CONTAINER, 9, 1, AppPalette.OUTLINE_VARIANT)
+        background = solid(AppPalette.SURFACE_CONTAINER, 9, 1, AppPalette.OUTLINE_VARIANT)
     }
 
     private val finishLabel = TextView(context).apply {
@@ -94,6 +94,8 @@ class RecordingOverlay(
         addView(finishLabel, LinearLayout.LayoutParams(dp(34), -2))
     }
 
+    private val statusDot = View(context).apply { background = solid(AppPalette.TERTIARY, 4) }
+
     private val panel = LinearLayout(context).apply {
         background = solid(AppPalette.SURFACE, 11, 1, AppPalette.OUTLINE_VARIANT)
         clipToOutline = true
@@ -101,6 +103,7 @@ class RecordingOverlay(
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
         setPadding(dp(5), dp(3), dp(3), dp(3))
+        addView(statusDot, LinearLayout.LayoutParams(dp(4), dp(4)).apply { marginEnd = dp(4) })
         addView(stateText, LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(3) })
         addView(actions, LinearLayout.LayoutParams(-2, -2))
     }
@@ -316,6 +319,7 @@ class RecordingOverlay(
 
     /** 更新录制状态、步数和按钮文字。 */
     private fun render(recording: Boolean, count: Int, message: String) {
+        statusDot.background = solid(if (recording) AppPalette.ERROR else AppPalette.TERTIARY, 4)
         val ready = count == 0
         val state = when {
             recording -> "录制"

@@ -7,11 +7,12 @@ import android.os.Looper
 import android.os.SystemClock
 import android.provider.Settings
 import android.util.Log
-import android.widget.Toast
+import com.forest.android.assistant.ui.AppToast as Toast
 import com.forest.android.assistant.core.floaty.ConsoleOverlay
 import com.forest.android.assistant.core.gesture.AccessibilityGuard
 import com.forest.android.assistant.core.gesture.GestureClient
 import com.forest.android.assistant.core.floaty.FloatyManager
+import com.forest.android.assistant.core.floaty.RunningControlOverlay
 import com.forest.android.assistant.core.floaty.PickerOverlay
 import com.forest.android.assistant.core.image.ScreenCapture
 import com.forest.android.assistant.core.runner.ScriptForegroundService
@@ -54,7 +55,14 @@ object ScriptRunner {
         /** 队列执行进度（1-based）；0 = 单任务运行或空闲 */
         val queueIndex: Int = 0,
         /** 队列任务总数；1 = 单任务运行 */
-        val queueTotal: Int = 0
+        val queueTotal: Int = 0,
+        /** 剩余任务与真实循环进度用于悬浮运行控制，不从日志猜测。 */
+        val remainingTasks: List<String> = emptyList(),
+        val round: Long = 0,
+        val roundTotal: Long? = null,
+        val waitingUntilElapsed: Long = 0,
+        val waitingForTask: String? = null,
+        val waitingForRound: Boolean = false
     )
 
     private val _state = MutableStateFlow(RunState())
@@ -97,6 +105,7 @@ object ScriptRunner {
         val context: Context,
         val launcher: Boolean,
         val console: Boolean,
+        val runningControl: Boolean,
         val hiddenAt: Long
     )
     // Main-thread only. The run bar stays visible; only idle controls and the console are hidden.
@@ -286,6 +295,7 @@ object ScriptRunner {
         val stopRequested = AtomicBoolean(false)
         job = runJob
         runStopRequested = stopRequested
+        _state.value = RunState(queue.first(), true, 1, queue.size, remainingTasks = queue.drop(1))
         val queueMode = queue.size > 1
         if (queueMode) addLog('I', "▶ 顺序执行 ${queue.size} 个任务：${queue.joinToString(" → ")}")
         var executed = false
@@ -294,7 +304,7 @@ object ScriptRunner {
             val queueIntervalSec = TaskExecutionSettings.queueIntervalSec(app)
             for ((index, taskName) in queue.withIndex()) {
                 if (stopRequested.get() || runJob?.isCancelled == true) break
-                val result = runSingleTask(app, taskName, source, stopRequested, index + 1, queue.size)
+                val result = runSingleTask(app, taskName, source, stopRequested, index + 1, queue.size, queue.drop(index + 1))
                 executed = executed || result != TaskResult.SKIPPED
                 // 出错/被停止：中止队列，剩下的任务不再执行
                 if (result == TaskResult.FAILED || result == TaskResult.STOPPED) {
@@ -307,6 +317,8 @@ object ScriptRunner {
                 // 只在任务正常完成且还有下一项时等待；协程取消可立即打断间隔。
                 if (result == TaskResult.DONE && index < queue.lastIndex && queueIntervalSec > 0) {
                     addLog('I', "任务间隔：等待 $queueIntervalSec 秒后执行「${queue[index + 1]}」")
+                    _state.value = _state.value.copy(waitingUntilElapsed = SystemClock.elapsedRealtime() + queueIntervalSec * 1000L,
+                        waitingForTask = queue[index + 1], waitingForRound = false)
                     delay(queueIntervalSec * 1000L)
                 }
             }
@@ -357,7 +369,8 @@ object ScriptRunner {
         source: String,
         stopRequested: AtomicBoolean,
         queueIndex: Int,
-        queueTotal: Int
+        queueTotal: Int,
+        remainingTasks: List<String>
     ): TaskResult {
         val script = try {
             com.forest.android.assistant.core.flow.FlowCompiler.prepare(app, taskName)
@@ -375,8 +388,9 @@ object ScriptRunner {
         val runJob = coroutineContext[Job]       // 队列协程 Job（停止会取消它）
         val timedOut = AtomicBoolean(false)
         var timerJob: Job? = null
-        _state.value = RunState(taskName, running = true, queueIndex = queueIndex, queueTotal = queueTotal)
         val loop = config.loop
+        _state.value = RunState(taskName, running = true, queueIndex = queueIndex, queueTotal = queueTotal,
+            remainingTasks = remainingTasks, roundTotal = if (loop.mode == TaskLoop.Mode.COUNT) loop.count.toLong() else null)
         val sourceTag = if (source != "手动") "（$source）" else ""
         val isScheduled = source != "手动"
         // 队列模式给每条日志加序号前缀，便于看懂当前进度
@@ -425,6 +439,7 @@ object ScriptRunner {
             var iteration = 0L
             while (loop.shouldStartNext(iteration, SystemClock.elapsedRealtime() - startedElapsed)) {
                 iteration++
+                _state.value = _state.value.copy(round = iteration, waitingUntilElapsed = 0, waitingForTask = null, waitingForRound = false)
                 val label = if (loop.mode == TaskLoop.Mode.COUNT) "$iteration/${loop.count}" else "$iteration"
                 val repeated = loop.mode != TaskLoop.Mode.COUNT || loop.count > 1
                 if (repeated) addLog('I', "第 $label 次执行")
@@ -458,7 +473,10 @@ object ScriptRunner {
 
                 if (loop.intervalSec > 0) {
                     addLog('D', "等待 ${loop.intervalSec}s 后进入下一次循环")
-                    delay(loop.nextDelayMs(SystemClock.elapsedRealtime() - startedElapsed))
+                    val waitMs = loop.nextDelayMs(SystemClock.elapsedRealtime() - startedElapsed)
+                    _state.value = _state.value.copy(waitingUntilElapsed = SystemClock.elapsedRealtime() + waitMs,
+                        waitingForTask = taskName, waitingForRound = true)
+                    delay(waitMs)
                 }
             }
         } finally {
@@ -637,7 +655,7 @@ object ScriptRunner {
     ): android.graphics.Bitmap? {
         if (context == null) {
             return if ((!FloatyManager.isLauncherShowing() || FloatyManager.isShowing()) &&
-                !ConsoleOverlay.isShowing())
+                !ConsoleOverlay.isShowing() && !RunningControlOverlay.isShowing())
                 capture(0) else null
         }
         var hiddenAt = 0L
@@ -656,18 +674,21 @@ object ScriptRunner {
             } else {
                 val launcher = FloatyManager.isLauncherShowing() && !FloatyManager.isShowing()
                 val console = ConsoleOverlay.isShowing()
-                if (!launcher && !console) {
+                val runningControl = RunningControlOverlay.isShowing()
+                if (!launcher && !console && !runningControl) {
                     prepared = true
                 } else {
                     val launcherHidden = !launcher || FloatyManager.hideLauncherForScreenshot()
                     val consoleHidden = !console || ConsoleOverlay.hideForScreenshot()
-                    if (launcherHidden && consoleHidden) {
+                    val runningHidden = !runningControl || RunningControlOverlay.hideForScreenshot()
+                    if (launcherHidden && consoleHidden && runningHidden) {
                         hiddenAt = SystemClock.uptimeMillis()
-                        hiddenCaptureOverlays = HiddenCaptureOverlays(context, launcher, console, hiddenAt)
+                        hiddenCaptureOverlays = HiddenCaptureOverlays(context, launcher, console, runningControl, hiddenAt)
                         prepared = true
                     } else {
                         if (launcherHidden && launcher) FloatyManager.restoreLauncherAfterScreenshot()
                         if (consoleHidden && console) ConsoleOverlay.restoreAfterScreenshot()
+                        if (runningHidden && runningControl) RunningControlOverlay.restoreAfterScreenshot()
                     }
                 }
             }
@@ -711,6 +732,7 @@ object ScriptRunner {
         if (hidden.console && ConsoleOverlay.isShowing() && !ConsoleOverlay.restoreAfterScreenshot()) {
             ConsoleOverlay.show(hidden.context)
         }
+        if (hidden.runningControl && _state.value.running) RunningControlOverlay.restoreAfterScreenshot()
     }
 
     private fun runOnMainBlocking(action: () -> Unit): Boolean {

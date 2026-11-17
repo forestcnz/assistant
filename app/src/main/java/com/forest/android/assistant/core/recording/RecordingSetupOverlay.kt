@@ -20,7 +20,7 @@ import android.widget.RadioButton
 import android.widget.RadioGroup
 import android.widget.ScrollView
 import android.widget.TextView
-import android.widget.Toast
+import com.forest.android.assistant.ui.AppToast as Toast
 import com.forest.android.assistant.R
 import com.forest.android.assistant.core.engine.ScriptRunner
 import com.forest.android.assistant.core.floaty.FloatyManager
@@ -41,7 +41,7 @@ import java.util.Locale
 /** A small system overlay that starts recording without bringing MainActivity to the foreground. */
 object RecordingSetupOverlay {
     // 录制配置弹窗与 APP 页面使用同一套表面色和文字色。
-    private const val BG = AppPalette.SURFACE
+    private const val BG = AppPalette.BACKGROUND
     private const val TEXT = AppPalette.ON_SURFACE
     private const val SUBTLE = AppPalette.ON_SURFACE_VARIANT
     private const val FIELD_BG = AppPalette.SURFACE_CONTAINER_LOW
@@ -69,11 +69,18 @@ object RecordingSetupOverlay {
             setStroke(dp(1), AppPalette.OUTLINE_VARIANT)
         }
 
-        val card = LinearLayout(app).apply {
+        val card = object : LinearLayout(app) {
+            override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
+                if (event.keyCode == android.view.KeyEvent.KEYCODE_BACK && event.action == android.view.KeyEvent.ACTION_UP) {
+                    scope.cancel(); hide(); return true
+                }
+                return super.dispatchKeyEvent(event)
+            }
+        }.apply {
             orientation = LinearLayout.VERTICAL
             background = GradientDrawable().apply {
                 setColor(BG)
-                cornerRadius = dp(18).toFloat()
+                cornerRadius = 0f
                 setStroke(dp(1), AppPalette.OUTLINE_VARIANT)
             }
             elevation = dp(12).toFloat()
@@ -81,11 +88,12 @@ object RecordingSetupOverlay {
         }
 
         // 深绿灰标题栏与暖白表单复用悬浮任务面板的层级。
+        // 配置升级为完整表单页，仍使用系统悬浮窗口以保持目标应用的位置。
         val header = LinearLayout(app).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(10), dp(3), dp(6), dp(3))
-            setBackgroundColor(AppPalette.INVERSE_SURFACE)
+            setPadding(dp(20), dp(16), dp(14), dp(16))
+            setBackgroundColor(BG)
             addView(ImageView(app).apply {
                 setImageResource(R.drawable.ic_record_logo)
                 scaleType = ImageView.ScaleType.FIT_CENTER
@@ -93,9 +101,9 @@ object RecordingSetupOverlay {
             }, LinearLayout.LayoutParams(dp(24), dp(24)))
             addView(TextView(app).apply {
                 text = "录制操作"
-                textSize = 16f
+                textSize = 23f
                 typeface = Typeface.DEFAULT_BOLD
-                setTextColor(AppPalette.INVERSE_ON_SURFACE)
+                setTextColor(TEXT)
             }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
                 marginStart = dp(8)
             })
@@ -104,7 +112,7 @@ object RecordingSetupOverlay {
             text = "×"
             textSize = 24f
             gravity = Gravity.CENTER
-            setTextColor(AppPalette.INVERSE_ON_SURFACE)
+            setTextColor(TEXT)
             contentDescription = "关闭录制设置"
             setOnClickListener { scope.cancel(); hide() }
         }, LinearLayout.LayoutParams(dp(44), dp(44)))
@@ -115,7 +123,7 @@ object RecordingSetupOverlay {
 
         val content = LinearLayout(app).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(10), dp(8), dp(10), dp(8))
+            setPadding(dp(20), dp(16), dp(20), dp(24))
         }
 
         fun hint(text: String) = TextView(app).apply {
@@ -126,9 +134,8 @@ object RecordingSetupOverlay {
         }
 
         fun formRow(label: String) = LinearLayout(app).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            addView(hint(label), LinearLayout.LayoutParams(dp(56), -2).apply { marginEnd = dp(6) })
+            orientation = LinearLayout.VERTICAL
+            addView(hint(label), LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(10) })
         }
 
         val name = EditText(app).apply {
@@ -139,12 +146,12 @@ object RecordingSetupOverlay {
             setHintTextColor(SUBTLE)
             hint = "任务名称"
             gravity = Gravity.CENTER_VERTICAL
-            minHeight = dp(32)
+            minHeight = dp(50)
             setPadding(dp(10), dp(3), dp(10), dp(3))
             background = fieldBackground()
         }
         content.addView(formRow("任务名称").apply {
-            addView(name, LinearLayout.LayoutParams(0, -2, 1f))
+            addView(name, LinearLayout.LayoutParams(-1, -2))
         }, LinearLayout.LayoutParams(-1, -2))
 
         val modes = RadioGroup(app).apply {
@@ -154,21 +161,28 @@ object RecordingSetupOverlay {
         // （纯坐标录制改为悬浮面板上的一键入口，不在本弹窗里选）
         fun modeButton(label: String, checked: Boolean): RadioButton =
             RadioButton(app).apply {
-                text = label
+                text = android.text.SpannableString(label).apply {
+                    val start = label.indexOf('\n') + 1
+                    if (start > 0) {
+                        setSpan(android.text.style.RelativeSizeSpan(.78f), start, length, 0)
+                        setSpan(android.text.style.ForegroundColorSpan(SUBTLE), start, length, 0)
+                    }
+                }
                 textSize = 14f
                 setTextColor(TEXT)
                 buttonTintList = ColorStateList.valueOf(AppPalette.PRIMARY)
                 id = View.generateViewId()
                 isChecked = checked
-                minHeight = dp(36)
+                minHeight = dp(72)
                 setPadding(dp(6), dp(3), dp(6), dp(3))
                 background = fieldBackground()
             }
-        val coordinate = modeButton("记录坐标", checked = true)
-        val image = modeButton("记录图片", checked = false)
+        val coordinate = modeButton("记录坐标\n记录点击位置，同时导出备用图片素材", checked = true)
+        val image = modeButton("记录图片\n保存图片，回放时通过找图定位", checked = false)
         modes.addView(coordinate, RadioGroup.LayoutParams(-1, -2))
-        modes.addView(image, RadioGroup.LayoutParams(-1, -2).apply { topMargin = dp(3) })
-        content.addView(modes, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(6) })
+        modes.addView(image, RadioGroup.LayoutParams(-1, -2).apply { topMargin = dp(12) })
+        content.addView(hint("记录方式"), LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(22) })
+        content.addView(modes, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10) })
         fun refreshModes() {
             listOf(coordinate, image).forEach { button ->
                 button.background = fieldBackground(if (button.isChecked) AppPalette.PRIMARY_CONTAINER else BG).apply {
@@ -189,21 +203,23 @@ object RecordingSetupOverlay {
             setTextColor(TEXT)
             setHintTextColor(SUBTLE)
             gravity = Gravity.CENTER_VERTICAL
-            minHeight = dp(32)
+            minHeight = dp(50)
             setPadding(dp(8), dp(3), dp(8), dp(3))
             background = fieldBackground()
         }
 
         fun addSizeRow(label: String, widthField: EditText, heightField: EditText) {
             val row = formRow(label).apply {
-                addView(widthField, LinearLayout.LayoutParams(0, -2, 1f))
-                addView(hint("×").apply {
+                val fields = LinearLayout(app).apply { orientation = LinearLayout.HORIZONTAL }
+                fields.addView(widthField, LinearLayout.LayoutParams(0, -2, 1f))
+                fields.addView(hint("×").apply {
                     gravity = Gravity.CENTER
                     importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
                 }, LinearLayout.LayoutParams(dp(20), -2))
-                addView(heightField, LinearLayout.LayoutParams(0, -2, 1f))
+                fields.addView(heightField, LinearLayout.LayoutParams(0, -2, 1f))
+                addView(fields)
             }
-            content.addView(row, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(5) })
+            content.addView(row, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(22) })
         }
 
         val cropWidth = sizeField("截图宽度", 100)
@@ -228,7 +244,7 @@ object RecordingSetupOverlay {
             text = "取消"
             textSize = 14f
             isAllCaps = false
-            backgroundTintList = ColorStateList.valueOf(AppPalette.SECONDARY_CONTAINER)
+            backgroundTintList = ColorStateList.valueOf(AppPalette.SURFACE_CONTAINER)
             setTextColor(TEXT)
             setOnClickListener { scope.cancel(); hide() }
         }
@@ -241,8 +257,11 @@ object RecordingSetupOverlay {
         }
         actions.addView(cancel, LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(6) })
         actions.addView(start, LinearLayout.LayoutParams(0, -2, 1.45f))
-        content.addView(actions, LinearLayout.LayoutParams(-1, -2))
-        card.addView(content)
+        actions.setPadding(dp(20), dp(12), dp(20), dp(20))
+        // 表单可独立滚动，开始按钮固定在底部，键盘弹起后仍可访问。
+        val formScroll = ScrollView(app).apply { addView(content) }
+        card.addView(formScroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        card.addView(actions, LinearLayout.LayoutParams(-1, dp(88)))
 
         start.setOnClickListener {
             val taskName = name.text.toString().trim()
@@ -290,8 +309,8 @@ object RecordingSetupOverlay {
             }
         }
         val params = WindowManager.LayoutParams(
-            minOf(dp(288), app.resources.displayMetrics.widthPixels - dp(24)).coerceAtLeast(1),
-            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.MATCH_PARENT,
             // minSdk 29：悬浮窗类型固定为 TYPE_APPLICATION_OVERLAY，TYPE_PHONE 已废弃
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
@@ -301,7 +320,7 @@ object RecordingSetupOverlay {
             softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
         }
         // Keep all fields reachable on small screens and while the keyboard is open.
-        val scroll = ScrollView(app).apply { addView(card) }
+        val scroll = card
         // The overlay must accept keyboard input for task name and recording dimensions.
         params.flags = params.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()
         windowManager = wm

@@ -1,23 +1,26 @@
 package com.forest.android.assistant.ui
 
-import android.widget.Toast
+import com.forest.android.assistant.ui.AppToast as Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.RoundedCornerShape
+import com.forest.android.assistant.ui.AppRoundedCornerShape as RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
@@ -28,7 +31,9 @@ import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import com.forest.android.assistant.R
@@ -44,7 +49,8 @@ import kotlinx.coroutines.withContext
 
 /** APP、Web 和悬浮窗共用 TaskGroups；每次修改携带 revision，避免覆盖其他端的新数据。 */
 @Composable
-fun TaskGroupsPage(lifecycle: Lifecycle, modifier: Modifier = Modifier, onSwitchToTasks: () -> Unit) {
+fun TaskGroupsPage(lifecycle: Lifecycle, modifier: Modifier = Modifier, onSwitchToTasks: () -> Unit,
+    createSignal: Int = 0, onOpenTask: (String) -> Unit = {}) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var groups by remember { mutableStateOf(emptyList<TaskGroup>()) }
@@ -101,6 +107,12 @@ fun TaskGroupsPage(lifecycle: Lifecycle, modifier: Modifier = Modifier, onSwitch
         }
     }
 
+    LaunchedEffect(createSignal) {
+        if (createSignal > 0) {
+            nameTarget = null
+            nameDialog = true
+        }
+    }
     LaunchedEffect(lifecycle) {
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             while (true) {
@@ -117,24 +129,29 @@ fun TaskGroupsPage(lifecycle: Lifecycle, modifier: Modifier = Modifier, onSwitch
     val selected = groups.find { it.id == selectedId }
     BackHandler(selected != null && !busy) { selectedId = null }
     val heading: @Composable () -> Unit = {
-        Row(Modifier.fillMaxWidth().padding(bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-            if (selected != null) IconButton(enabled = !busy, onClick = { selectedId = null }) { AppIcon(R.drawable.ic_back, "返回分组列表") }
-            Column(Modifier.weight(1f)) {
-                Text(selected?.name ?: "全部分组", style = MaterialTheme.typography.titleMedium)
-                Text(if (selected == null) "同一任务可加入多个分组" else "长按任务图标排序 · 左滑移出任务",
-                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            if (selected == null) IconButton(enabled = !busy, onClick = { nameTarget = null; nameDialog = true }) { AppIcon(R.drawable.ic_add, "新建分组") }
-            else {
+        Row(Modifier.fillMaxWidth().padding(bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (selected == null) {
+                SegmentedTabs(listOf("全部任务 ${taskNames.size}", "任务分组"), 1, Modifier.weight(1f)) {
+                    if (it == 0) onSwitchToTasks()
+                }
+            } else {
+                AppBackButton(enabled = !busy, onClick = { selectedId = null }, description = "返回分组列表")
+                Column(Modifier.weight(1f).padding(start = 11.dp)) {
+                    Text(selected.name, fontSize = 18.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text("长按任务图标排序 · 左滑移出任务", fontSize = 10.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
                 IconButton(enabled = !busy, onClick = { membersTarget = selected }) { AppIcon(R.drawable.ic_add, "添加任务") }
                 IconButton(enabled = !busy, onClick = { actionsExpanded = true }) { AppIcon(R.drawable.ic_more, "分组操作") }
             }
-            if (selected == null) IconButton(enabled = !busy, onClick = onSwitchToTasks) { AppIcon(R.drawable.ic_switch_lists, "切换到任务列表") }
         }
     }
     Column(modifier.fillMaxWidth()) {
         if (selected == null) {
-            LazyColumn(Modifier.fillMaxWidth().weight(1f), verticalArrangement = Arrangement.spacedBy(0.dp), contentPadding = PaddingValues(18.dp)) {
+            LazyColumn(Modifier.fillMaxWidth().weight(1f), verticalArrangement = Arrangement.spacedBy(0.dp),
+                contentPadding = PaddingValues(start = 18.dp, top = 10.dp, end = 18.dp, bottom = 18.dp)) {
+                // 与全部任务页共用主视觉，分组切换后仍显示首页卡片。
+                item { Box(Modifier.padding(bottom = 16.dp)) { TaskWorkspaceHero() } }
                 item { heading() }
                 error?.let { message -> item { Text(message, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(bottom = 8.dp)) } }
                 if (busy) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
@@ -144,24 +161,71 @@ fun TaskGroupsPage(lifecycle: Lifecycle, modifier: Modifier = Modifier, onSwitch
                         R.drawable.ic_nav_tasks, "新建分组") { nameTarget = null; nameDialog = true }
                 }
                 itemsIndexed(groups, key = { _, group -> group.id }) { index, group ->
-                    Surface(Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.surface,
-                        shape = RoundedCornerShape(topStart = if (index == 0) 18.dp else 0.dp,
-                            topEnd = if (index == 0) 18.dp else 0.dp,
-                            bottomStart = if (index == groups.lastIndex) 18.dp else 0.dp,
-                            bottomEnd = if (index == groups.lastIndex) 18.dp else 0.dp)) {
-                        Column {
-                            DesignRow(group.name, "${group.taskNames.size} 个任务", R.drawable.ic_code, enabled = !busy) { selectedId = group.id }
-                            if (index < groups.lastIndex) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    // 分组以独立卡片展示，显示成员数量与执行顺序预览。
+                    Surface(Modifier.fillMaxWidth().padding(bottom = 12.dp).clip(RoundedCornerShape(19.dp))
+                        .clickable(enabled = !busy) { selectedId = group.id },
+                        color = MaterialTheme.colorScheme.surface, shape = RoundedCornerShape(19.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
+                        // 名称、说明和任务数量共用首行区域，成员预览缩小后将卡片高度压缩约一半。
+                        Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                IconTile(R.drawable.ic_folder, blue = true)
+                                Column(Modifier.weight(1f).padding(start = 10.dp, end = 8.dp)) {
+                                    Text(group.name, fontSize = 16.sp, lineHeight = 20.sp, fontWeight = FontWeight.SemiBold,
+                                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    Text(if (group.taskNames.isEmpty()) "添加任务后按顺序执行"
+                                        else "按顺序执行 · 长按任务图标调整顺序",
+                                        fontSize = 10.sp, lineHeight = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(top = 3.dp), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
+                                Text("${group.taskNames.size} 个任务", fontSize = 10.sp, lineHeight = 14.sp,
+                                    color = Color(AppPalette.ON_SURFACE_VARIANT))
+                                AppIcon(R.drawable.ic_arrow, modifier = Modifier.padding(start = 6.dp).size(14.dp))
+                            }
+                            // 叠放的成员图标预览与保存的组内顺序一致。
+                            if (group.taskNames.isNotEmpty()) Row(Modifier.padding(start = 49.dp, top = 6.dp),
+                                horizontalArrangement = Arrangement.spacedBy((-5).dp)) {
+                                group.taskNames.take(3).forEach {
+                                    Surface(shape = RoundedCornerShape(6.dp), color = MaterialTheme.colorScheme.surface,
+                                        border = androidx.compose.foundation.BorderStroke(2.dp, MaterialTheme.colorScheme.surface)) {
+                                        Box(Modifier.size(24.dp), contentAlignment = Alignment.Center) { AppIcon(R.drawable.ic_code, modifier = Modifier.size(14.dp)) }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
+                if (groups.isNotEmpty()) item {
+                    // 分组说明改为普通小字，不再占用浅色提示块。
+                    Text("同一任务可以加入多个分组。分组顺序会同步到 Web 和悬浮任务面板。",
+                        Modifier.fillMaxWidth().padding(horizontal = 2.dp, vertical = 2.dp),
+                        fontSize = 10.sp, lineHeight = 15.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
             }
         } else {
-            Column(Modifier.fillMaxSize().padding(start = 18.dp, end = 18.dp, top = 18.dp)) {
-                heading()
+            // 系统授权必须由 Activity 打开，Compose 提供的是通用 Context。
+            // 分组详情已移除悬浮执行入口，执行与授权统一从悬浮面板及权限页进入。
+            DetailPage("分组详情", "任务空间 / 分组", { if (!busy) selectedId = null }, scrollable = false,
+                compactBackFrame = true,
+                actions = {
+                    IconButton(enabled = !busy, onClick = { membersTarget = selected }) { AppIcon(R.drawable.ic_add, "添加任务") }
+                    IconButton(enabled = !busy, onClick = { actionsExpanded = true }) { AppIcon(R.drawable.ic_more, "分组操作") }
+                }) {
+                Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    IconTile(R.drawable.ic_folder)
+                    Column(Modifier.padding(start = 15.dp)) {
+                        Text(selected.name, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+                        Text("${selected.taskNames.size} 个任务 · 按列表顺序执行", fontSize = 10.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 7.dp))
+                    }
+                }
+                // 与任务列表底部一致，改用普通小字说明拖动和左滑操作。
+                Text("长按任务图标排序 · 左滑移出任务", Modifier.fillMaxWidth().padding(horizontal = 2.dp, vertical = 2.dp),
+                    fontSize = 10.sp, lineHeight = 15.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                SectionLabel("执行顺序 · 更改自动保存", compact = true)
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(bottom = 8.dp)) }
                 if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
-                GroupMembersList(selected, busy, Modifier.weight(1f), onAdd = { if (!busy) membersTarget = selected }) { original, members ->
+                GroupMembersList(selected, busy, Modifier.weight(1f), onAdd = { if (!busy) membersTarget = selected }, onOpenTask = onOpenTask) { original, members ->
                     mutate("分组已保存") {
                         TaskGroups.update(context, original.id, original.revision, original.name, members).id
                     }
@@ -169,19 +233,19 @@ fun TaskGroupsPage(lifecycle: Lifecycle, modifier: Modifier = Modifier, onSwitch
             }
         }
     }
+    // 分组操作改用底部操作面板，与任务操作和详情页保持同一套圆角、字号与行高。
     if (actionsExpanded && selected != null) {
-        AlertDialog(containerColor = MaterialTheme.colorScheme.surface,
-            onDismissRequest = { actionsExpanded = false }, title = { Text("分组操作") },
-            text = {
-                Column(Modifier.verticalScroll(rememberScrollState())) {
-                    DesignRow("重命名分组", "", R.drawable.ic_code, enabled = !busy) {
-                        actionsExpanded = false; nameTarget = selected; nameDialog = true
-                    }
-                    DesignRow("删除分组", "", R.drawable.ic_stop, enabled = !busy) {
-                        actionsExpanded = false; deleteTarget = selected
-                    }
+        ActionSheet("分组操作", onDismiss = { actionsExpanded = false }) {
+            SectionCard {
+                DesignRow("重命名分组", "修改分组名称", R.drawable.ic_edit, enabled = !busy, compact = true) {
+                    actionsExpanded = false; nameTarget = selected; nameDialog = true
                 }
-            }, confirmButton = { TextButton(onClick = { actionsExpanded = false }) { Text("关闭") } })
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                DesignRow("删除分组", "任务本身会保留", R.drawable.ic_stop, enabled = !busy, compact = true) {
+                    actionsExpanded = false; deleteTarget = selected
+                }
+            }
+        }
     }
     if (nameDialog) {
         val target = nameTarget
@@ -189,18 +253,17 @@ fun TaskGroupsPage(lifecycle: Lifecycle, modifier: Modifier = Modifier, onSwitch
         val trimmed = name.trim()
         val invalid = trimmed.isBlank() || trimmed.length > 50 || trimmed.any(Char::isISOControl) ||
             groups.any { it.id != target?.id && it.name == trimmed }
-        AlertDialog(containerColor = MaterialTheme.colorScheme.surface, onDismissRequest = { if (!busy) nameDialog = false },
-            title = { Text(if (target == null) "新建分组" else "重命名分组") },
-            text = { OutlinedTextField(name, { name = it }, modifier = Modifier.fillMaxWidth(), enabled = !busy, singleLine = true,
-                label = { Text("分组名称") }, isError = invalid,
-                supportingText = { Text(if (invalid) "名称非法或与现有分组重复" else if (target == null) "使用易于辨认的名称，如：每日任务" else "组内任务与执行顺序会一同保留") }) },
-            confirmButton = { TextButton(enabled = !busy && !invalid, onClick = {
+        DetailPage(if (target == null) "新建分组" else "重命名分组", "把有关的任务放在一起", { if (!busy) nameDialog = false },
+            footer = { PrimaryAction(if (busy) "正在保存…" else if (target == null) "创建分组" else "保存分组", !busy && !invalid) {
                 mutate(if (target == null) "分组已创建" else "分组已重命名") {
                     if (target == null) TaskGroups.create(context, name, emptyList()).id
                     else TaskGroups.update(context, target.id, target.revision, name, target.taskNames).id
                 }
-            }) { Text(if (busy) "正在保存…" else if (target == null) "创建" else "保存") } },
-            dismissButton = { TextButton(enabled = !busy, onClick = { nameDialog = false }) { Text("取消") } })
+            } }) {
+            DesignField("分组名称", name, { name = it }, "例如：早晨例行、晚间整理。最多 50 个字符。",
+                error = if (trimmed.isNotEmpty() && invalid) "名称非法或与现有分组重复" else null)
+            InfoNotice(if (target == null) "先给分组起个名字，再添加需要依次执行的任务。" else "组内任务与执行顺序会一同保留。")
+        }
     }
     membersTarget?.let { target ->
         val available = taskNames.filterNot { it in target.taskNames }
@@ -252,8 +315,7 @@ private fun GroupTaskPicker(group: TaskGroup, available: List<String>, busy: Boo
             }
         }) {
         if (available.isEmpty()) {
-            Text("所有任务均已在当前分组中。", style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            EmptyState("所有任务都已在分组中", "你可以返回查看执行顺序。", R.drawable.ic_check)
         } else {
             SectionLabel("选择任务")
             WorkCard(Modifier.fillMaxWidth()) {
@@ -273,7 +335,7 @@ private fun GroupTaskPicker(group: TaskGroup, available: List<String>, busy: Boo
 /** 拖动期间仅调整预览，松手后一次保存；取消手势恢复原顺序。 */
 @Composable
 private fun GroupMembersList(group: TaskGroup, busy: Boolean, modifier: Modifier, onAdd: () -> Unit,
-    onSave: (TaskGroup, List<String>) -> Unit) {
+    onOpenTask: (String) -> Unit, onSave: (TaskGroup, List<String>) -> Unit) {
     val listState = rememberLazyListState()
     var draft by remember(group.id) { mutableStateOf<List<String>?>(null) }
     var dragging by remember(group.id) { mutableStateOf<String?>(null) }
@@ -339,7 +401,7 @@ private fun GroupMembersList(group: TaskGroup, busy: Boolean, modifier: Modifier
                                 }, contentAlignment = Alignment.Center) {
                                 IconTile(R.drawable.ic_code, blue = true)
                             }
-                            Column(Modifier.weight(1f).padding(horizontal = 12.dp, vertical = 12.dp)) {
+                            Column(Modifier.weight(1f).clickable(enabled = !busy) { onOpenTask(name) }.padding(horizontal = 12.dp, vertical = 12.dp)) {
                                 Text(name, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall)
                                 Text("第 ${index + 1} 个执行", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }

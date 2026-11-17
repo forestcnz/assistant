@@ -21,17 +21,18 @@ object JsHighlighter {
     private const val MAX_CACHED_TEXT_CHARS = 64 * 1024
 
     // 与编辑器深绿灰工作区配套，保证细小代码文本的对比度。
-    private val COLOR_KEYWORD = Color(0xFFFFAB7E)
-    private val COLOR_STRING = Color(0xFFA6D3B7)
-    private val COLOR_COMMENT = Color(0xFF90A69E)
-    private val COLOR_NUMBER = Color(0xFFECC58F)
-    private val COLOR_API = Color(0xFFB9D7EF)
+    // 方案二改用深蓝灰工作区，高亮色同步换成雾蓝与沙色系。
+    private val COLOR_KEYWORD = Color(0xFFB9D7EF)
+    private val COLOR_STRING = Color(0xFFAFCFB9)
+    private val COLOR_COMMENT = Color(0xFF879BB3)
+    private val COLOR_NUMBER = Color(0xFFE7D7B7)
+    private val COLOR_API = Color(0xFFA9C7EB)
     private val STYLE_KEYWORD = SpanStyle(color = COLOR_KEYWORD, fontWeight = FontWeight.Medium)
     private val STYLE_STRING = SpanStyle(color = COLOR_STRING)
     private val STYLE_COMMENT = SpanStyle(color = COLOR_COMMENT)
     private val STYLE_NUMBER = SpanStyle(color = COLOR_NUMBER)
     private val STYLE_API = SpanStyle(color = COLOR_API)
-    private val STYLE_ERROR_LINE = SpanStyle(background = Color(0x665C292A))
+    private val STYLE_ERROR_LINE = SpanStyle(background = Color(0x66AE4647))
 
     private val KEYWORDS = setOf(
         "var", "let", "const", "function", "return", "if", "else", "for", "while", "do",

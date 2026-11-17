@@ -125,15 +125,25 @@ internal class AppUpdateModel(application: Application) : AndroidViewModel(appli
         mutableState.update { it.copy(notice = message) }
     }
 
-    fun startDownload() {
+    fun startDownload() = downloadPackage(forceFull = false)
+
+    /** 中断后可主动改用完整包，清理旧下载后仍沿用相同校验流程。 */
+    fun downloadFullPackage() = downloadPackage(forceFull = true)
+
+    private fun downloadPackage(forceFull: Boolean) {
         viewModelScope.launch {
             downloadMutex.withLock {
                 val current = state.value
-                if (current.downloadPhase != DownloadPhase.IDLE || current.checking) return@withLock
+                if (current.checking || (current.downloadPhase != DownloadPhase.IDLE &&
+                        !(forceFull && current.downloadPhase == DownloadPhase.INTERRUPTED))) return@withLock
                 val manifest = current.availableUpdate ?: return@withLock
                 showDownload(DownloadPhase.STARTING)
                 try {
-                    val download = withContext(Dispatchers.IO) { downloads.start(manifest, current.useFullPackage) }
+                    val download = withContext(Dispatchers.IO) {
+                        if (forceFull) currentDownload?.let { downloads.clear(it) }
+                        downloads.start(manifest, forceFull || current.useFullPackage)
+                    }
+                    if (forceFull) mutableState.update { it.copy(useFullPackage = true) }
                     currentDownload = download
                     enqueue(download)
                 } catch (error: CancellationException) {

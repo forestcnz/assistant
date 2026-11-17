@@ -61,6 +61,8 @@
             android:theme="@android:style/Theme.Translucent.NoTitleBar" />
 
         <!-- 内置脚本编辑器 -->
+        <!-- 录制停止后核对摘要，确认保存或放弃。 -->
+        <activity android:name=".RecordingSummaryActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
         <activity
             android:name=".ScriptEditorActivity"
             android:exported="false"

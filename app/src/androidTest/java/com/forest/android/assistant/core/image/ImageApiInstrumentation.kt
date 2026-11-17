@@ -30,6 +30,7 @@ class ImageApiInstrumentation : Instrumentation() {
     private var onlyNewApi = false
     private var onlyShape = false
     private var onlyFlowConversion = false
+    private var onlyUiRedesign = false
 
     override fun onCreate(arguments: Bundle?) {
         super.onCreate(arguments)
@@ -40,6 +41,7 @@ class ImageApiInstrumentation : Instrumentation() {
         onlyNewApi = arguments?.getString("onlyNewApi") == "true"
         onlyShape = arguments?.getString("onlyShape") == "true"
         onlyFlowConversion = arguments?.getString("onlyFlowConversion") == "true"
+        onlyUiRedesign = arguments?.getString("onlyUiRedesign") == "true"
         Log.i(TAG, "Instrumentation onCreate; starting test thread")
         start()
     }
@@ -50,6 +52,13 @@ class ImageApiInstrumentation : Instrumentation() {
         Log.i(TAG, "Instrumentation base onStart returned")
         val result = Bundle()
         try {
+            if (onlyUiRedesign) {
+                report("UI redesign file replacement, recording review and queue stop")
+                UiRedesignChecks.run(this)
+                result.putString("stream", "UI 修复：模板覆盖、历史恢复、录制保存边界和队列停止回归通过")
+                finish(Activity.RESULT_OK, result)
+                return
+            }
             if (onlyShape) {
                 report("Shape matching across image APIs")
                 testShapeMatchingWithScaledAndInvertedBitmap()

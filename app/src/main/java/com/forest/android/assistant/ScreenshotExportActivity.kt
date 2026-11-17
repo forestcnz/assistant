@@ -1,7 +1,7 @@
 package com.forest.android.assistant
 
 import android.os.Bundle
-import android.widget.Toast
+import com.forest.android.assistant.ui.AppToast as Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.lifecycle.lifecycleScope

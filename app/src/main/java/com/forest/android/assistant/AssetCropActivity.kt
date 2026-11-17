@@ -31,6 +31,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -90,12 +91,12 @@ class AssetCropActivity : ComponentActivity() {
         val valid = preview != null && region?.isValid(preview.width, preview.height) == true
         Scaffold(containerColor = MaterialTheme.colorScheme.background,
             topBar = {
-                TopAppBar(colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface),
+                TopAppBar(colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
                     title = { Column {
                         Text("裁剪图片", style = MaterialTheme.typography.titleMedium)
                         Text(imageName, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     } },
-                    navigationIcon = { IconButton(onClick = { finish() }, enabled = !model.saving) { AppIcon(R.drawable.ic_back, "返回") } },
+                    navigationIcon = { AppBackButton(onClick = { finish() }, enabled = !model.saving) },
                     actions = { TextButton(enabled = preview != null && !model.saving, onClick = { model.region = null }) { Text("重选") } })
             },
             bottomBar = {
@@ -115,41 +116,32 @@ class AssetCropActivity : ComponentActivity() {
                     Text("拖动选区可移动，拖动四角可调整大小。", style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Box(Modifier.fillMaxWidth().height(imageHeight).clip(MaterialTheme.shapes.medium)
-                        .background(Color(AppPalette.INVERSE_SURFACE)), contentAlignment = Alignment.Center) {
+                         .checkerboardBackground(), contentAlignment = Alignment.Center) {
                         if (preview == null) Column(Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                             if (model.error == null) CircularProgressIndicator()
-                            Text(model.error ?: "正在读取图片…", color = Color.White, modifier = Modifier.padding(top = 12.dp))
+                             Text(model.error ?: "正在读取图片…", color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.padding(top = 12.dp))
                             if (model.error != null) TextButton(onClick = { model.load(taskName, imageName) }) { Text("重试") }
                         } else CropCanvas(preview, region, !model.saving) { model.region = it }
                     }
                     if (preview != null) {
-                        WorkCard(Modifier.fillMaxWidth()) {
-                            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                    Text("当前选区", style = MaterialTheme.typography.titleSmall)
-                                    StatusBadge(if (valid) "可保存" else "待框选", warning = !valid)
-                                }
-                                Text(if (valid) "X ${region!!.left} · Y ${region.top} · 宽 ${region.width} · 高 ${region.height} px"
-                                    else "在图片上拖动，选择需要保留的区域", style = MaterialTheme.typography.bodySmall)
-                                Text("原图 ${preview.width} × ${preview.height} px", style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                        }
+                        Text("原图 ${preview.width} × ${preview.height} px", fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        SectionLabel("当前选区 · 以原图像素为单位")
+                        CropValues(region)
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             OutlinedButton(enabled = !model.saving, onClick = { model.region = CropRegion(0, 0, preview.width, preview.height) },
-                                shape = MaterialTheme.shapes.small) { Text("全选") }
+                                shape = MaterialTheme.shapes.small) { Text("选择整张图片") }
                             OutlinedButton(enabled = valid && !model.saving, onClick = { exactDialog = true },
                                 shape = MaterialTheme.shapes.small) { Text("精确调整") }
                         }
-                        Text("保存后替换当前素材，原图移入历史素材；脚本引用保持原路径。",
-                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        InfoNotice("保存后替换当前素材，原图移入历史素材；脚本引用保持原路径。")
                         model.error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
                     }
                 }
             }
         }
         if (exactDialog && preview != null && region != null) {
-            ExactRegionDialog(region, preview.width, preview.height, onDismiss = { exactDialog = false },
+            ExactRegionPage(region, preview, onDismiss = { exactDialog = false },
                 onApply = { model.region = it; exactDialog = false })
         }
     }
@@ -216,11 +208,10 @@ class AssetCropModel(application: Application) : AndroidViewModel(application) {
 }
 
 @Composable
-private fun CropCanvas(preview: AssetCropper.Preview, region: CropRegion?, enabled: Boolean, onChange: (CropRegion?) -> Unit) {
+internal fun CropCanvas(preview: AssetCropper.Preview, region: CropRegion?, enabled: Boolean, onChange: (CropRegion?) -> Unit) {
     val currentRegion by rememberUpdatedState(region)
     val updateRegion by rememberUpdatedState(onChange)
-    Image(preview.bitmap.asImageBitmap(), "待裁剪图片", contentScale = ContentScale.FillBounds,
-        modifier = Modifier.fillMaxSize().wrapContentSize(Alignment.Center).aspectRatio(preview.width.toFloat() / preview.height))
+    Image(preview.bitmap.asImageBitmap(), "待裁剪图片", contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize())
     Canvas(Modifier.fillMaxSize().pointerInput(preview, enabled) {
         if (!enabled) return@pointerInput
         val fit = CropImageFit(preview.width, preview.height, size.width.toFloat(), size.height.toFloat())
@@ -277,12 +268,12 @@ private fun CropCanvas(preview: AssetCropper.Preview, region: CropRegion?, enabl
         val top = fit.top + selected.top * fit.scale
         val right = fit.left + selected.right * fit.scale
         val bottom = fit.top + selected.bottom * fit.scale
-        val dim = Color(0x99000000)
+        val dim = Color(0x3514243B)
         drawRect(dim, Offset.Zero, Size(size.width, top))
         drawRect(dim, Offset(0f, bottom), Size(size.width, size.height - bottom))
         drawRect(dim, Offset(0f, top), Size(left, bottom - top))
         drawRect(dim, Offset(right, top), Size(size.width - right, bottom - top))
-        drawRect(Color(AppPalette.INVERSE_ACCENT), Offset(left, top), Size(right - left, bottom - top), style = Stroke(2.dp.toPx()))
+        drawRect(Color(AppPalette.PRIMARY), Offset(left, top), Size(right - left, bottom - top), style = Stroke(2.dp.toPx()))
         for (step in 1..2) {
             val x = left + (right - left) * step / 3f
             val y = top + (bottom - top) * step / 3f
@@ -290,14 +281,17 @@ private fun CropCanvas(preview: AssetCropper.Preview, region: CropRegion?, enabl
             drawLine(Color.White.copy(alpha = 0.4f), Offset(left, y), Offset(right, y), 1.dp.toPx())
         }
         listOf(Offset(left, top), Offset(right, top), Offset(left, bottom), Offset(right, bottom)).forEach {
-            drawCircle(Color(AppPalette.INVERSE_ACCENT), 6.dp.toPx(), it)
+            drawCircle(Color(AppPalette.PRIMARY), 6.dp.toPx(), it)
             drawCircle(Color.White, 6.dp.toPx(), it, style = Stroke(1.dp.toPx()))
         }
     }
 }
 
 @Composable
-private fun ExactRegionDialog(region: CropRegion, imageWidth: Int, imageHeight: Int, onDismiss: () -> Unit, onApply: (CropRegion) -> Unit) {
+internal fun ExactRegionPage(region: CropRegion, preview: AssetCropper.Preview, minimumSize: Int = 1,
+    onDismiss: () -> Unit, onApply: (CropRegion) -> Unit) {
+    val imageWidth = preview.width
+    val imageHeight = preview.height
     var x by rememberSaveable { mutableStateOf(region.left.toString()) }
     var y by rememberSaveable { mutableStateOf(region.top.toString()) }
     var width by rememberSaveable { mutableStateOf(region.width.toString()) }
@@ -305,10 +299,13 @@ private fun ExactRegionDialog(region: CropRegion, imageWidth: Int, imageHeight: 
     val numbers = listOf(x, y, width, height).map { it.toIntOrNull() }
     val parsed = if (numbers.all { it != null && it in 0..maxOf(imageWidth, imageHeight) })
         CropRegion(numbers[0]!!, numbers[1]!!, numbers[0]!! + numbers[2]!!, numbers[1]!! + numbers[3]!!) else null
-    val valid = parsed?.isValid(imageWidth, imageHeight) == true
-    AlertDialog(containerColor = MaterialTheme.colorScheme.surface, onDismissRequest = onDismiss, title = { Text("精确调整选区") }, text = {
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("以原图像素为单位", style = MaterialTheme.typography.bodySmall)
+    val valid = parsed?.isValid(imageWidth, imageHeight) == true && parsed.width >= minimumSize && parsed.height >= minimumSize
+    DetailPage("精确调整", "以原图像素为单位", onDismiss, footer = {
+        PrimaryAction("应用选区", valid) { onApply(parsed!!) }
+    }, compact = true) {
+        InfoNotice("原图尺寸 $imageWidth × $imageHeight px，选区必须完整位于原图范围内。")
+        // 四个像素字段保持两列，统一收紧行距和输入框高度。
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 PixelField("X", x, { x = it }, Modifier.weight(1f))
                 PixelField("Y", y, { y = it }, Modifier.weight(1f))
@@ -317,15 +314,30 @@ private fun ExactRegionDialog(region: CropRegion, imageWidth: Int, imageHeight: 
                 PixelField("宽度", width, { width = it }, Modifier.weight(1f))
                 PixelField("高度", height, { height = it }, Modifier.weight(1f))
             }
-            if (!valid) Text("选区需在原图范围内，宽高至少为 1 px", color = MaterialTheme.colorScheme.error)
         }
-    }, confirmButton = {
-        TextButton(enabled = valid, onClick = { onApply(parsed!!) }) { Text("应用") }
-    }, dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } })
+        if (!valid) InfoNotice("选区需在原图范围内，宽高至少为 $minimumSize px", error = true)
+        Box(Modifier.fillMaxWidth().height(260.dp).clip(MaterialTheme.shapes.medium).checkerboardBackground()) {
+            CropCanvas(preview, parsed?.takeIf { valid }, false) { }
+        }
+    }
 }
 
 @Composable
 private fun PixelField(label: String, value: String, onChange: (String) -> Unit, modifier: Modifier) {
-    OutlinedTextField(value = value, onValueChange = onChange, label = { Text(label) }, singleLine = true,
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = modifier)
+    DesignField(label, value, onChange, keyboardType = KeyboardType.Number, modifier = modifier, compact = true)
+}
+
+/** 裁剪和模板工具共用四项读数，未选择时保留稳定布局。 */
+@Composable
+internal fun CropValues(region: CropRegion?) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        listOf("起点 X" to region?.left, "起点 Y" to region?.top, "宽度" to region?.width, "高度" to region?.height).forEach { (label, value) ->
+            Surface(modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.surface, shape = MaterialTheme.shapes.small) {
+                Column(Modifier.padding(horizontal = 10.dp, vertical = 15.dp)) {
+                    Text(label, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(value?.toString() ?: "—", fontSize = 16.sp, modifier = Modifier.padding(top = 7.dp))
+                }
+            }
+        }
+    }
 }

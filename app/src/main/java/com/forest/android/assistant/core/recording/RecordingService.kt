@@ -14,7 +14,7 @@ import android.os.Build
 import android.os.IBinder
 import android.os.SystemClock
 import android.view.WindowManager
-import android.widget.Toast
+import com.forest.android.assistant.ui.AppToast as Toast
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
@@ -45,6 +45,8 @@ class RecordingService : Service() {
     private var rotation = -1
     private var persistenceFailed = false
     private var lastMessage = ""
+    private var pendingPersistence: kotlinx.coroutines.Job? = null
+    private var reviewTaskToOpen: String? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -196,7 +198,7 @@ class RecordingService : Service() {
     private fun persistPending() {
         val current = task ?: return
         if (current.steps.isEmpty()) return
-        scope.launch {
+        pendingPersistence = scope.launch {
             try {
                 withContext(Dispatchers.IO) { current.persist() }
                 persistenceFailed = false
@@ -235,12 +237,21 @@ class RecordingService : Service() {
         scope.launch {
             try {
                 val current = task
-                withContext(Dispatchers.IO) { current?.persist(); current?.discardIfEmpty() }
+                // 等待暂停时的落盘完成，避免摘要页改名后旧任务仍在写原目录。
+                pendingPersistence?.join()
+                withContext(Dispatchers.IO) {
+                    current?.persist(); current?.discardIfEmpty()
+                    if (current != null && current.steps.isNotEmpty()) RecordingReview.prepare(this@RecordingService, current)
+                }
                 val message = if (current?.steps.isNullOrEmpty()) "录制结束：没有操作，未生成空任务"
-                    else "已生成任务「${current?.name}」，共 ${current?.steps?.size} 步"
+                    else "录制已完成，共 ${current.steps.size} 步，请确认保存"
                 Toast.makeText(this@RecordingService, message, Toast.LENGTH_LONG).show()
                 ScriptRunner.appendLog(message)
                 // 完成后停留在当前应用，不再跳回 App 内；任务可在 App 任务列表查看
+                // 新版完成流程进入独立摘要页；快照已落盘，停止服务后才允许改名和放弃。
+                if (current != null && current.steps.isNotEmpty()) {
+                    reviewTaskToOpen = current.name
+                }
                 stopSelf()
             } catch (e: Exception) {
                 finishRequested = false
@@ -285,7 +296,7 @@ class RecordingService : Service() {
             .setContentTitle("操作录制已开启")
             .setContentText("使用悬浮条开始、暂停或完成录制")
             .setOngoing(true)
-            .addAction(android.R.drawable.ic_menu_save, "完成并保存", finish).build()
+            .addAction(android.R.drawable.ic_menu_save, "完成录制", finish).build()
         ServiceCompat.startForeground(this, 1004, notification,
             if (Build.VERSION.SDK_INT >= 34) ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE else 0)
     }
@@ -295,6 +306,12 @@ class RecordingService : Service() {
         scope.cancel()
         task?.discardIfEmpty()
         active = false
+        reviewTaskToOpen?.let { name ->
+            runCatching {
+                startActivity(Intent(this, com.forest.android.assistant.RecordingSummaryActivity::class.java)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra("task_name", name))
+            }.onFailure { notifyError("可返回任务详情，继续完成录制保存") }
+        }
         ScriptRunner.ensureLauncher(this)
         super.onDestroy()
     }
