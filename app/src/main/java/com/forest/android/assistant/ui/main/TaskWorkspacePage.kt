@@ -50,13 +50,13 @@ internal fun MainActivity.TaskWorkspace(runState: ScriptRunner.RunState) {
     Column(Modifier.fillMaxSize()) {
         PageHeading("任务空间", "雕雕助手 · AUTOMATION COMPANION", compact = true, actions = {
             if (!groupsSelected) {
-                Box(Modifier.size(37.dp).border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp))
+                Box(Modifier.size(32.dp).border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp))
                     .clickable { showTransferDialog = true }, contentAlignment = Alignment.Center) {
                     AppIcon(R.drawable.ic_more, "任务工具", Modifier.size(19.dp))
                 }
             } else {
                 // 分组页标题栏的「＋」用于新建分组，与设计稿一致。
-                Box(Modifier.size(37.dp).border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp))
+                Box(Modifier.size(32.dp).border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp))
                     .clickable { groupCreateSignal++ }, contentAlignment = Alignment.Center) {
                     AppIcon(R.drawable.ic_add, "新建分组", Modifier.size(19.dp))
                 }
@@ -147,7 +147,7 @@ private fun MainActivity.TaskListSection(runState: ScriptRunner.RunState, modifi
                         if (it == 1) onSwitchToGroups()
                     }
                     Spacer(Modifier.width(10.dp))
-                    Box(Modifier.size(44.dp).border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp))
+                    Box(Modifier.size(32.dp).border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp))
                         .clickable { showCreateDialog = true }, contentAlignment = Alignment.Center) {
                         AppIcon(R.drawable.ic_add, "新建任务", Modifier.size(20.dp))
                     }

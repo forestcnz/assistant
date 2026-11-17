@@ -62,21 +62,27 @@ internal fun SwipeDeleteTask(
         },
         backgroundContent = {
             // 左滑操作使用暖白底和小圆角图标块，与任务列表的配色、字号和间距保持一致。
-            Box(
-                Modifier.fillMaxSize().background(Color(AppPalette.SURFACE_CONTAINER_LOW))
-                    .padding(horizontal = 8.dp, vertical = 6.dp),
-                contentAlignment = Alignment.CenterEnd
-            ) {
-                Surface(Modifier.width(80.dp).fillMaxHeight(), shape = RoundedCornerShape(8.dp),
-                    color = MaterialTheme.colorScheme.surface, contentColor = MaterialTheme.colorScheme.error,
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
-                    Column(Modifier.padding(4.dp), horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(3.dp, Alignment.CenterVertically)) {
-                        AppIcon(R.drawable.ic_clear_tasks, modifier = Modifier.size(18.dp))
-                        Text("删除任务", fontSize = 11.sp, lineHeight = 14.sp, fontWeight = FontWeight.Medium)
-                    }
-                }
-            }
+            SwipeDestructiveAction("删除任务", R.drawable.ic_clear_tasks)
         }
     ) { content() }
+}
+
+/** 删除与移出共用同一左滑操作样式，仅文案不同。 */
+@Composable
+internal fun SwipeDestructiveAction(label: String, icon: Int) {
+    Box(
+        Modifier.fillMaxSize().background(Color(AppPalette.SURFACE_CONTAINER_LOW))
+            .padding(horizontal = 8.dp, vertical = 6.dp),
+        contentAlignment = Alignment.CenterEnd
+    ) {
+        Surface(Modifier.width(80.dp).fillMaxHeight(), shape = RoundedCornerShape(8.dp),
+            color = MaterialTheme.colorScheme.surface, contentColor = MaterialTheme.colorScheme.error,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
+            Column(Modifier.padding(4.dp), horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(3.dp, Alignment.CenterVertically)) {
+                AppIcon(icon, modifier = Modifier.size(18.dp))
+                Text(label, fontSize = 11.sp, lineHeight = 14.sp, fontWeight = FontWeight.Medium)
+            }
+        }
+    }
 }

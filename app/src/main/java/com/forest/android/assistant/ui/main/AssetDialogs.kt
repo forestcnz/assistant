@@ -87,9 +87,6 @@ internal fun MainActivity.AssetsDialog(
             // 按要求移除素材工具中的“截取模板”入口，仅保留历史素材。
             DesignRow("历史素材", "查看裁剪前保留的原图", R.drawable.ic_history, compact = true, onClick = onHistory)
         }
-        Text("脚本可使用 images/图片名称.png 引用素材。",
-            Modifier.fillMaxWidth().background(Color(AppPalette.PRIMARY_CONTAINER), RoundedCornerShape(12.dp)).padding(14.dp),
-            fontSize = 10.sp, lineHeight = 19.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 

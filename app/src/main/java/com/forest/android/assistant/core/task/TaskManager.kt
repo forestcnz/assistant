@@ -43,6 +43,9 @@ object TaskManager {
         fun hasDesignSize(): Boolean = designWidth > 0 && designHeight > 0
     }
 
+    /** 待确认录制的标记文件：带此标记的任务在确认保存前不进入任务列表。 */
+    const val PENDING_REVIEW_MARKER = "recording-review.json"
+
     /** 任务根目录（应用专属外部存储，无需权限） */
     fun tasksRoot(context: Context): File {
         val base = context.getExternalFilesDir(null) ?: context.filesDir
@@ -63,9 +66,12 @@ object TaskManager {
     internal fun availableTaskNames(context: Context): Set<String> =
         taskNamesIn(tasksRoot(context)).toSet()
 
-    /** 扫描任务根目录下包含 task.js 的任务目录；已被删除标记的临时目录不计入 */
+    /** 扫描任务根目录下包含 task.js 的任务目录；删除标记和待确认录制不计入 */
     private fun taskNamesIn(root: File): List<String> =
-        root.listFiles { f -> f.isDirectory && !f.name.startsWith(".deleted-") && File(f, "task.js").isFile }
+        root.listFiles { f ->
+            f.isDirectory && !f.name.startsWith(".deleted-") &&
+                File(f, "task.js").isFile && !File(f, PENDING_REVIEW_MARKER).isFile
+        }
             ?.map { it.name }
             ?: emptyList()
 
@@ -325,7 +331,7 @@ object TaskManager {
                     mode = TaskLoop.Mode.fromKey(loop?.optString("mode", "count") ?: "count"),
                     count = loop?.optInt("count", 1)?.coerceAtLeast(1) ?: 1,
                     durationSec = loop?.optLong("durationSec", 60L)?.coerceIn(1L, MAX_DURATION_SEC) ?: 60L,
-                    intervalSec = loop?.optInt("interval", 0)?.coerceAtLeast(0) ?: 0
+                    intervalSec = loop?.optInt("interval", 3)?.coerceAtLeast(0) ?: 3
                 ),
                 designWidth = designW,
                 designHeight = designH

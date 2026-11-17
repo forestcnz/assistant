@@ -1026,14 +1026,14 @@ object FloatyManager {
             setColorFilter(COLOR_TEXT)
             scaleType = ImageView.ScaleType.CENTER_INSIDE
             // 悬浮页返回入口同步缩小，窗口与标题栏高度保持固定。
-            setPadding((9 * d).toInt(), (9 * d).toInt(), (9 * d).toInt(), (9 * d).toInt())
+            setPadding((7 * d).toInt(), (7 * d).toInt(), (7 * d).toInt(), (7 * d).toInt())
             contentDescription = "返回任务列表"
-            background = panelTouchBackground(roundedBackground(COLOR_BG, 6 * d, d, COLOR_DIVIDER))
+            background = panelTouchBackground(roundedBackground(COLOR_BG, 10 * d, d, COLOR_DIVIDER))
             isClickable = true
             isFocusable = true
             visibility = View.GONE
         }
-        header.addView(backToTasks, LinearLayout.LayoutParams((36 * d).toInt(), (36 * d).toInt()).apply {
+        header.addView(backToTasks, LinearLayout.LayoutParams((32 * d).toInt(), (32 * d).toInt()).apply {
             marginEnd = (5 * d).toInt()
         })
         header.addView(headerLogo, LinearLayout.LayoutParams((26 * d).toInt(), (26 * d).toInt()).apply {
@@ -1059,7 +1059,7 @@ object FloatyManager {
             visibility = View.GONE
         }
         header.addView(titleLabel, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f))
-        header.addView(pageSwitch, LinearLayout.LayoutParams((40 * d).toInt(), (40 * d).toInt()))
+        header.addView(pageSwitch, LinearLayout.LayoutParams((32 * d).toInt(), (32 * d).toInt()))
         header.addView(
             textView(context, "✕", 16f, COLOR_TEXT).apply {
                 gravity = Gravity.CENTER
@@ -1069,7 +1069,7 @@ object FloatyManager {
                 isFocusable = true
                 setOnClickListener { hideTaskPanel() }
             },
-            LinearLayout.LayoutParams((44 * d).toInt(), (44 * d).toInt()).apply {
+            LinearLayout.LayoutParams((32 * d).toInt(), (32 * d).toInt()).apply {
                 marginStart = (6 * d).toInt()
             }
         )
@@ -1675,7 +1675,7 @@ object FloatyManager {
             if (highlighted) COLOR_PRIMARY else COLOR_DIVIDER))
         views.badge.text = order?.toString() ?: if (running) "▶" else ""
         views.badge.visibility = if (highlighted) View.VISIBLE else View.GONE
-        views.description.text = if (order != null) "执行顺序 $order" else views.originalDescription
+        views.description.text = views.originalDescription
         views.badge.setTextColor(if (running) COLOR_RUNNING else COLOR_ON_PRIMARY)
         views.badge.background = when {
             running -> roundedBackground(COLOR_PRIMARY_CONTAINER, 8 * d, 0f, 0)

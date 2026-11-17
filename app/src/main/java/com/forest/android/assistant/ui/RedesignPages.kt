@@ -15,6 +15,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.forest.android.assistant.R
@@ -25,20 +26,24 @@ import com.forest.android.assistant.core.web.LanWebState
 @Composable
 fun TransferPage(taskCount: Int, busy: Boolean, canClear: Boolean, onBack: () -> Unit,
     onImport: () -> Unit, onExport: () -> Unit, onClear: () -> Unit) {
-    DetailPage("导入与导出", "备份、迁移与整理", onBack) {
-        ContentBlock("留一份安心的备份。") {
-            Text("任务、素材和配置，随时带到另一台设备。", fontSize = 12.sp, color = Color(AppPalette.ON_SURFACE_VARIANT))
+    DetailPage("导入与导出", "备份、迁移与整理", onBack, compact = true) {
+        ContentBlock("留一份安心的备份。", compact = true) {
+            Text("任务、素材和配置，随时带到另一台设备。", fontSize = 11.sp, lineHeight = 16.sp,
+                color = Color(AppPalette.ON_SURFACE_VARIANT))
             StatusBadge("本地 ZIP · 自主保存")
         }
-        SectionLabel("导入")
-        SectionCard { DesignRow("从 ZIP 导入任务", "支持单任务与任务合集", R.drawable.ic_import, !busy, onClick = onImport) }
-        SectionLabel("导出")
+        SectionLabel("导入", compact = true)
+        SectionCard { DesignRow("从 ZIP 导入任务", "支持单任务与任务合集", R.drawable.ic_import,
+            !busy, compact = true, onClick = onImport) }
+        SectionLabel("导出", compact = true)
         SectionCard { DesignRow("导出全部任务", "$taskCount 个任务 · 包含分组与执行顺序", R.drawable.ic_export,
-            !busy && taskCount > 0, onClick = onExport) }
-        InfoNotice("导入会覆盖同名任务的脚本、素材和配置，保留本机运行历史。合集中的分组信息会按备份恢复。", warning = true)
-        InfoNotice("备份包含任务文件和素材；共享流程模板不随任务导出。请把 ZIP 保存到任务目录之外。")
-        SectionLabel("清理")
-        SectionCard { DesignRow("清空全部任务", "删除脚本、素材、运行记录和定时", R.drawable.ic_clear_tasks, canClear, onClick = onClear) }
+            !busy && taskCount > 0, compact = true, onClick = onExport) }
+        InfoNotice("导入会覆盖同名任务的脚本、素材和配置，保留本机运行历史。合集中的分组信息会按备份恢复。",
+            warning = true, compact = true)
+        InfoNotice("备份包含任务文件和素材；共享流程模板不随任务导出。请把 ZIP 保存到任务目录之外。", compact = true)
+        SectionLabel("清理", compact = true)
+        SectionCard { DesignRow("清空全部任务", "删除脚本、素材、运行记录和定时", R.drawable.ic_clear_tasks,
+            canClear, compact = true, onClick = onClear) }
     }
 }
 
@@ -63,28 +68,32 @@ fun QueueIntervalPage(value: String, onChange: (String) -> Unit, onBack: () -> U
 
 @Composable
 fun LanEditorPage(state: LanWebState, onBack: () -> Unit, onStart: () -> Unit, onStop: () -> Unit, onCopy: (String) -> Unit) {
-    DetailPage("局域网 Web 编辑", "把手机任务连接到浏览器", onBack,
+    DetailPage("局域网 Web 编辑", "把手机任务连接到浏览器", onBack, scrollable = false, compact = true,
         footer = { if (state.running) SecondaryAction("停止服务", onClick = onStop) else PrimaryAction("启动服务", icon = R.drawable.ic_play, onClick = onStart) }) {
-        Row(Modifier.fillMaxWidth().padding(vertical = 35.dp), horizontalArrangement = Arrangement.Center,
+        Row(Modifier.fillMaxWidth().padding(vertical = 18.dp), horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically) {
-            AppIcon(R.drawable.ic_phone, modifier = Modifier.size(49.dp))
-            Text("┄┄┄", Modifier.padding(horizontal = 20.dp), color = Color(0xFF9DB6D4), fontSize = 24.sp)
-            AppIcon(R.drawable.ic_monitor, modifier = Modifier.size(49.dp))
+            AppIcon(R.drawable.ic_phone, modifier = Modifier.size(40.dp))
+            Text("┄┄┄", Modifier.padding(horizontal = 16.dp), color = Color(0xFF9DB6D4), fontSize = 18.sp)
+            AppIcon(R.drawable.ic_monitor, modifier = Modifier.size(40.dp))
         }
         Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
             StatusBadge(if (state.running) "服务运行中" else "服务已停止")
-            Text("大一点的屏幕，\n更自在地编排。", fontSize = 21.sp, lineHeight = 31.sp, textAlign = TextAlign.Center,
-                modifier = Modifier.padding(top = 17.dp, bottom = 10.dp))
-            Text("电脑、平板和手机，同一局域网即可连接。", fontSize = 12.sp, color = Color(AppPalette.ON_SURFACE_VARIANT))
+            Text("大一点的屏幕，\n更自在地编排。", fontSize = 18.sp, lineHeight = 25.sp, textAlign = TextAlign.Center,
+                modifier = Modifier.padding(top = 10.dp, bottom = 6.dp))
+            Text("电脑、平板和手机，同一局域网即可连接。", fontSize = 11.sp, color = Color(AppPalette.ON_SURFACE_VARIANT))
         }
         state.url?.takeIf { state.running }?.let { url ->
             Text(url, Modifier.fillMaxWidth().background(Color(AppPalette.PRIMARY_CONTAINER), RoundedCornerShape(14.dp))
-                .padding(vertical = 20.dp, horizontal = 8.dp), fontFamily = FontFamily.Monospace, textAlign = TextAlign.Center,
-                color = Color(AppPalette.PRIMARY), fontSize = 16.sp)
+                .padding(vertical = 10.dp, horizontal = 8.dp), fontFamily = FontFamily.Monospace, textAlign = TextAlign.Center,
+                color = Color(AppPalette.PRIMARY), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             SecondaryAction("复制访问地址") { onCopy(url) }
-        } ?: InfoNotice(state.error ?: "启动服务后，这里会显示可在浏览器中打开的地址。", error = state.error != null)
-        ContentBlock("连接后可以做什么") { Text("编辑脚本、编排流程、管理任务分组和共享模板、上传素材。", fontSize = 12.sp, lineHeight = 21.sp) }
-        InfoNotice("请在可信网络使用。同一局域网内能够访问此地址的设备都可以编辑任务，用完后可停止服务。", warning = true)
+        } ?: InfoNotice(state.error ?: "启动服务后，这里会显示可在浏览器中打开的地址。",
+            error = state.error != null, compact = true)
+        ContentBlock("连接后可以做什么", compact = true) {
+            Text("编辑脚本、编排流程、管理任务分组和共享模板、上传素材。", fontSize = 11.sp, lineHeight = 17.sp)
+        }
+        InfoNotice("请在可信网络使用。同一局域网内能够访问此地址的设备都可以编辑任务，用完后可停止服务。",
+            warning = true, compact = true)
     }
 }
 

@@ -37,7 +37,6 @@ import kotlinx.coroutines.launch
 @Composable
 internal fun MainActivity.LogsTab(logs: List<ScriptRunner.LogEntry>) {
     var filter by rememberSaveable { mutableStateOf("全部") }
-    var confirmClear by remember { mutableStateOf(false) }
     var jumpSignal by remember { mutableStateOf(0) }
     val filtered = when (filter) {
         "INFO" -> logs.filter { it.level == 'I' || it.level == 'D' }
@@ -47,7 +46,7 @@ internal fun MainActivity.LogsTab(logs: List<ScriptRunner.LogEntry>) {
     }
     Column(Modifier.fillMaxSize()) {
         PageHeading("运行日志", "每一步，都清楚可见", actions = {
-            if (logs.isNotEmpty()) TextButton(onClick = { confirmClear = true }) {
+            if (logs.isNotEmpty()) TextButton(onClick = { ScriptRunner.clearLogs() }) {
                 Text("清空", fontSize = 12.sp, color = Color(AppPalette.PRIMARY))
             }
         })
@@ -95,9 +94,6 @@ internal fun MainActivity.LogsTab(logs: List<ScriptRunner.LogEntry>) {
             }
         }
     }
-    if (confirmClear) ConfirmActionSheet("清空运行日志？", "清空当前实时输出，已保存的任务运行历史不受影响。", "清空日志",
-        onDismiss = { confirmClear = false }, danger = true,
-        onConfirm = { confirmClear = false; ScriptRunner.clearLogs() })
 }
 
 @Composable

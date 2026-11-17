@@ -5,7 +5,7 @@ data class TaskLoop(
     val mode: Mode = Mode.COUNT,
     val count: Int = 1,
     val durationSec: Long = 60,
-    val intervalSec: Int = 0
+    val intervalSec: Int = 3
 ) {
     enum class Mode(val key: String) {
         COUNT("count"), DURATION("duration"), UNTIL_STOPPED("untilStopped");

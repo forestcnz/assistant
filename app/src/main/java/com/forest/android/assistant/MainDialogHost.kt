@@ -112,17 +112,20 @@ internal fun MainActivity.MainDialogHost() {
     renamingTask?.let { name -> RenameTaskDialog(name) }
     deletingTask?.let { name ->
         val canDelete = !runState.running && !RecordingService.active && !taskMutationBusy && !taskTransferBusy
-        AlertDialog(
-        containerColor = MaterialTheme.colorScheme.surface,
-            onDismissRequest = { if (!taskMutationBusy) deletingTask = null },
-            title = { Text("删除任务") },
-            text = { Text("确定删除「$name」？脚本、素材、录制范围图和运行历史都会删除，定时任务也会取消。此操作无法撤销。") },
-            confirmButton = {
-                TextButton(enabled = canDelete, onClick = {
-                    performTaskChange({ TaskManager.deleteTask(this, name) }, "已删除任务「$name」") { deletingTask = null; menuTask = null }
-                }) { Text(if (taskMutationBusy) "正在删除…" else "删除", color = MaterialTheme.colorScheme.error) }
+        ConfirmActionSheet(
+            title = "删除任务",
+            message = "确定删除「$name」？脚本、素材、录制范围图和运行历史都会删除，定时任务也会取消。此操作无法撤销。",
+            confirmLabel = if (taskMutationBusy) "正在删除…" else "删除任务",
+            onDismiss = { if (!taskMutationBusy) deletingTask = null },
+            onConfirm = {
+                performTaskChange({ TaskManager.deleteTask(this, name) }, "已删除任务「$name」") {
+                    deletingTask = null
+                    menuTask = null
+                }
             },
-            dismissButton = { TextButton(enabled = !taskMutationBusy, onClick = { deletingTask = null }) { Text("取消") } }
+            danger = true,
+            busy = taskMutationBusy || taskTransferBusy,
+            enabled = canDelete
         )
     }
 
@@ -173,9 +176,13 @@ internal fun MainActivity.MainDialogHost() {
     }
 
     deletingAsset?.let { info ->
-        AlertDialog(containerColor = MaterialTheme.colorScheme.surface, onDismissRequest = { deletingAsset = null }, title = { Text("删除素材") },
-            text = { Text("确定删除「${info.file.name}」？引用这张图片的脚本可能无法运行。此操作无法撤销。") },
-            confirmButton = { TextButton(onClick = {
+        ConfirmActionSheet(
+            title = "删除素材",
+            message = "确定删除「${info.file.name}」？引用这张图片的脚本可能无法运行。此操作无法撤销。",
+            confirmLabel = "删除",
+            onDismiss = { deletingAsset = null },
+            danger = true,
+            onConfirm = {
                 if (TaskManager.deleteImage(info.file)) {
                     assetsTask?.let { assets = TaskManager.imageInfos(this@MainDialogHost, it) }
                     previewLoadJob?.cancel()
@@ -183,8 +190,8 @@ internal fun MainActivity.MainDialogHost() {
                     previewBitmap = null
                     deletingAsset = null
                 } else Toast.makeText(this@MainDialogHost, "删除失败，请重试", Toast.LENGTH_SHORT).show()
-            }) { Text("删除", color = MaterialTheme.colorScheme.error) } },
-            dismissButton = { TextButton(onClick = { deletingAsset = null }) { Text("取消") } })
+            }
+        )
     }
     renameAsset?.let { info ->
         var name by remember(info.file) { mutableStateOf(info.file.name) }

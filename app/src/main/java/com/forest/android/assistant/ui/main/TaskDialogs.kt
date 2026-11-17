@@ -68,7 +68,6 @@ internal fun MainActivity.TaskMenuDialog(
     val scheduleNow = schedules[taskName]
     DetailPage("任务详情", taskType + (latestRun?.let { " · 最近运行" + it.outcome.label } ?: " · 尚未运行"), onDismiss,
         compact = true,
-        compactBackFrame = true,
         actions = { IconButton(onClick = { showMenu = true }) { AppIcon(R.drawable.ic_more, "任务操作") } }) {
         // 任务摘要 + 三项关键数据，对应设计稿的详情首屏。
         Row(Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -249,17 +248,7 @@ internal fun MainActivity.ScheduleDialog(
             if (type == ScheduleManager.Type.DAILY_AT) KeyboardType.Text else KeyboardType.Number,
             compact = true
         )
-        if (type == ScheduleManager.Type.DAILY_AT) TextButton(onClick = {
-            // 系统时间选择器避免移动端输入时刻时误输分隔符。
-            val parts = value.split(':').mapNotNull(String::toIntOrNull)
-            android.app.TimePickerDialog(this@ScheduleDialog, { _, hour, minute ->
-                onValueChange("%02d:%02d".format(hour, minute))
-            }, parts.getOrElse(0) { 8 }.coerceIn(0, 23), parts.getOrElse(1) { 0 }.coerceIn(0, 59), true).show()
-        }) { Text("选择运行时刻") }
-        Text("定时启动沿用当前任务的循环设置。请保持无障碍服务可用，并按保活指引允许后台运行。",
-            Modifier.fillMaxWidth().padding(vertical = 2.dp), fontSize = 10.sp, lineHeight = 15.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant)
-        TextButton(onClick = { keepAliveDialog = true }) { Text("查看后台保活指引") }
+        // 系统时间选择器避免移动端输入时刻时误输分隔符；此处改为在运行时间输入框中直接填写。
         if (current != null) TextButton(onClick = onCancelSchedule) {
             Text("取消当前定时", color = Color(AppPalette.ERROR), fontSize = 12.sp)
         }
@@ -267,31 +256,44 @@ internal fun MainActivity.ScheduleDialog(
 }
 
 @Composable
+@OptIn(ExperimentalMaterial3Api::class)
 internal fun MainActivity.RenameTaskDialog(oldName: String) {
     var name by remember(oldName) { mutableStateOf(oldName) }
     val trimmed = name.trim()
     val invalid = trimmed.isBlank() || trimmed.length > 50 || trimmed == "." || trimmed == ".." ||
         trimmed.any { it == '/' || it == '\\' || it.isISOControl() } ||
         tasks.any { it.name == trimmed && it.name != oldName }
-    // 与其它详情页共用标题栏、表单和底部操作，不再使用系统 AlertDialog。
-    DetailPage("重命名任务", oldName, { if (!taskMutationBusy) renamingTask = null }, compact = true, footer = {
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Box(Modifier.weight(1f)) { SecondaryAction("取消", !taskMutationBusy) { renamingTask = null } }
-            Box(Modifier.weight(1f)) {
-                PrimaryAction(if (taskMutationBusy) "正在保存…" else "保存", !invalid && !taskMutationBusy) {
-                    performTaskChange({ TaskManager.renameTask(this@RenameTaskDialog, oldName, trimmed) }, "已改名为「$trimmed」") {
-                        renamingTask = null
-                        menuTask = trimmed
+    ModalBottomSheet(
+        onDismissRequest = { if (!taskMutationBusy) renamingTask = null },
+        containerColor = MaterialTheme.colorScheme.background,
+        shape = RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp),
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ) {
+        Column(Modifier.fillMaxWidth().imePadding().verticalScroll(rememberScrollState())
+            .padding(horizontal = 20.dp)) {
+            Text("重命名任务", fontSize = 18.sp, lineHeight = 24.sp, fontWeight = FontWeight.SemiBold)
+            Text(oldName, fontSize = 11.sp, lineHeight = 16.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 2.dp, bottom = 14.dp))
+            DesignField("任务名称", name, { name = it }, "脚本、素材与历史记录会一同保留",
+                error = if (invalid) "名称非法或与现有任务重复" else null, compact = true)
+            if (schedules.containsKey(oldName)) Text("定时任务将保留原设置，并从改名后重新计时。",
+                Modifier.fillMaxWidth().padding(top = 6.dp), fontSize = 10.sp, lineHeight = 15.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row(Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Box(Modifier.weight(1f)) {
+                    SecondaryAction("取消", !taskMutationBusy) { renamingTask = null }
+                }
+                Box(Modifier.weight(1f)) {
+                    PrimaryAction(if (taskMutationBusy) "正在保存…" else "保存", !invalid && !taskMutationBusy) {
+                        performTaskChange({ TaskManager.renameTask(this@RenameTaskDialog, oldName, trimmed) }, "已改名为「$trimmed」") {
+                            renamingTask = null
+                            menuTask = trimmed
+                        }
                     }
                 }
             }
         }
-    }) {
-        DesignField("任务名称", name, { name = it }, "脚本、素材与历史记录会一同保留",
-            error = if (invalid) "名称非法或与现有任务重复" else null, compact = true)
-        if (schedules.containsKey(oldName)) Text("定时任务将保留原设置，并从改名后重新计时。",
-            Modifier.fillMaxWidth().padding(vertical = 2.dp), fontSize = 10.sp, lineHeight = 15.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 

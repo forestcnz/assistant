@@ -62,7 +62,7 @@ internal fun MainActivity.openLoopSettings(taskName: String) {
         else -> DurationUnit.SECOND
     }
     loopDurationValue = (loop.durationSec / loopDurationUnit.seconds).toString()
-    loopIntervalValue = loop.intervalSec.toString()
+    loopIntervalValue = (loop.intervalSec.takeIf { it > 0 } ?: 3).toString()
     loopEditing = taskName
 }
 

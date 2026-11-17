@@ -206,7 +206,6 @@ fun TaskGroupsPage(lifecycle: Lifecycle, modifier: Modifier = Modifier, onSwitch
             // 系统授权必须由 Activity 打开，Compose 提供的是通用 Context。
             // 分组详情已移除悬浮执行入口，执行与授权统一从悬浮面板及权限页进入。
             DetailPage("分组详情", "任务空间 / 分组", { if (!busy) selectedId = null }, scrollable = false,
-                compactBackFrame = true,
                 actions = {
                     IconButton(enabled = !busy, onClick = { membersTarget = selected }) { AppIcon(R.drawable.ic_add, "添加任务") }
                     IconButton(enabled = !busy, onClick = { actionsExpanded = true }) { AppIcon(R.drawable.ic_more, "分组操作") }
@@ -222,7 +221,6 @@ fun TaskGroupsPage(lifecycle: Lifecycle, modifier: Modifier = Modifier, onSwitch
                 // 与任务列表底部一致，改用普通小字说明拖动和左滑操作。
                 Text("长按任务图标排序 · 左滑移出任务", Modifier.fillMaxWidth().padding(horizontal = 2.dp, vertical = 2.dp),
                     fontSize = 10.sp, lineHeight = 15.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                SectionLabel("执行顺序 · 更改自动保存", compact = true)
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(bottom = 8.dp)) }
                 if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
                 GroupMembersList(selected, busy, Modifier.weight(1f), onAdd = { if (!busy) membersTarget = selected }, onOpenTask = onOpenTask) { original, members ->
@@ -274,12 +272,15 @@ fun TaskGroupsPage(lifecycle: Lifecycle, modifier: Modifier = Modifier, onSwitch
         })
     }
     deleteTarget?.let { target ->
-        AlertDialog(containerColor = MaterialTheme.colorScheme.surface, onDismissRequest = { if (!busy) deleteTarget = null }, title = { Text("删除分组") },
-            text = { Text("确定删除「${target.name}」？分组及组内顺序会删除，任务本身会保留。此操作无法撤销。") },
-            confirmButton = { TextButton(enabled = !busy, onClick = {
-                mutate("分组已删除") { TaskGroups.delete(context, target.id, target.revision); null }
-            }) { Text(if (busy) "正在删除…" else "删除", color = MaterialTheme.colorScheme.error) } },
-            dismissButton = { TextButton(enabled = !busy, onClick = { deleteTarget = null }) { Text("取消") } })
+        ConfirmActionSheet(
+            title = "删除分组",
+            message = "确定删除「${target.name}」？分组及组内顺序会删除，任务本身会保留。此操作无法撤销。",
+            confirmLabel = if (busy) "正在删除…" else "删除分组",
+            onDismiss = { if (!busy) deleteTarget = null },
+            onConfirm = { mutate("分组已删除") { TaskGroups.delete(context, target.id, target.revision); null } },
+            danger = true,
+            busy = busy
+        )
     }
 }
 
@@ -336,7 +337,9 @@ private fun GroupTaskPicker(group: TaskGroup, available: List<String>, busy: Boo
 @Composable
 private fun GroupMembersList(group: TaskGroup, busy: Boolean, modifier: Modifier, onAdd: () -> Unit,
     onOpenTask: (String) -> Unit, onSave: (TaskGroup, List<String>) -> Unit) {
+    val context = LocalContext.current
     val listState = rememberLazyListState()
+    var subtitles by remember(group.id) { mutableStateOf(emptyMap<String, String>()) }
     var draft by remember(group.id) { mutableStateOf<List<String>?>(null) }
     var dragging by remember(group.id) { mutableStateOf<String?>(null) }
     var dragGroup by remember(group.id) { mutableStateOf<TaskGroup?>(null) }
@@ -346,6 +349,18 @@ private fun GroupMembersList(group: TaskGroup, busy: Boolean, modifier: Modifier
     val latestNames by rememberUpdatedState(names)
     val latestSave by rememberUpdatedState(onSave)
     val latestGroup by rememberUpdatedState(group)
+    LaunchedEffect(group.taskNames) {
+        subtitles = withContext(Dispatchers.IO) {
+            group.taskNames.associateWith { name ->
+                val config = TaskManager.readConfig(context, name)
+                val base = config.desc.ifBlank { config.target?.let { "目标：$it" } ?: "" }
+                val repeated = if (config.loop.mode != com.forest.android.assistant.core.task.TaskLoop.Mode.COUNT || config.loop.count > 1)
+                    config.loop.describe() else ""
+                listOf(base, repeated).filter(String::isNotBlank).joinToString(" · ")
+                    .ifBlank { "脚本任务 · 待运行" }
+            }
+        }
+    }
     fun reorderAtPointer() {
         val name = dragging ?: return
         val from = latestNames.indexOf(name)
@@ -383,10 +398,11 @@ private fun GroupMembersList(group: TaskGroup, busy: Boolean, modifier: Modifier
                 Surface(Modifier.fillMaxWidth(), color = if (dragging == name) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface,
                     shape = shape) {
                     Column {
-                        Row(Modifier.fillMaxWidth().heightIn(min = 76.dp).padding(start = 6.dp, end = 8.dp),
+                        Row(Modifier.fillMaxWidth().heightIn(min = 60.dp)
+                            .padding(start = 14.dp, end = 14.dp, top = 8.dp, bottom = 8.dp),
                             verticalAlignment = Alignment.CenterVertically) {
                             // 长按任务图标即可拖动排序，不再单独显示拖拽符号。
-                            Box(Modifier.size(48.dp).semantics { contentDescription = "长按「$name」的图标拖动排序" }
+                            Box(Modifier.size(40.dp).semantics { contentDescription = "长按「$name」的图标拖动排序" }
                                 .onGloballyPositioned { handleTop = it.positionInRoot().y }
                                 .pointerInput(name, busy) {
                                     if (!busy) detectDragGesturesAfterLongPress(
@@ -401,10 +417,14 @@ private fun GroupMembersList(group: TaskGroup, busy: Boolean, modifier: Modifier
                                 }, contentAlignment = Alignment.Center) {
                                 IconTile(R.drawable.ic_code, blue = true)
                             }
-                            Column(Modifier.weight(1f).clickable(enabled = !busy) { onOpenTask(name) }.padding(horizontal = 12.dp, vertical = 12.dp)) {
-                                Text(name, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall)
-                                Text("第 ${index + 1} 个执行", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Column(Modifier.weight(1f).clickable(enabled = !busy) { onOpenTask(name) }.padding(horizontal = 12.dp)) {
+                                Text(name, fontSize = 13.sp, lineHeight = 18.sp, fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(subtitles[name] ?: "脚本任务 · 待运行", fontSize = 10.sp, lineHeight = 14.sp,
+                                    maxLines = 2, overflow = TextOverflow.Ellipsis,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 2.dp))
                             }
+                            AppIcon(R.drawable.ic_arrow, modifier = Modifier.size(15.dp))
                         }
                         if (index < names.lastIndex) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                     }
@@ -431,9 +451,6 @@ private fun SwipeRemoveMember(enabled: Boolean, modifier: Modifier = Modifier,
             if (direction == SwipeToDismissBoxValue.EndToStart && enabled) onRemove()
             scope.launch { state.reset() }
         }, backgroundContent = {
-            Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.errorContainer).padding(horizontal = 20.dp),
-                contentAlignment = Alignment.CenterEnd) {
-                Text("移出分组", color = MaterialTheme.colorScheme.onErrorContainer, style = MaterialTheme.typography.labelLarge)
-            }
+            SwipeDestructiveAction("移出分组", R.drawable.ic_clear_tasks)
         }) { content() }
 }

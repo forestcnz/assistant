@@ -13,6 +13,7 @@ import androidx.compose.foundation.shape.CircleShape
 import com.forest.android.assistant.ui.AppRoundedCornerShape as RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
+import androidx.compose.foundation.clickable
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -24,6 +25,8 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -38,19 +41,16 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.forest.android.assistant.R
 
-/** 各页面共用紧凑返回按钮，统一边框、图标尺寸与圆角。 */
+/** 各页面共用返回按钮，外框统一为 32dp，贴合标题及副标题文字块高度。 */
 @Composable
 fun AppBackButton(onClick: () -> Unit, enabled: Boolean = true, modifier: Modifier = Modifier,
-    description: String = "返回", compactFrame: Boolean = false) {
-    IconButton(onClick = onClick, enabled = enabled, modifier = modifier.size(36.dp)
-        .then(if (compactFrame) Modifier else Modifier.border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp)))) {
-        if (compactFrame) {
-            // 仅缩小可见外框，按钮占位、触摸区域和箭头尺寸保持不变。
-            Box(Modifier.size(28.dp).border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(8.dp)),
-                contentAlignment = Alignment.Center) {
-                AppIcon(R.drawable.ic_back, description, Modifier.size(17.dp))
-            }
-        } else AppIcon(R.drawable.ic_back, description, Modifier.size(17.dp))
+    description: String = "返回") {
+    Box(modifier.size(32.dp)
+        .clip(RoundedCornerShape(10.dp))
+        .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(10.dp))
+        .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+        .semantics { contentDescription = description }, contentAlignment = Alignment.Center) {
+        AppIcon(R.drawable.ic_back, description, Modifier.size(17.dp))
     }
 }
 
@@ -62,7 +62,6 @@ fun DetailPage(
     footer: @Composable ColumnScope.() -> Unit = {},
     scrollable: Boolean = true,
     compact: Boolean = false,
-    compactBackFrame: Boolean = false,
     content: @Composable ColumnScope.() -> Unit
 ) {
     Dialog(onDismissRequest = onBack, properties = DialogProperties(usePlatformDefaultWidth = false)) {
@@ -72,13 +71,14 @@ fun DetailPage(
                     Column {
                         Row(Modifier.fillMaxWidth().heightIn(min = 60.dp).padding(start = 12.dp, end = 14.dp, top = 8.dp, bottom = 8.dp),
                             verticalAlignment = Alignment.CenterVertically) {
-                            AppBackButton(onClick = onBack, compactFrame = compactBackFrame)
+                            AppBackButton(onClick = onBack)
                             Column(Modifier.weight(1f).padding(start = 11.dp)) {
-                                Text(title, fontSize = 18.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                Text(title, fontSize = 17.sp, lineHeight = 20.sp, fontWeight = FontWeight.Bold,
+                                    maxLines = 1, overflow = TextOverflow.Ellipsis,
                                     letterSpacing = (-0.5).sp)
-                                if (subtitle.isNotBlank()) Text(subtitle, fontSize = 10.sp, lineHeight = 14.sp,
+                                if (subtitle.isNotBlank()) Text(subtitle, fontSize = 9.sp, lineHeight = 11.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.padding(top = 3.dp))
+                                    modifier = Modifier.padding(top = 1.dp))
                             }
                             actions()
                         }
@@ -344,14 +344,16 @@ fun ActionSheet(title: String, onDismiss: () -> Unit, content: @Composable Colum
 /** 分段切换：任务 / 任务分组等两级视图共用，选中项浮起为白色。 */
 @Composable
 fun SegmentedTabs(options: List<String>, selectedIndex: Int, modifier: Modifier = Modifier, onSelect: (Int) -> Unit) {
-    Row(modifier.fillMaxWidth().background(Color(AppPalette.SURFACE_CONTAINER), RoundedCornerShape(12.dp))
-        .padding(4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+    Row(modifier.fillMaxWidth().height(32.dp)
+        .background(Color(AppPalette.SURFACE_CONTAINER), RoundedCornerShape(12.dp))
+        .padding(3.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         options.forEachIndexed { index, label ->
             val active = index == selectedIndex
-            Box(Modifier.weight(1f).heightIn(min = 36.dp)
+            Box(Modifier.weight(1f).fillMaxHeight()
                 .background(if (active) Color.White else Color.Transparent, RoundedCornerShape(9.dp))
                 .selectable(active, role = Role.Tab) { onSelect(index) }, contentAlignment = Alignment.Center) {
-                Text(label, fontSize = 12.sp, fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
+                Text(label, fontSize = 11.sp, lineHeight = 14.sp,
+                    fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
                     color = if (active) Color(AppPalette.ON_SURFACE) else Color(AppPalette.ON_SURFACE_VARIANT))
             }
         }
@@ -437,9 +439,10 @@ fun InfoNotice(text: String, warning: Boolean = false, error: Boolean = false, c
 
 /** 内容块和统计条复用于运行结果、更新、录制摘要等状态页。 */
 @Composable
-fun ContentBlock(title: String, content: @Composable ColumnScope.() -> Unit) {
+fun ContentBlock(title: String, compact: Boolean = false, content: @Composable ColumnScope.() -> Unit) {
     SectionCard {
-        Column(Modifier.padding(17.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(Modifier.padding(if (compact) 12.dp else 17.dp),
+            verticalArrangement = Arrangement.spacedBy(if (compact) 5.dp else 8.dp)) {
             Text(title, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
             content()
         }
