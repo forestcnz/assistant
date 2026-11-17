@@ -957,6 +957,15 @@ object FloatyManager {
 
     // ==================== 任务 / 工具面板 ====================
 
+    /** 任务列表和录制保存悬浮窗共用实际像素高度，避免 Compose 主题缩放造成尺寸不一致。 */
+    @Suppress("DEPRECATION")
+    internal fun taskPanelHeightPx(context: Context): Int {
+        val density = context.resources.displayMetrics.density
+        val wm = context.getSystemService(WindowManager::class.java)
+        val displaySize = android.graphics.Point().also { wm.defaultDisplay.getSize(it) }
+        return minOf((displaySize.y - 48 * density).toInt(), (320 * density).toInt()).coerceAtLeast(1)
+    }
+
     /**
      * 展开/收起面板（每次展开重新读取任务列表与运行状态）。
      * 布局：深绿灰标题栏 + 暖白内容区，自上而下 = 头部（Logo + 标题 + 列表切换 + 收起） /
@@ -994,7 +1003,7 @@ object FloatyManager {
         val displaySize = android.graphics.Point().also { wm.defaultDisplay.getSize(it) }
         // 任务与分组面板共用原高度上限的一半，较长列表在面板内滚动。
         // 窗口固定为 320dp，切换列表与工具时不随内容收缩；小屏只按可用屏高限制。
-        val panelHeight = minOf((displaySize.y - 48 * d).toInt(), (320 * d).toInt()).coerceAtLeast(1)
+        val panelHeight = taskPanelHeightPx(context)
         // 窄屏保留两侧各 12dp 的操作边距。
         val panelW = (360 * d).toInt()
             .coerceAtMost((displaySize.x - 24 * d).toInt()).coerceAtLeast(1)

@@ -43,6 +43,9 @@ class RecordingTask(
     var width = 0
     var height = 0
 
+    /** 最后一次操作完成至结束录制的等待，不包含暂停时间。 */
+    @Volatile var trailingDelayMs = 0L
+
     init {
         require(name.isNotBlank() && name.length <= 50 && name != "." && name != ".." &&
             name.none { it == '/' || it == '\\' || it.isISOControl() }) { "任务名称不合法" }
@@ -91,7 +94,7 @@ class RecordingTask(
         writeAtomic(File(directory, "config.json"), configJson(current).toString(2))
         // task.js 最后写入：任务列表只展示已经具备配置和素材的可运行任务。
         writeAtomic(File(directory, "task.js"),
-            RecordingScript.generate(width, height, current, mode, searchRegionWidth, searchRegionHeight))
+            RecordingScript.generate(width, height, current, mode, searchRegionWidth, searchRegionHeight, trailingDelayMs))
     }
 
     fun discardIfEmpty() {
@@ -99,13 +102,14 @@ class RecordingTask(
     }
 
     private fun recordingJson(current: List<RecordedOperation>): JSONObject = JSONObject().apply {
-        put("version", 4)
+        put("version", 5)
         put("mode", mode.name.lowercase())
         put("screenSize", JSONArray(listOf(width, height)))
         put("cropWidth", cropWidth)
         put("cropHeight", cropHeight)
         put("searchRegionWidth", searchRegionWidth)
         put("searchRegionHeight", searchRegionHeight)
+        put("trailingDelayMs", trailingDelayMs)
         put("operations", JSONArray().apply { current.forEach { put(stepJson(it)) } })
     }
 
@@ -149,10 +153,11 @@ class RecordingTask(
             val height: Int,
             val searchRegionWidth: Int,
             val searchRegionHeight: Int,
+            val trailingDelayMs: Long,
             val steps: List<RecordedOperation>
         )
 
-        private fun recoverOne(dir: File) {
+        internal fun recoverOne(dir: File) {
             val snapshotFile = File(dir, "recording.json")
             if (!snapshotFile.isFile) return
             val script = File(dir, "task.js")
@@ -168,7 +173,7 @@ class RecordingTask(
                 }.toString(2))
             }
             writeAtomic(script, RecordingScript.generate(snapshot.width, snapshot.height,
-                snapshot.steps, snapshot.mode, snapshot.searchRegionWidth, snapshot.searchRegionHeight))
+                snapshot.steps, snapshot.mode, snapshot.searchRegionWidth, snapshot.searchRegionHeight, snapshot.trailingDelayMs))
         }
 
         private fun parseRecording(file: File): Snapshot? = runCatching {
@@ -188,6 +193,8 @@ class RecordingTask(
                 height = size?.optInt(1) ?: 0,
                 searchRegionWidth = json.optInt("searchRegionWidth", DEFAULT_SEARCH_REGION_SIZE),
                 searchRegionHeight = json.optInt("searchRegionHeight", DEFAULT_SEARCH_REGION_SIZE),
+                // 兼容旧快照：缺少末尾等待时沿用原来的回放行为。
+                trailingDelayMs = json.optLong("trailingDelayMs").coerceAtLeast(0),
                 steps = steps
             )
         }.getOrNull()

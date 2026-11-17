@@ -64,7 +64,8 @@ object RecordingScript {
         steps: List<RecordedOperation>,
         mode: RecordingMode = RecordingMode.COORDINATE,
         searchRegionWidth: Int = DEFAULT_SEARCH_REGION_SIZE,
-        searchRegionHeight: Int = DEFAULT_SEARCH_REGION_SIZE
+        searchRegionHeight: Int = DEFAULT_SEARCH_REGION_SIZE,
+        trailingDelayMs: Long = 0
     ): String = buildString {
         appendLine("// 操作录制 · 屏幕 ${width}×${height}，坐标单位为实际像素")
         // 纯坐标模式不带找图素材，回放只依赖坐标
@@ -139,6 +140,12 @@ object RecordingScript {
                 appendLine("}")
                 if (!useImage) appendLine("*/")
             }
+        }
+        // 末尾等待独立于操作步骤，确保坐标与找图模式都会在最后一次操作后执行。
+        if (steps.isNotEmpty() && trailingDelayMs > 0) {
+            appendLine()
+            appendLine("// 录制结束前等待 $trailingDelayMs ms（不包含暂停时间）")
+            appendLine("sleep($trailingDelayMs);")
         }
     }
 }

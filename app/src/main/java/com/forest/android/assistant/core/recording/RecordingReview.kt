@@ -13,7 +13,8 @@ object RecordingReview {
     fun prepare(context: Context, task: RecordingTask) {
         val steps = task.steps
         val json = JSONObject().put("steps", steps.size)
-            .put("durationMs", steps.sumOf { it.delayMs + it.durationMs }).put("mode", task.mode.label)
+            // 摘要时长与脚本一致，包含最后一次操作后的等待。
+            .put("durationMs", steps.sumOf { it.delayMs + it.durationMs } + task.trailingDelayMs).put("mode", task.mode.label)
         File(TaskManager.taskDir(context, task.name), MARKER).writeText(json.toString())
     }
 

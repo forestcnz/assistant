@@ -149,6 +149,44 @@ class RecordingScriptTest {
         assertTrue(script.contains("console.error(\"步骤 1 执行失败\")"))
     }
 
+    @Test fun replayKeepsFinalWaitAfterAllOperationsInEveryMode() {
+        // 同时覆盖坐标备用段的注释边界，末尾等待必须是可执行代码。
+        for (mode in RecordingMode.values()) {
+            val steps = listOf(
+                RecordedOperation(RecordedOperation.Kind.CLICK, listOf(RecordedPoint(10, 20)), 100,
+                    image = if (mode == RecordingMode.COORDINATE_ONLY) null else "images/step_001.png",
+                    crop = if (mode == RecordingMode.COORDINATE_ONLY) null else RecordedCrop(0, 0, 100, 100))
+            )
+            val script = RecordingScript.generate(900, 1600, steps, mode, trailingDelayMs = 3750)
+
+            assertTrue("$mode 应在操作后保留末尾等待", script.endsWith("sleep(3750);\n"))
+            assertEquals(2, Regex("sleep\\(").findAll(script).count())
+            assertTrue(script.indexOf("sleep(3750);") > script.lastIndexOf("click("))
+            assertTrue(script.indexOf("sleep(3750);") > script.lastIndexOf("*/"))
+        }
+    }
+
+    @Test fun finalWaitDoesNotReplaceOrDuplicateInterOperationWait() {
+        val steps = listOf(
+            RecordedOperation(RecordedOperation.Kind.CLICK, listOf(RecordedPoint(10, 20)), 100),
+            RecordedOperation(RecordedOperation.Kind.SWIPE, listOf(RecordedPoint(1, 2), RecordedPoint(3, 4)),
+                650, delayMs = 1200, intervalMs = 1300)
+        )
+        val script = RecordingScript.generate(900, 1600, steps, trailingDelayMs = 5000)
+
+        assertEquals(3, Regex("sleep\\(").findAll(script).count())
+        assertTrue(script.indexOf("click(10, 20, 100)") < script.indexOf("sleep(1200);"))
+        assertTrue(script.indexOf("sleep(1200);") < script.indexOf("swipe(1, 2, 3, 4, 650)"))
+        assertTrue(script.endsWith("sleep(5000);\n"))
+        assertFalse(script.contains("sleep(1300)"))
+    }
+
+    @Test fun emptyRecordingDoesNotProduceFinalWait() {
+        // 未录到操作时仍不生成无意义的等待任务。
+        val script = RecordingScript.generate(900, 1600, emptyList(), trailingDelayMs = 5000)
+        assertFalse(script.contains("sleep("))
+    }
+
     @Test fun imageModeLogsErrorsInsteadOfThrowing() {
         // 图片模式的各类失败都改为错误日志，且不再出现 throw new
         val point = RecordedPoint(890, 1590)

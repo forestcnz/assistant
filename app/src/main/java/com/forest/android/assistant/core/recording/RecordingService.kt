@@ -38,6 +38,7 @@ class RecordingService : Service() {
     private var recording = false
     private var busy = false
     private var finishRequested = false
+    private var finishTime = 0L
     private var pausedAt = SystemClock.uptimeMillis()
     private var pausedTotal = 0L
     private var previousStart = 0L
@@ -229,9 +230,14 @@ class RecordingService : Service() {
 
     private fun finishRecording() {
         // 通知栏允许执行期间结束：等待当前操作回调和落盘，避免漏掉最后一步。
+        if (!finishRequested) {
+            // 在点击完成时冻结结束时间；暂停后的等待和后续落盘耗时不计入录制。
+            finishTime = if (recording) logicalTime() else pausedAt - pausedTotal
+        }
         finishRequested = true
         if (busy) return
         pause()
+        task?.trailingDelayMs = if (previousEnd == 0L) 0 else (finishTime - previousEnd).coerceAtLeast(0)
         busy = true
         overlay?.hide()
         scope.launch {
