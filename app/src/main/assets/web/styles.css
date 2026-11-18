@@ -463,6 +463,46 @@ body.dragging-module .drop-zone::after { color: var(--orange); }
 .settings-hint { margin-top: 9px; color: var(--muted); font-size: 13px; }
 .settings-actions { flex-wrap: wrap; }
 .settings-actions .danger { margin-right: auto; }
+/* 市场发布复用任务设置弹窗，在窄屏保留发布入口。 */
+#publish-task { white-space: nowrap; }
+.market-account, .market-links, .market-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.market-account > span { margin-right: auto; overflow-wrap: anywhere; }
+.market-body p { overflow-wrap: anywhere; }
+.market-body a { color: var(--orange-dark); }
+.market-error { color: #a93429; padding-top: 10px; }
+.market-device-code { margin: 10px 0; font: 700 24px ui-monospace, Consolas, monospace; letter-spacing: .12em; user-select: all; }
+.market-assets { min-width: 0; padding: 10px; border: 1px solid var(--line); border-radius: 9px; }
+.market-assets legend { padding-inline: 4px; }
+.market-image-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 8px; margin-top: 10px; }
+.market-image-grid label, .market-image-grid figure { min-width: 0; margin: 0; padding: 6px; border: 1px solid var(--line); border-radius: 8px; }
+.market-image-grid img { display: block; width: 100%; height: 72px; object-fit: contain; background: var(--soft); }
+.market-image-grid span, .market-image-grid figcaption { display: block; margin-top: 4px; font-size: 12px; overflow-wrap: anywhere; }
+.market-summary { display: grid; gap: 5px; border-radius: 9px; padding: 12px; background: var(--soft); }
+.market-file-list { margin: 12px 0; padding-left: 18px; overflow-wrap: anywhere; }
+.market-file-list small { color: var(--muted); }
+.market-code { margin-top: 8px; }
+.market-code summary { cursor: pointer; margin-bottom: 5px; }
+/* 发布记录作为独立工作区，状态与常用链接直接显示在列表中。 */
+.market-history-page { flex: 1; min-width: 0; padding: clamp(14px, 4vw, 36px); }
+.market-history-workspace { width: min(100%, 940px); margin-inline: auto; }
+.market-history-head, .market-record-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.market-history-head { flex-wrap: wrap; margin-bottom: 16px; }
+.market-history-head .settings-hint { margin-top: 5px; }
+.market-history-controls { display: flex; gap: 7px; flex-wrap: wrap; }
+.market-history-list { display: grid; gap: 9px; }
+.market-history-empty { display: grid; justify-items: center; gap: 12px; padding: 28px 14px; border: 1px dashed var(--line); border-radius: 12px; color: var(--muted); text-align: center; }
+.market-history-empty a, .market-record a { color: var(--orange-dark); }
+.market-record { min-width: 0; padding: 13px 16px; border: 1px solid var(--line); border-radius: 11px; background: var(--paper); }
+.market-record-head { align-items: baseline; }
+.market-record-head h2 { font-size: 16px; overflow-wrap: anywhere; }
+.market-record-head small { margin-left: 4px; color: var(--muted); font-size: 12px; font-weight: 500; }
+.market-record-status { flex: 0 0 auto; max-width: 55%; padding: 3px 8px; border-radius: 6px; color: var(--orange-dark); background: var(--orange-soft); font-size: 12px; }
+.market-record-status[data-status="published"], .market-record-status[data-status="superseded"] { color: var(--green); background: var(--green-soft); }
+.market-record-status[data-status="failed"], .market-record-status[data-status="build_failed"] { color: var(--red); background: var(--red-soft); }
+.market-record-status[data-status="closed"], .market-record-status[data-status="conflict"] { color: var(--muted); background: var(--soft); }
+.market-record .market-links:not(:empty) { margin-top: 8px; font-size: 13px; }
+.market-record-route, .market-record-detail { margin-top: 4px; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+.market-history-page .market-error { margin-bottom: 10px; padding-top: 0; }
 .assets-workspace { flex: 1; min-width: 0; padding: clamp(14px, 3vw, 30px); overflow: auto; }
 .assets-header { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 17px; }
 .assets-header h3 { font-size: 20px; }
@@ -575,6 +615,12 @@ body.dragging-module .drop-zone::after { color: var(--orange); }
   .editor-header { padding-inline: 9px; }
   .editor-actions .save-state { display: none; }
   .editor-actions .secondary-button { display: none; }
+  .editor-actions #publish-task:not([hidden]) { display: block; padding-inline: 8px; }
+}
+
+@media (max-width: 660px) {
+  .workspace-nav a { padding-inline: 6px; }
+  .app-header { column-gap: 10px; }
 }
 
 @media (max-width: 540px) {
@@ -582,7 +628,7 @@ body.dragging-module .drop-zone::after { color: var(--orange); }
   .app-header { height: 96px; padding: 0 12px 6px; display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: 44px 38px; gap: 4px 8px; }
   .brand { grid-column: 1; grid-row: 1; }
   .workspace-nav { grid-column: 1 / -1; grid-row: 2; }
-  .workspace-nav a { flex: 1; text-align: center; }
+  .workspace-nav a { flex: 1; padding-inline: 3px; text-align: center; }
   .brand small { display: none; }
   .server-state { grid-column: 2; grid-row: 1; padding: 6px 8px; }
   .group-workspace { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }

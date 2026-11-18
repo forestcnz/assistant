@@ -82,6 +82,13 @@ Web 顶部有「任务管理 / 分组管理 / 模板管理」三个独立页签�
 
 编写 JavaScript 可参考[脚本 API](docs/script-api.md)和[任务脚本编写指南](docs/script-writing-guide.md)。
 
+### 从 Web 发布到脚本市场
+
+1. 在手机浏览器打开 `http://127.0.0.1:8765/`。通过 USB 连接电脑时，可运行 `adb forward tcp:8765 tcp:8765`，再在电脑浏览器打开同一地址。也可使用连接到回环地址的可信 HTTPS 反向代理，代理需保留浏览器的 `Host` 并设置 `X-Forwarded-Proto: https`。
+2. 保存任务后，点编辑器右上角的「发布到市场」。首次使用时填写启用了 Device Flow 的 GitHub OAuth App 的 Client ID，按网页提示在 GitHub 输入设备码。Client ID 可在 [GitHub 应用设置](https://github.com/settings/developers) 中获取。
+3. 选择发布新条目或更新市场条目，核对将公开的代码和素材后确认。GitHub 账号有权限直接写入时会提交到 `master`，其余情况会发起 PR。确认 GitHub Actions 已将该版本写入市场目录后，Web 发布记录显示「已上架」。
+4. 在 Web 顶部打开「发布记录」查看当前会话的提交状态。进行中的记录会自动刷新，也可点「刷新状态」立即查询。
+
 ## 运行任务
 
 - **立即运行：** 打开悬浮任务面板，长按一个任务即可单独运行；点选多个任务后点「执行所选」，会按点选顺序执行。

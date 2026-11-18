@@ -7,6 +7,7 @@
     tasksPage: document.getElementById("tasks-page"),
     groupsPage: document.getElementById("groups-page"),
     templatesPage: document.getElementById("templates-page"),
+    marketHistoryPage: document.getElementById("market-history-page"),
     templateRail: document.getElementById("template-rail"),
     templateList: document.getElementById("template-list"),
     templateSearch: document.getElementById("template-search"),
@@ -34,6 +35,7 @@
     assetInput: document.getElementById("asset-file-input"),
     saveButton: document.getElementById("save-task"),
     previewButton: document.getElementById("preview-code"),
+    publishButton: document.getElementById("publish-task"),
     serverState: document.getElementById("server-state")
   };
 
@@ -406,7 +408,8 @@
   }
 
   function showPage() {
-    const page = location.hash === "#groups" ? "groups" : location.hash === "#templates" ? "templates" : "tasks";
+    const requested = location.hash.slice(1);
+    const page = ["groups", "templates", "market-history"].includes(requested) ? requested : "tasks";
     if (page !== "templates" && current?.templateId) {
       if (!confirmDiscard()) {
         history.replaceState(null, "", "#templates");
@@ -417,6 +420,8 @@
     dom.tasksPage.hidden = page !== "tasks";
     dom.groupsPage.hidden = page !== "groups";
     dom.templatesPage.hidden = page !== "templates";
+    dom.marketHistoryPage.hidden = page !== "market-history";
+    marketHistory.setVisible(page === "market-history");
     dom.workspaceNav.querySelectorAll("[data-page]").forEach(link => {
       if (link.dataset.page === page) link.setAttribute("aria-current", "page");
       else link.removeAttribute("aria-current");
@@ -610,6 +615,7 @@
     dom.taskName.textContent = current.name;
     dom.editorContext.textContent = current.templateId ? "雕雕助手 / 编辑常用模板" : "雕雕助手 / 编辑任务";
     dom.exitTemplate.hidden = !current.templateId;
+    dom.publishButton.hidden = Boolean(current.templateId);
     dom.saveButton.textContent = current.templateId ? "保存模板" : "保存";
     document.getElementById("task-settings").textContent = current.templateId ? "模板设置" : "任务设置";
     const loop = current.loopMode === "duration" ? `${current.durationSec} 秒`
@@ -2019,6 +2025,19 @@
     dom.modal.innerHTML = "";
   }
 
+  // 弹窗和独立页面共用发布授权，离开任务编辑页时保留已打开的任务。
+  function openMarketPublisher(onAuthorized, newRelease = false) {
+    if (!onAuthorized && (!current || current.templateId)) return;
+    if (!onAuthorized && dirtyModes.size) return toast("请先保存任务修改，再发布到市场", true);
+    return window.openMarketPublisher({
+      task: onAuthorized ? null : { ...current }, api, esc, showModal, root: dom.modal, onAuthorized, newRelease,
+      onHistory: () => {
+        closeModal();
+        location.hash = "market-history";
+      }
+    });
+  }
+
   function taskSettingsModal() {
     showModal(`
       <div class="modal-head">
@@ -2822,6 +2841,10 @@
       return;
     }
     if (target.closest("#save-task")) return saveCurrent();
+    if (target.closest("#publish-task") && current && !current.templateId) {
+      // 公开内容取自手机中已保存的任务，避免把编辑器未保存的内容误认作发布版本。
+      return openMarketPublisher();
+    }
     if (target.closest("#task-settings")) return current.templateId
       ? templateModal({ id: current.templateId, name: current.name, description: current.description, revision: current.revision })
       : taskSettingsModal();
@@ -3444,6 +3467,17 @@
     event.returnValue = "";
   });
 
+  const marketHistory = window.createMarketHistory({
+    root: dom.marketHistoryPage, api, esc,
+    onLogin: () => openMarketPublisher(() => {
+      closeModal();
+      marketHistory.open();
+    }),
+    onNew: () => {
+      location.hash = "tasks";
+      if (current && !current.templateId) openMarketPublisher(null, true);
+    }
+  });
   window.addEventListener("hashchange", () => {
     showPage();
     if (location.hash === "#groups" && !busy) perform(loadTasks);

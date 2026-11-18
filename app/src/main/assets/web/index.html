@@ -23,6 +23,7 @@
         <a href="#tasks" data-page="tasks" aria-current="page">任务管理</a>
         <a href="#groups" data-page="groups">分组管理</a>
         <a href="#templates" data-page="templates">模板管理</a>
+        <a href="#market-history" data-page="market-history">发布记录</a>
       </nav>
       <div class="server-state" id="server-state">
         <span class="state-dot"></span>
@@ -70,6 +71,7 @@
               <span class="save-state" id="save-state">已保存</span>
               <button class="secondary-button" id="exit-template" hidden>结束编辑</button>
               <button class="secondary-button" id="preview-code">代码预览</button>
+              <button class="secondary-button" id="publish-task" hidden>发布到市场</button>
               <button class="primary-button" id="save-task">保存</button>
             </div>
           </header>
@@ -109,12 +111,29 @@
         <div class="empty-editor" id="empty-template-editor"><div class="empty-symbol">▤</div><h2>选择模板开始编辑</h2><p>先创建模板名称，再从左侧选择、编排并保存。</p><button class="secondary-button mobile-tasks empty-tasks" data-open-templates>查看模板列表</button><button class="primary-button" data-new-template>新建模板</button></div>
       </section>
     </main>
+    <main class="market-history-page" id="market-history-page" hidden>
+      <section class="market-history-workspace" aria-labelledby="market-history-title">
+        <header class="market-history-head">
+          <div>
+            <h1 id="market-history-title">发布记录</h1>
+            <p class="settings-hint" id="market-history-session"></p>
+          </div>
+          <div class="market-history-controls">
+            <button type="button" class="secondary-button" id="market-history-refresh">刷新状态</button>
+            <button type="button" class="secondary-button" id="market-history-new">新建发布</button>
+          </div>
+        </header>
+        <p class="market-error" id="market-history-error" role="alert" hidden></p>
+        <div class="market-history-list" id="market-history-list" aria-live="polite"></div>
+      </section>
+    </main>
   </div>
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
   <div class="modal-layer" id="modal-layer" hidden></div>
   <input id="image-file-input" type="file" accept="image/*" hidden>
   <input id="asset-file-input" type="file" accept="image/*" multiple hidden>
+  <script src="/market.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>

@@ -54,12 +54,14 @@ object FlowCompiler {
         if (!target.isFile || target.readText() != script) writeAtomic(target, script)
     }
 
-    fun compile(document: JSONObject): String {
+    fun compile(document: JSONObject): String = compile(document, linkedSetOf())
+
+    /** 发布预检与编译共用实际加载的素材列表。 */
+    internal fun compile(document: JSONObject, templates: MutableSet<String>): String {
         require(document.optInt("schemaVersion", 1) == 1) { "流程版本不受支持" }
         val nodes = document.getJSONArray("nodes")
         require(nodes.length() <= 1000) { "步骤过多" }
         val ids = HashSet<String>()
-        val templates = linkedSetOf<String>()
         val anchors = collectAnchors(nodes)
         val handler = findErrorHandler(nodes)
         val steps = StringBuilder("    if (__flowResume === '__start__') __flowResume = null;\n")

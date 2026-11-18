@@ -87,6 +87,13 @@ object LanWebServer {
 private class EditorHttpServer(
     private val context: Context
 ) : NanoHTTPD(LanWebServerPort.value) {
+    private val marketWeb = MarketWebRoutes(context)
+
+    override fun stop() {
+        super.stop()
+        marketWeb.close()
+    }
+
     override fun serve(session: IHTTPSession): Response {
         return runCatching { route(session) }
             .getOrElse { error ->
@@ -102,9 +109,11 @@ private class EditorHttpServer(
         val segments = session.uri.trim('/').split('/').filter(String::isNotBlank)
 
         if (segments.isEmpty() || (segments.size == 1 && segments[0] == "index.html")) {
-            return asset("web/index.html", "text/html; charset=utf-8")
+            // 发布确认留在编辑器页面内，防止其他页面嵌入并诱导提交。
+            return asset("web/index.html", "text/html; charset=utf-8").apply { addHeader("X-Frame-Options", "DENY") }
         }
         if (segments == listOf("app.js")) return asset("web/app.js", "text/javascript; charset=utf-8")
+        if (segments == listOf("market.js")) return asset("web/market.js", "text/javascript; charset=utf-8")
         if (segments == listOf("styles.css")) return asset("web/styles.css", "text/css; charset=utf-8")
         if (segments == listOf("app-icon.png")) return asset("web/app-icon.png", "image/png")
         if (segments == listOf("api", "health")) {
@@ -115,6 +124,7 @@ private class EditorHttpServer(
         }
 
         return when {
+            segments[1] == "market" -> marketWeb.route(session, segments.drop(2)) { jsonBody(session) }
             segments == listOf("api", "task-bundle") -> exportTaskBundle(session)
             segments == listOf("api", "tasks") -> tasks(session)
             segments == listOf("api", "tasks", "order") -> taskOrder(session)

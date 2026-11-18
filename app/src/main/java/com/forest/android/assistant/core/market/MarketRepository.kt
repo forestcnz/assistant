@@ -20,8 +20,10 @@ import javax.net.ssl.HttpsURLConnection
 internal data class MarketImportProgress(val phase: String, val receivedBytes: Long = 0, val totalBytes: Long = 0)
 
 internal class MarketRepository(private val context: Context) {
-    suspend fun load(): List<MarketRelease> = withContext(Dispatchers.IO) {
-        val bytes = download("$MARKET_RELEASES/latest/download/catalog.json") { input ->
+    suspend fun load(fresh: Boolean = false): List<MarketRelease> = withContext(Dispatchers.IO) {
+        // 跟踪发布时重新解析最新 Release，避免复用指向旧 Release 的缓存重定向。
+        val query = if (fresh) "?refresh=${System.currentTimeMillis()}" else ""
+        val bytes = download("$MARKET_RELEASES/latest/download/catalog.json$query", fresh) { input ->
             val output = ByteArrayOutputStream()
             val buffer = ByteArray(8192)
             while (true) {
@@ -87,7 +89,7 @@ internal class MarketRepository(private val context: Context) {
         }
     }
 
-    private fun <T> download(address: String, read: (InputStream) -> T): T {
+    private fun <T> download(address: String, fresh: Boolean = false, read: (InputStream) -> T): T {
         var uri = URI(address)
         repeat(6) {
             require(uri.scheme == "https" && uri.port in setOf(-1, 443) &&
@@ -98,6 +100,10 @@ internal class MarketRepository(private val context: Context) {
                 connection.connectTimeout = 8_000
                 connection.readTimeout = 15_000
                 connection.setRequestProperty("User-Agent", "DiaoDiaoAssistant-Android")
+                if (fresh) {
+                    connection.useCaches = false
+                    connection.setRequestProperty("Cache-Control", "no-cache")
+                }
                 when (val status = connection.responseCode) {
                     200 -> return connection.inputStream.buffered().use(read)
                     301, 302, 303, 307, 308 -> {
