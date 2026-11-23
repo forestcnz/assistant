@@ -25,6 +25,7 @@ import android.view.WindowManager
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import android.widget.Space
 import android.widget.TextView
 import androidx.core.graphics.drawable.RoundedBitmapDrawableFactory
 import com.forest.android.assistant.R
@@ -1089,7 +1090,7 @@ object FloatyManager {
 
         // 多选操作提示由任务格子的序号与选中态承载，不再单独占用提示行。
         // —— 双列任务列表，独立滚动 ——
-        // 列表改为单列图标行，仍使用独立滚动容器。
+        // 任务格子恢复双列排布（每行两个任务），仍使用独立滚动容器。
         val list = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(contentInset, (5 * d).toInt(), contentInset, (4 * d).toInt())
@@ -1241,7 +1242,9 @@ object FloatyManager {
                 })
             } else {
                 val columnGap = (6 * d).toInt()
-                visibleTasks.chunked(1).forEachIndexed { rowIndex, names ->
+                // 任务面板与分组详情统一双列排布：每行两个任务，列表更长时纵向滚动。
+                val columns = 2
+                visibleTasks.chunked(columns).forEachIndexed { rowIndex, names ->
                     val row = LinearLayout(context).apply {
                         orientation = LinearLayout.HORIZONTAL
                         isBaselineAligned = false
@@ -1267,6 +1270,12 @@ object FloatyManager {
                         cellHolders[name] = views
                         row.addView(views.root, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f).apply {
                             if (columnIndex > 0) marginStart = columnGap
+                        })
+                    }
+                    // 末行只有一个任务时补一个等宽占位，避免单个任务被拉伸占满整行。
+                    if (names.size < columns) {
+                        row.addView(Space(context), LinearLayout.LayoutParams(0, 1, 1f).apply {
+                            marginStart = columnGap
                         })
                     }
                     list.addView(row, LinearLayout.LayoutParams(
@@ -1588,10 +1597,11 @@ object FloatyManager {
     )
 
     /**
-     * 每个任务格包含勾选序号、单行任务名和运行中标记。
+     * 每个任务格包含勾选序号、任务名、一行说明和运行中标记。
      * 点选 = 加入/移出执行队列（序号 = 执行顺序），长按 = 立即单独运行。
      * 当前已移除长按执行，仅保留点选切换队列成员。
-     * 任务行最小高度为 38dp，长名称在末尾显示省略号。
+     * 双列排布后格子只有半个面板宽：首行放图标、名称和序号，第二行放说明，
+     * 名称与说明都单行显示，超长时在末尾省略。
      */
     private fun buildTaskCell(
         context: Context,
@@ -1600,11 +1610,11 @@ object FloatyManager {
     ): TaskCellViews {
         val d = context.resources.displayMetrics.density
         val cell = LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
+            // 纵向紧凑卡片：半宽下把名称放到独立一行，避免图标与序号挤压长任务名。
+            orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_VERTICAL
-            // 单列紧凑任务行，标题和一行说明保持清晰，减少卡片留白。
-            minimumHeight = (48 * d).toInt()
-            setPadding((10 * d).toInt(), (6 * d).toInt(), (10 * d).toInt(), (6 * d).toInt())
+            minimumHeight = (52 * d).toInt()
+            setPadding((8 * d).toInt(), (6 * d).toInt(), (8 * d).toInt(), (7 * d).toInt())
             isClickable = true
             isFocusable = true
             setOnClickListener { onToggle() }
@@ -1628,11 +1638,11 @@ object FloatyManager {
         val icon = ImageView(context).apply {
             setImageResource(when { name.contains("签到") -> R.drawable.ic_sun; name.contains("阅读") -> R.drawable.ic_book; else -> R.drawable.ic_code })
             setColorFilter(COLOR_TEXT_DIM)
-            setPadding((7*d).toInt(), (7*d).toInt(), (7*d).toInt(), (7*d).toInt())
+            // 双列格子图标缩小到 26dp，给任务名留出更多宽度
+            setPadding((6*d).toInt(), (6*d).toInt(), (6*d).toInt(), (6*d).toInt())
             background = roundedBackground(COLOR_PRIMARY_CONTAINER, 6*d, 0f, 0)
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
         }
-        cell.addView(icon, LinearLayout.LayoutParams((32*d).toInt(), (32*d).toInt()))
         val label = textView(context, name, 13f, COLOR_TEXT).apply {
             typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
             includeFontPadding = false
@@ -1653,20 +1663,34 @@ object FloatyManager {
             ellipsize = TextUtils.TruncateAt.END
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
         }
-        // 名称与运行标记纵向排列，避免徽标挤占长任务名的显示空间。
-        cell.addView(LinearLayout(context).apply {
-            orientation = LinearLayout.VERTICAL
-            addView(label, LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
-            ))
-            addView(description, LinearLayout.LayoutParams(-1, -2).apply { topMargin = (2*d).toInt() })
-            addView(runningTag, LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { topMargin = (3 * d).toInt() })
-        }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
-            marginStart = (8 * d).toInt()
+        // 首行：图标 + 任务名 + 勾选序号，名称占满剩余宽度。
+        val titleRow = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        titleRow.addView(icon, LinearLayout.LayoutParams((26*d).toInt(), (26*d).toInt()))
+        titleRow.addView(label, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+            marginStart = (6 * d).toInt()
         })
-        cell.addView(badge, LinearLayout.LayoutParams((20*d).toInt(), (20*d).toInt()).apply { marginStart = (10*d).toInt() })
+        titleRow.addView(badge, LinearLayout.LayoutParams((18*d).toInt(), (18*d).toInt()).apply {
+            marginStart = (6 * d).toInt()
+        })
+        cell.addView(titleRow, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+        ))
+        // 说明与运行中标记同一行，标记显隐不改变格子高度，双列时两侧卡片等高。
+        val detailRow = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            minimumHeight = (16 * d).toInt()
+        }
+        detailRow.addView(description, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        detailRow.addView(runningTag, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT
+        ).apply { marginStart = (4 * d).toInt() })
+        cell.addView(detailRow, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+        ).apply { topMargin = (3 * d).toInt() })
         return TaskCellViews(cell, badge, label, runningTag, description, baseDescription)
     }
 
