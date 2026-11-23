@@ -168,8 +168,8 @@ object PickerOverlay {
     private fun attachPicker(context: Context, mode: Mode, frozenFrame: Bitmap?): Boolean {
         val wm = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
         val view = PickerView(context, mode, frozenFrame) { code -> deliver(context, code) }
-        // minSdk 29：悬浮窗类型固定为 TYPE_APPLICATION_OVERLAY
-        val windowType = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+        // Android 8.0 起使用 TYPE_APPLICATION_OVERLAY，Android 7.x 回退 TYPE_PHONE
+        val windowType = overlayWindowType()
         // 截图通过屏幕上的取消按钮退出，其余模式由浮层处理系统返回。
         val usesBackToCancel = mode != Mode.SCREENSHOT
         val params = WindowManager.LayoutParams(

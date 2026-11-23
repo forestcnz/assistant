@@ -146,7 +146,10 @@ internal fun MainActivity.installAppUpdate() {
     }
     if (taskBusy()) return
     try {
-        if (!packageManager.canRequestPackageInstalls()) {
+        // 未知来源安装权限开关从 Android 8.0（API 26）开始提供；
+        // 更低版本在安装时由系统统一询问，无需进入该设置页
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O &&
+            !packageManager.canRequestPackageInstalls()) {
             appUpdate.showNotice("允许来自此来源的应用后，返回并点击立即安装")
             startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, "package:$packageName".toUri()))
             return

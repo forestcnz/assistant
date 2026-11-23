@@ -22,6 +22,7 @@ import android.widget.TextView
 import com.forest.android.assistant.ui.AppToast as Toast
 import com.forest.android.assistant.core.engine.ScriptRunner
 import com.forest.android.assistant.core.floaty.FloatyManager
+import com.forest.android.assistant.core.floaty.overlayWindowType
 import com.forest.android.assistant.core.gesture.GestureClient
 import com.forest.android.assistant.core.image.ScreenCapture
 import com.forest.android.assistant.core.task.TaskManager
@@ -278,8 +279,8 @@ object RecordingSetupOverlay {
         val params = WindowManager.LayoutParams(
             panelWidth,
             WindowManager.LayoutParams.WRAP_CONTENT,
-            // minSdk 29：悬浮窗类型固定为 TYPE_APPLICATION_OVERLAY，TYPE_PHONE 已废弃
-            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            // Android 8.0 起使用 TYPE_APPLICATION_OVERLAY，Android 7.x 回退 TYPE_PHONE
+            overlayWindowType(),
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
             PixelFormat.TRANSLUCENT
         ).apply {

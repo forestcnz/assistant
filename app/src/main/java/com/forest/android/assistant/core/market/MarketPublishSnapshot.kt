@@ -8,8 +8,10 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.io.OutputStream
-import java.time.LocalDate
-import java.time.ZoneOffset
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
 import java.util.UUID
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
@@ -79,7 +81,7 @@ internal data class MarketPublishSnapshot(
                 .put("description", request.required("description", 200)).put("usage", request.required("usage", 2000))
                 .put("environment", request.required("environment", 500)).put("changes", request.required("changes", 500))
                 .put("capabilities", JSONArray(capabilities)).put("minAppVersionCode", minimum)
-                .put("updatedAt", LocalDate.now(ZoneOffset.ofHours(8)).toString())
+                .put("updatedAt", beijingDate())
             targetApp?.let { metadata.put("targetApp", it) }
             targetPackage?.let { metadata.put("targetPackage", it) }
             val images = request.getJSONArray("images").strings()
@@ -173,6 +175,11 @@ internal data class MarketPublishSnapshot(
             require(size <= MAX_MARKET_ZIP_BYTES) { "市场 ZIP 不能超过 20 MiB" }
             return size
         }
+
+        /** 市场目录统一使用北京时间日期（yyyy-MM-dd）。 */
+        private fun beijingDate(): String = SimpleDateFormat("yyyy-MM-dd", Locale.US).apply {
+            timeZone = TimeZone.getTimeZone("GMT+08:00")
+        }.format(Date())
 
         fun imageMime(name: String): String? = when (name.substringAfterLast('.').lowercase()) {
             "png" -> "image/png"

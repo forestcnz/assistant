@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
+import android.os.Build
 import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkInfo
@@ -17,8 +18,6 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.json.JSONObject
 import java.io.File
-import java.nio.file.Files
-import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
 import java.util.UUID
 
@@ -52,10 +51,24 @@ internal class UpdateDownloads(
     private val workManager by lazy { WorkManager.getInstance(context) }
     private val packageManager = context.packageManager
 
-    fun installedPackage(): PackageInfo = packageManager.getPackageInfo(context.packageName, PackageManager.GET_SIGNING_CERTIFICATES)
+    // Android 9 起签名信息由 signingInfo 提供；Android 7/8 只能用已废弃的 signatures
+    private val signatureFlags: Int
+        get() = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            PackageManager.GET_SIGNING_CERTIFICATES
+        } else {
+            @Suppress("DEPRECATION")
+            PackageManager.GET_SIGNATURES
+        }
+
+    fun installedPackage(): PackageInfo = packageManager.getPackageInfo(context.packageName, signatureFlags)
 
     fun isOfficial(info: PackageInfo): Boolean {
-        val signers = info.signingInfo?.apkContentsSigners ?: return false
+        val signers = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            info.signingInfo?.apkContentsSigners
+        } else {
+            @Suppress("DEPRECATION")
+            info.signatures
+        } ?: return false
         return signers.size == 1 && sha256(signers.single().toByteArray()) == BuildConfig.RELEASE_CERTIFICATE_SHA256
     }
 
@@ -118,7 +131,7 @@ internal class UpdateDownloads(
         val installed = installedPackage()
         val patchSpace = directory.usableSpace - manifest.sizeBytes
         val candidates = manifest.patches.filter {
-            it.fromVersionCode == installed.longVersionCode && it.sizeBytes <= patchSpace
+            it.fromVersionCode == installed.longVersionCodeCompat && it.sizeBytes <= patchSpace
         }
         if (candidates.isEmpty()) return null
         val base = baseApk(installed) ?: return null
@@ -218,17 +231,18 @@ internal class UpdateDownloads(
         }
         val installed = installedPackage()
         val base = baseApk(installed)
-        require(installed.longVersionCode == patch.fromVersionCode && base != null && sha256(base) == patch.fromSha256) {
+        require(installed.longVersionCodeCompat == patch.fromVersionCode && base != null && sha256(base) == patch.fromSha256) {
             "旧版 APK 与增量包不匹配"
         }
         val target = File(directory, download.fileName)
         val temporary = File(directory, "${download.fileName}.part.apk")
-        Files.deleteIfExists(temporary.toPath())
+        temporary.delete()
         check(directory.usableSpace >= download.manifest.sizeBytes) { "设备空间不足，请清理后重试" }
         try {
             ApkPatch.apply(base, payload, temporary, download.manifest.sizeBytes)
             verifyApk(temporary, download.manifest)
-            Files.move(temporary.toPath(), target.toPath(), StandardCopyOption.ATOMIC_MOVE)
+            // 同目录 rename 是原子替换（Android 7 没有 java.nio.file）
+            check(temporary.renameTo(target)) { "无法完成更新包合并" }
             if (download.legacyId != null) runCatching { manager.remove(download.legacyId) }
             payload.delete()
         } finally {
@@ -245,12 +259,12 @@ internal class UpdateDownloads(
     private fun verifyApk(file: File, manifest: UpdateManifest) {
         require(file.isFile && file.length() == manifest.sizeBytes) { "安装包大小不符" }
         require(sha256(file) == manifest.sha256) { "安装包 SHA-256 校验失败" }
-        val archive = packageManager.getPackageArchiveInfo(file.path, PackageManager.GET_SIGNING_CERTIFICATES)
+        val archive = packageManager.getPackageArchiveInfo(file.path, signatureFlags)
         require(archive != null && archive.packageName == context.packageName && isOfficial(archive)) {
             "安装包的包名或签名不匹配"
         }
-        require(archive.longVersionCode == manifest.versionCode && archive.versionName == manifest.versionName &&
-            archive.longVersionCode > installedPackage().longVersionCode
+        require(archive.longVersionCodeCompat == manifest.versionCode && archive.versionName == manifest.versionName &&
+            archive.longVersionCodeCompat > installedPackage().longVersionCodeCompat
         ) { "安装包版本不匹配" }
     }
 

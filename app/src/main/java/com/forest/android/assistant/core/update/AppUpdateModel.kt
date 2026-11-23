@@ -52,7 +52,7 @@ internal class AppUpdateModel(application: Application) : AndroidViewModel(appli
     init {
         viewModelScope.launch {
             val installed = withContext(Dispatchers.IO) { downloads.installedPackage() }
-            installedCode = installed.longVersionCode
+            installedCode = installed.longVersionCodeCompat
             val official = downloads.isOfficial(installed)
             val saved = withContext(Dispatchers.IO) {
                 downloads.restore()?.takeIf {

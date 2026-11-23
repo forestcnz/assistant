@@ -260,7 +260,8 @@ object TaskZip {
                 if (!entry.isDirectory) {
                     check(seen.add(name)) { "压缩包包含重复路径：$name" }
                     val target = File(temp, name)
-                    check(target.canonicalFile.toPath().startsWith(temp.canonicalFile.toPath())) { "压缩包包含非法路径：$name" }
+                    // 规范路径解析符号链接后仍须位于临时目录内，防止 zip 路径穿越
+                    check(target.canonicalPath.startsWith(temp.canonicalFile.path + File.separator)) { "压缩包包含非法路径：$name" }
                     check(target.parentFile?.mkdirs() == true || target.parentFile?.isDirectory == true) { "无法创建临时目录" }
                     target.outputStream().use { output ->
                         val buffer = ByteArray(8192)

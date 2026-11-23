@@ -3,6 +3,7 @@ package com.forest.android.assistant.core.web
 import android.content.Context
 import android.graphics.Bitmap
 import android.util.AtomicFile
+import android.util.Base64
 import com.forest.android.assistant.core.engine.ScriptRunner
 import com.forest.android.assistant.core.flow.FlowCompiler
 import com.forest.android.assistant.core.flow.FlowTemplates
@@ -26,7 +27,6 @@ import java.io.File
 import java.io.FileInputStream
 import java.net.NetworkInterface
 import java.net.URLEncoder
-import java.util.Base64
 
 data class LanWebState(
     val running: Boolean = false,
@@ -513,7 +513,7 @@ private class EditorHttpServer(
         val encoded = request.optString("data")
         require(encoded.isNotBlank()) { "图片内容为空" }
         require(encoded.length <= 21_000_000) { "图片不能超过 15 MB" }
-        val bytes = Base64.getDecoder().decode(encoded)
+        val bytes = Base64.decode(encoded, Base64.DEFAULT)
         require(bytes.isNotEmpty()) { "图片内容为空" }
         val directory = TaskManager.imagesDir(context, taskName)
         val safeName = uniqueImageName(directory, rawName)

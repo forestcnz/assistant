@@ -21,6 +21,7 @@ import android.os.Handler
 import android.os.HandlerThread
 import android.os.IBinder
 import android.util.Log
+import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import java.util.concurrent.CountDownLatch
@@ -158,21 +159,24 @@ class ScreenCaptureService : Service() {
 
     private fun startForegroundCompat() {
         val nm = getSystemService(NotificationManager::class.java)
-        // minSdk 29：通知渠道必然可用
-        nm.createNotificationChannel(
-            NotificationChannel(
-                CHANNEL_ID,
-                "雕雕助手",
-                NotificationManager.IMPORTANCE_LOW
-            ).apply { description = "自动化脚本识别界面时使用屏幕截图" }
-        )
-        val notification: Notification = Notification.Builder(this, CHANNEL_ID)
+        // Android 8.0+ 才有通知渠道，低版本走 NotificationCompat 的兼容路径
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            nm.createNotificationChannel(
+                NotificationChannel(
+                    CHANNEL_ID,
+                    "雕雕助手",
+                    NotificationManager.IMPORTANCE_LOW
+                ).apply { description = "自动化脚本识别界面时使用屏幕截图" }
+            )
+        }
+        val notification: Notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("雕雕助手")
             .setContentText("正在为自动化脚本提供屏幕截图")
             .setSmallIcon(android.R.drawable.ic_menu_view)
             .setOngoing(true)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
-        // minSdk 29：Q 起才引入前台服务类型，本分支恒为真
+        // 前台服务类型仅 Android 10+ 有意义，低版本由 ServiceCompat 忽略
         val type = ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
         try {
             ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, type)

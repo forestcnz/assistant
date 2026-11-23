@@ -4,6 +4,7 @@ import android.app.ActivityManager
 import android.content.Context
 import android.graphics.PixelFormat
 import android.graphics.drawable.GradientDrawable
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
@@ -16,6 +17,7 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import com.forest.android.assistant.R
+import com.forest.android.assistant.core.floaty.overlayWindowType
 import kotlin.math.roundToInt
 
 /** 全局轻提示：直接绘制透明雕雕 Logo，不依赖系统 Toast 自动加载的应用图标。 */
@@ -76,7 +78,7 @@ internal object AppToast {
         val manager = context.getSystemService(WindowManager::class.java) ?: return false
         val params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT,
-            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            overlayWindowType(),
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
             PixelFormat.TRANSLUCENT
         ).apply {
@@ -89,8 +91,15 @@ internal object AppToast {
             overlayView = content
             val baseTimeout = if (duration == LENGTH_LONG) 3_500 else 2_000
             val accessibility = context.getSystemService(AccessibilityManager::class.java)
-            val timeout = accessibility?.getRecommendedTimeoutMillis(baseTimeout,
-                AccessibilityManager.FLAG_CONTENT_TEXT or AccessibilityManager.FLAG_CONTENT_ICONS) ?: baseTimeout
+            // 无障碍建议时长从 Android 10（API 29）开始提供，低版本使用默认时长
+            val timeout = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && accessibility != null) {
+                accessibility.getRecommendedTimeoutMillis(
+                    baseTimeout,
+                    AccessibilityManager.FLAG_CONTENT_TEXT or AccessibilityManager.FLAG_CONTENT_ICONS
+                )
+            } else {
+                baseTimeout
+            }
             handler.postDelayed(dismissOverlay, timeout.toLong())
             true
         } catch (_: Exception) {

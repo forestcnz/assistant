@@ -34,13 +34,16 @@ class LanWebService : Service() {
 
     private fun startForegroundCompat() {
         val manager = getSystemService(NotificationManager::class.java)
-        manager.createNotificationChannel(
-            NotificationChannel(
-                CHANNEL_ID,
-                "局域网 Web 编辑",
-                NotificationManager.IMPORTANCE_LOW
-            ).apply { description = "在浏览器中编辑脚本和可视化流程" }
-        )
+        // 通知渠道从 Android 8.0（API 26）开始提供
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            manager.createNotificationChannel(
+                NotificationChannel(
+                    CHANNEL_ID,
+                    "局域网 Web 编辑",
+                    NotificationManager.IMPORTANCE_LOW
+                ).apply { description = "在浏览器中编辑脚本和可视化流程" }
+            )
+        }
         val openIntent = PendingIntent.getActivity(
             this,
             10,
