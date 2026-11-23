@@ -2,7 +2,6 @@ package com.forest.android.assistant.core.task
 
 import org.json.JSONObject
 import java.io.File
-import java.nio.file.Files
 import java.util.UUID
 
 /** 先完整写入隐藏暂存目录，再一次发布；新任务仅继承内容，不继承运行记录。 */
@@ -18,13 +17,16 @@ internal object TaskCopy {
         val staging = File(target.parentFile, ".deleted-copy-${UUID.randomUUID()}")
         try {
             check(staging.mkdirs()) { "无法创建任务暂存目录" }
+            // Android 7 没有 java.nio.file.Files：用规范路径判断是否仍位于任务目录内，
+            // 符号链接会被解析到真实目标，指向目录外的链接同样会被拒绝。
+            val root = source.canonicalFile
             source.walkTopDown().onEnter { directory ->
-                require(!Files.isSymbolicLink(directory.toPath())) { "任务目录包含符号链接，无法复制" }
+                require(directory.canonicalFile.isInside(root)) { "任务目录包含符号链接，无法复制" }
                 true
             }.onFail { _, error -> throw error }.forEach { entry ->
                 val relative = entry.relativeTo(source).path.replace('\\', '/')
                 if (relative == "history.jsonl" || relative == "flow.draft.json") return@forEach
-                require(!Files.isSymbolicLink(entry.toPath())) { "任务文件包含符号链接，无法复制" }
+                require(entry.canonicalFile.isInside(root)) { "任务文件包含符号链接，无法复制" }
                 val destination = File(staging, relative)
                 if (entry.isDirectory) check(destination.isDirectory || destination.mkdirs()) { "无法复制任务目录" }
                 else entry.copyTo(destination, overwrite = false)
@@ -37,3 +39,7 @@ internal object TaskCopy {
         }
     }
 }
+
+/** 判断文件是否位于 root 目录内（含 root 本身）；调用前需先取 canonicalFile 解析符号链接。 */
+private fun File.isInside(root: File): Boolean =
+    path == root.path || path.startsWith(root.path + File.separator)

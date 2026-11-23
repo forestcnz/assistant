@@ -6,9 +6,7 @@ import com.forest.android.assistant.core.task.TaskManager
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
-import java.nio.file.AtomicMoveNotSupportedException
-import java.nio.file.Files
-import java.nio.file.StandardCopyOption
+import java.io.IOException
 
 /**
  * 录制任务落盘：
@@ -238,11 +236,11 @@ private fun writeAtomic(target: File, content: String) {
     val temp = File.createTempFile(target.name, ".tmp", dir)
     try {
         temp.writeText(content, Charsets.UTF_8)
-        try {
-            Files.move(temp.toPath(), target.toPath(),
-                StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
-        } catch (e: AtomicMoveNotSupportedException) {
-            Files.move(temp.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING)
+        // 同目录 rename 在 Android/Linux 上是原子替换；java.nio.file 需要 API 26，不能使用
+        if (!temp.renameTo(target)) {
+            // 个别文件系统不支持覆盖式改名：删除旧目标后重试一次
+            target.delete()
+            if (!temp.renameTo(target)) throw IOException("无法写入 ${target.name}")
         }
     } finally {
         if (temp.exists()) temp.delete()

@@ -6,6 +6,7 @@ import android.graphics.BitmapFactory
 import android.graphics.PixelFormat
 import android.util.Log
 import com.forest.android.assistant.core.shell.RootShell
+import com.forest.android.assistant.core.shell.waitForCompat
 import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -56,7 +57,7 @@ object SilentCapture {
     }
 
     private fun awaitAndDecode(process: Process, file: File, decode: (File) -> Bitmap?): Bitmap? = try {
-        val finished = process.waitFor(TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        val finished = process.waitForCompat(TIMEOUT_SECONDS, TimeUnit.SECONDS)
         if (!finished) {
             process.destroy()
             Log.w(TAG, "root 截屏超时")

@@ -655,9 +655,10 @@ object ImageApi {
         if (!restrictToTask) return if (f.isAbsolute) f else File(scriptDir, path)
         if (f.isAbsolute) return null
         return runCatching {
-            val root = scriptDir.canonicalFile.toPath()
+            // 规范路径解析符号链接后仍须位于脚本目录内（Android 7 无 java.nio.file）
+            val root = scriptDir.canonicalFile
             File(scriptDir, path).canonicalFile.takeIf {
-                it.toPath() != root && it.toPath().startsWith(root)
+                it.path != root.path && it.path.startsWith(root.path + File.separator)
             }
         }.getOrNull()
     }

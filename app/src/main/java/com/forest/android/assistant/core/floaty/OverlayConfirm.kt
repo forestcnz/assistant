@@ -42,7 +42,7 @@ internal object OverlayConfirm {
             setOnClickListener { dialog.dismiss(); onConfirm() }
         }, LinearLayout.LayoutParams(0, dp(48), 1f))
         layout.addView(actions)
-        dialog.window?.setType(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY)
+        dialog.window?.setType(overlayWindowType())
         dialog.show()
         dialog.window?.apply {
             setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))

@@ -1166,7 +1166,10 @@ object FloatyManager {
             pageSwitch.visibility = if (runningTask == null) View.VISIBLE else View.GONE
             val destination = if (showingGroups) "任务面板" else "分组面板"
             pageSwitch.contentDescription = "切换到$destination"
-            pageSwitch.tooltipText = "切换到$destination"
+            // setTooltipText 从 Android 8.0（API 26）开始提供，低版本只保留 contentDescription
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                pageSwitch.tooltipText = "切换到$destination"
+            }
         }
 
         fun renderTaskCells() {
@@ -1616,7 +1619,10 @@ object FloatyManager {
             typeface = Typeface.DEFAULT_BOLD
             includeFontPadding = false
             isSingleLine = true
-            setAutoSizeTextTypeUniformWithConfiguration(8, 12, 1, TypedValue.COMPLEX_UNIT_SP)
+            // 自动缩放从 Android 8.0（API 26）开始提供，低版本沿用 textView 的默认字号
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                setAutoSizeTextTypeUniformWithConfiguration(8, 12, 1, TypedValue.COMPLEX_UNIT_SP)
+            }
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
         }
         val icon = ImageView(context).apply {
@@ -1793,8 +1799,8 @@ object FloatyManager {
 
     /** 叠加窗口通用参数：置顶、不抢焦点、可触摸 */
     private fun overlayParams(gravity: Int, x: Int, y: Int): WindowManager.LayoutParams {
-        // minSdk 29：悬浮窗类型固定为 TYPE_APPLICATION_OVERLAY
-        val windowType = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+        // Android 8.0 起使用 TYPE_APPLICATION_OVERLAY，Android 7.x 回退 TYPE_PHONE
+        val windowType = overlayWindowType()
         return WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.WRAP_CONTENT,

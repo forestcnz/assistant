@@ -62,6 +62,7 @@ import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import com.forest.android.assistant.R
 import com.forest.android.assistant.core.engine.ScriptRunner
 import com.forest.android.assistant.core.floaty.FloatyManager
+import com.forest.android.assistant.core.floaty.overlayWindowType
 import com.forest.android.assistant.core.task.TaskManager
 import com.forest.android.assistant.ui.AppIcon
 import com.forest.android.assistant.ui.AppPalette
@@ -131,8 +132,8 @@ internal object RecordingSummaryOverlay {
             }
         }
         summaryDialog.window?.apply {
-            // minSdk 29：悬浮窗类型固定为 TYPE_APPLICATION_OVERLAY。
-            setType(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY)
+            // Android 8.0 起使用 TYPE_APPLICATION_OVERLAY，Android 7.x 回退 TYPE_PHONE。
+            setType(overlayWindowType())
             setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
             setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
             setGravity(Gravity.CENTER)
@@ -205,7 +206,7 @@ internal object RecordingSummaryOverlay {
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
         )
         confirmation.window?.apply {
-            setType(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY)
+            setType(overlayWindowType())
             setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
             setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN)
             setGravity(Gravity.BOTTOM)

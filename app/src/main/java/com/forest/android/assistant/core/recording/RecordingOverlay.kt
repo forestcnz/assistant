@@ -14,6 +14,7 @@ import android.view.ViewConfiguration
 import android.view.WindowManager
 import android.widget.LinearLayout
 import android.widget.TextView
+import com.forest.android.assistant.core.floaty.overlayWindowType
 import com.forest.android.assistant.ui.AppPalette
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -39,8 +40,8 @@ class RecordingOverlay(
     private val density = context.resources.displayMetrics.density
     private fun dp(value: Int) = (value * density).roundToInt()
 
-    // minSdk 29：悬浮窗类型固定为 TYPE_APPLICATION_OVERLAY
-    private val windowType = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+    // Android 8.0 起使用 TYPE_APPLICATION_OVERLAY，Android 7.x 回退 TYPE_PHONE
+    private val windowType = overlayWindowType()
 
     // —— 悬浮条与 APP 共用浅色表面，整张卡片只用一种底色 ——
     private val textColor = AppPalette.ON_SURFACE
@@ -399,8 +400,10 @@ class RecordingOverlay(
         PixelFormat.TRANSLUCENT
     ).apply {
         gravity = Gravity.TOP or Gravity.START
-        // minSdk 29：刘海屏模式常量自 API 28 起可用，无需版本判断
-        layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+        // 刘海屏模式字段从 Android 9（API 28）才有，低版本不能赋值
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+        }
         if (Build.VERSION.SDK_INT >= 30) setFitInsetsTypes(0)
     }
 }

@@ -33,7 +33,7 @@ object RootShell {
 
     private fun probe(): Boolean = try {
         val process = ProcessBuilder("su", "-c", "id").redirectErrorStream(true).start()
-        val finished = process.waitFor(PROBE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        val finished = process.waitForCompat(PROBE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
         val output = process.inputStream.bufferedReader().readText()
         if (!finished) process.destroy()
         val ok = finished && output.contains("uid=0")
@@ -47,7 +47,7 @@ object RootShell {
     /** 以 root 执行命令；返回是否成功（退出码 0） */
     fun exec(command: String, timeoutSeconds: Long = EXEC_TIMEOUT_SECONDS): Boolean = try {
         val process = ProcessBuilder("su", "-c", command).redirectErrorStream(true).start()
-        val finished = process.waitFor(timeoutSeconds, TimeUnit.SECONDS)
+        val finished = process.waitForCompat(timeoutSeconds, TimeUnit.SECONDS)
         if (!finished) {
             process.destroy()
             Log.w(TAG, "root 命令超时: $command")

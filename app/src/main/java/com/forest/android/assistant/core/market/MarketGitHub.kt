@@ -1,5 +1,6 @@
 package com.forest.android.assistant.core.market
 
+import android.util.Base64
 import org.json.JSONArray
 import org.json.JSONObject
 import org.json.JSONTokener
@@ -8,7 +9,6 @@ import java.io.IOException
 import java.io.InputStream
 import java.net.URI
 import java.net.URLEncoder
-import java.util.Base64
 import javax.net.ssl.HttpsURLConnection
 
 internal const val MARKET_BRANCH = "master"
@@ -66,7 +66,8 @@ internal class MarketGitHub(private val token: String? = null) {
         require(content.getString("encoding") == "base64" && content.getInt("size") <= 64 * 1024) {
             "市场条目的发布信息无效"
         }
-        JSONObject(Base64.getMimeDecoder().decode(content.getString("content")).toString(Charsets.UTF_8))
+        // GitHub 返回的 content 可能带换行，DEFAULT 解码会忽略空白字符
+        JSONObject(Base64.decode(content.getString("content"), Base64.DEFAULT).toString(Charsets.UTF_8))
     }
 
     fun fork(login: String): String {
@@ -106,7 +107,7 @@ internal class MarketGitHub(private val token: String? = null) {
     }
 
     fun createBlob(repo: String, bytes: ByteArray): String = obj("POST", "${repoPath(repo)}/git/blobs", JSONObject()
-        .put("encoding", "base64").put("content", Base64.getEncoder().encodeToString(bytes))).getString("sha")
+        .put("encoding", "base64").put("content", Base64.encodeToString(bytes, Base64.NO_WRAP))).getString("sha")
 
     fun createTree(repo: String, entries: JSONArray, base: String? = null): String {
         val body = JSONObject().put("tree", entries)

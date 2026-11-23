@@ -72,7 +72,7 @@ internal object RunningControlOverlay {
         val wm = app.getSystemService(WindowManager::class.java)
         val screen = android.graphics.Point().also { @Suppress("DEPRECATION") wm.defaultDisplay.getSize(it) }
         val params = WindowManager.LayoutParams(minOf(dp(360), screen.x - dp(24)), minOf(dp(620), screen.y - dp(48)),
-            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY, WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.TRANSLUCENT).apply {
+            overlayWindowType(), WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.TRANSLUCENT).apply {
             gravity = Gravity.CENTER
         }
         return try {

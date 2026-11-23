@@ -12,13 +12,13 @@ android {
 
     defaultConfig {
         applicationId = "com.forest.android.assistant"
-        // 支持 Android 10+（API 29）。代码中 Process.waitFor(timeout)、Notification.Builder(channel)、
-        // File.toPath() 等均要求 API 26+，与 24 不一致；定为 29 可避免低版本运行时崩溃。
-        minSdk = 29
+        // 支持 Android 7.0+（API 24）。通知渠道、java.nio.file、java.time、Base64 等 API 26+
+        // 能力已改为版本判断或等价实现，低版本不再依赖这些接口。
+        minSdk = 24
         targetSdk = 37
         testInstrumentationRunner = "com.forest.android.assistant.core.image.ImageApiInstrumentation"
         versionCode = providers.gradleProperty("appVersionCode").orElse("1").get().toInt()
-        versionName = providers.gradleProperty("appVersionName").orElse("0.1.18").get()
+        versionName = providers.gradleProperty("appVersionName").orElse("0.1.19").get()
         val releaseCertificate = providers.gradleProperty("appReleaseCertificateSha256").get()
         buildConfigField("String", "RELEASE_CERTIFICATE_SHA256", "\"$releaseCertificate\"")
     }

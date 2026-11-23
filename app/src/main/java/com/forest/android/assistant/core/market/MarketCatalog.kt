@@ -2,7 +2,10 @@ package com.forest.android.assistant.core.market
 
 import org.json.JSONObject
 import java.net.URI
-import java.time.LocalDate
+import java.text.ParseException
+import java.text.SimpleDateFormat
+import java.util.Locale
+import java.util.TimeZone
 
 internal const val MARKET_REPO = "https://github.com/forestcnz/assistant-scripts"
 internal const val MARKET_RELEASES = "$MARKET_REPO/releases"
@@ -33,7 +36,8 @@ internal data class MarketRelease(
     val environment: String,
     val capabilities: List<String>,
     val changes: String,
-    val updatedAt: LocalDate,
+    // ISO 日期（yyyy-MM-dd）：字符串比较与日期先后一致，避免低版本依赖 java.time
+    val updatedAt: String,
     val version: Int,
     val minAppVersionCode: Int,
     val sizeBytes: Long,
@@ -96,13 +100,28 @@ internal object MarketCatalog {
                 }
             },
             changes = json.requiredText("changes", 500),
-            updatedAt = LocalDate.parse(json.getString("updatedAt")),
+            updatedAt = parseDate(json.getString("updatedAt")),
             version = version,
             minAppVersionCode = minVersion,
             sizeBytes = size,
             sha256 = sha,
             revision = revision
         )
+    }
+
+    /** 严格校验 yyyy-MM-dd（SimpleDateFormat 默认宽松，需要回写比对排除 2026-1-1 之类格式）。 */
+    private fun parseDate(text: String): String {
+        val format = SimpleDateFormat("yyyy-MM-dd", Locale.US).apply {
+            isLenient = false
+            timeZone = TimeZone.getTimeZone("UTC")
+        }
+        val date = try {
+            format.parse(text)
+        } catch (_: ParseException) {
+            null
+        }
+        require(date != null && format.format(date) == text) { "市场目录日期无效" }
+        return text
     }
 
     private fun validateDirectoryName(name: String) {

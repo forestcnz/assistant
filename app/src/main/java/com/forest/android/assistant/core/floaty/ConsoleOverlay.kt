@@ -543,8 +543,8 @@ object ConsoleOverlay {
     }
 
     private fun overlayParams(gravity: Int, x: Int, y: Int): WindowManager.LayoutParams {
-        // minSdk 29：悬浮窗类型固定为 TYPE_APPLICATION_OVERLAY
-        val windowType = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+        // Android 8.0 起使用 TYPE_APPLICATION_OVERLAY，Android 7.x 回退 TYPE_PHONE
+        val windowType = overlayWindowType()
         return WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.WRAP_CONTENT,

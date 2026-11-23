@@ -5,6 +5,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
@@ -19,8 +20,6 @@ import java.io.File
 import java.io.IOException
 import java.io.RandomAccessFile
 import java.net.URI
-import java.nio.file.Files
-import java.nio.file.StandardCopyOption
 import javax.net.ssl.HttpsURLConnection
 
 internal class UpdateDownloadWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
@@ -57,7 +56,10 @@ internal class UpdateDownloadWorker(context: Context, params: WorkerParameters) 
 
     private fun showNotification(download: UpdateDownload): NotificationManager? = runCatching {
         val manager = applicationContext.getSystemService(NotificationManager::class.java)
-        manager.createNotificationChannel(NotificationChannel(CHANNEL_ID, "应用更新", NotificationManager.IMPORTANCE_LOW))
+        // Android 8.0+ 才有通知渠道，低版本走 NotificationCompat 的兼容路径
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            manager.createNotificationChannel(NotificationChannel(CHANNEL_ID, "应用更新", NotificationManager.IMPORTANCE_LOW))
+        }
         val openApp = PendingIntent.getActivity(applicationContext, NOTIFICATION_ID,
             Intent(applicationContext, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
         val notification = NotificationCompat.Builder(applicationContext, CHANNEL_ID)
@@ -182,7 +184,8 @@ internal class UpdateTransfer(
             }
         }
         checkActive()
-        Files.move(partial.toPath(), target.toPath(), StandardCopyOption.ATOMIC_MOVE)
+        // 同目录 rename 是原子替换（Android 7 没有 java.nio.file）
+        if (!partial.renameTo(target)) throw IOException("更新文件改名失败")
         validator.delete()
     }
 

@@ -2,6 +2,7 @@ package com.forest.android.assistant.core.web
 
 import android.content.Context
 import android.os.SystemClock
+import android.util.Base64
 import com.forest.android.assistant.BuildConfig
 import com.forest.android.assistant.core.market.MarketGitHub
 import com.forest.android.assistant.core.market.MarketGitHubError
@@ -34,7 +35,6 @@ import java.io.File
 import java.io.IOException
 import java.net.URI
 import java.security.SecureRandom
-import java.util.Base64
 import java.util.UUID
 
 /** GitHub 授权和提交仅存在于本次 Web 服务进程，各浏览器会话互相隔离。 */
@@ -388,7 +388,11 @@ internal class MarketWebRoutes(private val context: Context) {
 
     private fun sessionCookieName(origin: String) = if (origin.startsWith("https://")) "__Host-assistant-market" else "assistant-market-local"
 
-    private fun newKey(): String = Base64.getUrlEncoder().withoutPadding().encodeToString(ByteArray(32).apply(random::nextBytes))
+    // URL 安全的 Base64（无填充），与 java.util.Base64#getUrlEncoder 输出一致
+    private fun newKey(): String = Base64.encodeToString(
+        ByteArray(32).apply(random::nextBytes),
+        Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING
+    )
 
     private class Browser(val origin: String) {
         @Volatile var expires = now() + 900_000
