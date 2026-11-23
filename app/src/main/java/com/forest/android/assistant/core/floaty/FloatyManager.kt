@@ -40,7 +40,8 @@ import com.forest.android.assistant.ui.AppToast as Toast
  *
  * 控件有状态，就地变形而不是叠加多个窗口：
  * - 空闲态：肥宅雕 Logo 悬浮球，点击展开面板，拖动可移动并自动贴边（位置会记住）；
- * - 运行态：横条显示任务名、队列进度和「停止」按钮。
+ * - 运行态：横条显示任务名、队列进度和「停止」按钮；独立定位，首次开始任务时出现在左下角，
+ *   可拖动到任意位置且不自动贴边，位置单独记住，任务结束后空闲球回到原来的位置。
  *
  * 贴边后空闲球半隐藏：约一半探出屏外，点击先弹出完整显示，再次点击才展开面板；
  * 半隐藏位置与贴边方向都会持久化，重启后保持贴边形态。
@@ -60,6 +61,10 @@ object FloatyManager {
     private const val KEY_X = "x"
     private const val KEY_Y = "y"
     private const val KEY_PANEL_GROUPS = "panelGroups"
+
+    /** 运行横条的独立位置：与空闲球分开保存，避免两种形态互相覆盖 */
+    private const val KEY_RUN_X = "runX"
+    private const val KEY_RUN_Y = "runY"
 
     /** 用户是否希望显示悬浮球（默认 true = 首次启动自动开启） */
     private const val KEY_ENABLED = "enabled"
@@ -247,7 +252,9 @@ object FloatyManager {
         val wm = windowManager ?: return
         if (runningTask != null) {
             hideTaskPanel()
-            view.post { positionRunningBar(context) }
+            // 运行横条独立定位：转屏/分屏后按新屏宽调整宽度并钳回屏内，保留用户拖好的位置。
+            params.width = runningBarWidth(context, realScreenSize(context).x)
+            view.post { keepInsideScreen(context) }
             return
         }
         val screen = realScreenSize(context)
@@ -631,7 +638,11 @@ object FloatyManager {
         }
     }
 
-    /** 运行横条以原悬浮球为锚点，靠边时仍完整显示。 */
+    /**
+     * 运行横条独立定位：首次开始任务时固定在屏幕左下角，之后沿用上次拖到的位置
+     * （应用重启后依然记住）。运行条不参与贴边，也不使用空闲球的位置；
+     * 任务结束后空闲球回到原来的位置。
+     */
     private fun positionRunningBar(context: Context) {
         if (runningTask == null) return
         val view = capsuleView ?: return
@@ -640,19 +651,16 @@ object FloatyManager {
         val width = runningBarWidth(context, screen.x)
         val height = view.height.takeIf { view.isAttachedToWindow && it > 0 }
             ?: view.minimumHeight
-        val anchor = idlePosition ?: (params.x to params.y)
-        val ball = ballSize(context)
+        val bottom = runningBarBottom(context, view, screen.y)
+        val saved = loadRunningPosition(context)
         params.gravity = Gravity.TOP or Gravity.START
         params.width = width
-        params.x = when (idleDockedSide) {
-            DockSide.LEFT, DockSide.RIGHT ->
-                FloatyGeometry.visibleX(width, screen.x, idleDockedSide, snapMargin(context))
-            DockSide.NONE -> FloatyGeometry.clampX(
-                anchor.first - (width - ball) / 2, width, screen.x
-            )
-        }
-        val bottom = runningBarBottom(context, view, screen.y)
-        params.y = FloatyGeometry.clampY(anchor.second + (ball - height) / 2, height, bottom)
+        // 没有历史位置时落在左下角：左边距与空闲球的贴边边距一致，底边避开导航栏和系统手势区。
+        // 有历史位置时按当前屏幕重新钳位，转屏或分辨率变化后仍完整可见。
+        params.x = FloatyGeometry.clampX(saved?.first ?: snapMargin(context), width, screen.x)
+        params.y = FloatyGeometry.clampY(
+            saved?.second ?: (bottom - height).coerceAtLeast(0), height, bottom
+        )
         if (view.isAttachedToWindow) {
             try {
                 windowManager?.updateViewLayout(view, params)
@@ -831,9 +839,11 @@ object FloatyManager {
 
     /**
      * 拖动松手后的收位（也是手势被系统打断时的兜底）：
-     * - 自动贴边开启：贴到最近的左/右边缘（空闲球半隐藏，运行条完整可见）；
-     * - 自动贴边关闭：保持松手位置，只钳在屏内。
-     * 运行条位置不写入偏好：空闲球位置单独记录，避免「距底边」的坐标污染「距顶边」的持久化值。
+     * - 空闲球自动贴边开启：贴到最近的左/右边缘（半隐藏）；
+     * - 空闲球自动贴边关闭：保持松手位置，只钳在屏内；
+     * - 运行横条独立定位：不贴边，松手位置保留，只钳在屏内。
+     * 运行条位置写入独立的 KEY_RUN_X/KEY_RUN_Y：不与空闲球的位置和贴边方向混用，
+     * 避免两种形态的坐标语义互相污染。
      */
     private fun settleAfterDrag(
         context: Context,
@@ -842,18 +852,12 @@ object FloatyManager {
         params: WindowManager.LayoutParams
     ) {
         val screen = realScreenSize(context)
-        val margin = snapMargin(context)
         val viewW = stagedViewW(context)
         val viewH = view.height.takeIf { it > 0 } ?: viewW
         val autoSnap = isAutoSnapEnabled(context)
         if (runningTask != null) {
-            // 运行横条贴边时完整显示，保证停止按钮可点击。
-            val side = FloatyGeometry.sideByCenter(params.x, viewW, screen.x)
-            params.x = if (autoSnap) {
-                FloatyGeometry.visibleX(viewW, screen.x, side, margin)
-            } else {
-                FloatyGeometry.clampX(params.x, viewW, screen.x)
-            }
+            // 运行横条独立定位、不参与贴边：松手停在哪里就是哪里，只钳回屏内。
+            params.x = FloatyGeometry.clampX(params.x, viewW, screen.x)
         } else if (autoSnap) {
             val side = FloatyGeometry.sideByCenter(params.x, viewW, screen.x)
             dockedSide = side
@@ -869,6 +873,8 @@ object FloatyManager {
             wm.updateViewLayout(view, params)
         } catch (_: Exception) {
         }
+        // 运行条位置单独记忆，下次开始任务（含应用重启）直接回到这里。
+        if (runningTask != null) saveRunningPosition(context, params.x, params.y)
         savePosition(context, params.x, params.y, dockedSide)
         Log.i(
             TAG,
@@ -954,6 +960,19 @@ object FloatyManager {
             .putInt(KEY_Y, y)
             .putInt(KEY_DOCK, side.ordinal)
             .apply()
+    }
+
+    /** 读取运行横条上次拖到的位置；从未拖动过返回 null（首次仍在左下角显示）。 */
+    private fun loadRunningPosition(context: Context): Pair<Int, Int>? {
+        val p = prefs(context)
+        val x = p.getInt(KEY_RUN_X, -1)
+        val y = p.getInt(KEY_RUN_Y, -1)
+        return if (x >= 0 && y >= 0) x to y else null
+    }
+
+    /** 运行横条位置单独写入 KEY_RUN_X/KEY_RUN_Y，不与空闲球的位置和贴边方向混用。 */
+    private fun saveRunningPosition(context: Context, x: Int, y: Int) {
+        prefs(context).edit().putInt(KEY_RUN_X, x).putInt(KEY_RUN_Y, y).apply()
     }
 
     // ==================== 任务 / 工具面板 ====================
