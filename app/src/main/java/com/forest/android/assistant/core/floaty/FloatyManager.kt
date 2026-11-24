@@ -31,7 +31,6 @@ import androidx.core.graphics.drawable.RoundedBitmapDrawableFactory
 import com.forest.android.assistant.R
 import com.forest.android.assistant.core.task.TaskGroup
 import com.forest.android.assistant.core.task.TaskManager
-import com.forest.android.assistant.core.engine.ScriptRunner
 import com.forest.android.assistant.ui.AppPalette
 import com.forest.android.assistant.ui.AppToast as Toast
 
@@ -234,7 +233,6 @@ object FloatyManager {
     /** 应用内的详情与设置入口复用同一任务面板。 */
     fun showTaskPanel(context: Context): Boolean {
         if (!hasOverlayPermission(context)) return false
-        if (ScriptRunner.state.value.running) return RunningControlOverlay.show(context)
         if (panelView != null) return true
         val wm = windowManager ?: return false
         toggleTaskPanel(context.applicationContext, wm)
@@ -388,7 +386,8 @@ object FloatyManager {
                 MotionEvent.ACTION_UP -> {
                     when {
                         moved -> settleAfterDrag(context, wm, capsule, params)
-                        runningOnDown || runningTask != null -> RunningControlOverlay.show(context)
+                        // 运行态点击横条其他区域不再展开任何面板，只保留拖动与停止按钮。
+                        runningOnDown || runningTask != null -> Unit
                         // 半隐藏贴边第一次点击：先完整弹出，下一次点击才展开面板
                         popOutIfDocked(context, wm, capsule, params) -> Unit
                         else -> toggleTaskPanel(context, wm)
@@ -533,7 +532,6 @@ object FloatyManager {
 
     /** 回到空闲态（任务结束/停止后调用） */
     fun clearRunning(context: Context) {
-        RunningControlOverlay.hide()
         startingFromPanel = false
         // 先移除运行窗口，避免普通 Logo 在任务名称的旧窗口位置短暂显示。
         detachCapsuleForTransition()

@@ -12,7 +12,6 @@ import com.forest.android.assistant.core.floaty.ConsoleOverlay
 import com.forest.android.assistant.core.gesture.AccessibilityGuard
 import com.forest.android.assistant.core.gesture.GestureClient
 import com.forest.android.assistant.core.floaty.FloatyManager
-import com.forest.android.assistant.core.floaty.RunningControlOverlay
 import com.forest.android.assistant.core.floaty.PickerOverlay
 import com.forest.android.assistant.core.image.ScreenCapture
 import com.forest.android.assistant.core.runner.ScriptForegroundService
@@ -105,7 +104,6 @@ object ScriptRunner {
         val context: Context,
         val launcher: Boolean,
         val console: Boolean,
-        val runningControl: Boolean,
         val hiddenAt: Long
     )
     // Main-thread only. The run bar stays visible; only idle controls and the console are hidden.
@@ -655,7 +653,7 @@ object ScriptRunner {
     ): android.graphics.Bitmap? {
         if (context == null) {
             return if ((!FloatyManager.isLauncherShowing() || FloatyManager.isShowing()) &&
-                !ConsoleOverlay.isShowing() && !RunningControlOverlay.isShowing())
+                !ConsoleOverlay.isShowing())
                 capture(0) else null
         }
         var hiddenAt = 0L
@@ -674,21 +672,18 @@ object ScriptRunner {
             } else {
                 val launcher = FloatyManager.isLauncherShowing() && !FloatyManager.isShowing()
                 val console = ConsoleOverlay.isShowing()
-                val runningControl = RunningControlOverlay.isShowing()
-                if (!launcher && !console && !runningControl) {
+                if (!launcher && !console) {
                     prepared = true
                 } else {
                     val launcherHidden = !launcher || FloatyManager.hideLauncherForScreenshot()
                     val consoleHidden = !console || ConsoleOverlay.hideForScreenshot()
-                    val runningHidden = !runningControl || RunningControlOverlay.hideForScreenshot()
-                    if (launcherHidden && consoleHidden && runningHidden) {
+                    if (launcherHidden && consoleHidden) {
                         hiddenAt = SystemClock.uptimeMillis()
-                        hiddenCaptureOverlays = HiddenCaptureOverlays(context, launcher, console, runningControl, hiddenAt)
+                        hiddenCaptureOverlays = HiddenCaptureOverlays(context, launcher, console, hiddenAt)
                         prepared = true
                     } else {
                         if (launcherHidden && launcher) FloatyManager.restoreLauncherAfterScreenshot()
                         if (consoleHidden && console) ConsoleOverlay.restoreAfterScreenshot()
-                        if (runningHidden && runningControl) RunningControlOverlay.restoreAfterScreenshot()
                     }
                 }
             }
@@ -732,7 +727,6 @@ object ScriptRunner {
         if (hidden.console && ConsoleOverlay.isShowing() && !ConsoleOverlay.restoreAfterScreenshot()) {
             ConsoleOverlay.show(hidden.context)
         }
-        if (hidden.runningControl && _state.value.running) RunningControlOverlay.restoreAfterScreenshot()
     }
 
     private fun runOnMainBlocking(action: () -> Unit): Boolean {
