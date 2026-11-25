@@ -60,13 +60,30 @@ internal class UpdateDownloads(
             PackageManager.GET_SIGNATURES
         }
 
+    /**
+     * 解析 APK 文件时使用的标志：Android 9/10 的 getPackageArchiveInfo 只有带
+     * GET_SIGNATURES 才会收集证书，只传 GET_SIGNING_CERTIFICATES 会得到空 signingInfo。
+     * 同时带上两个标志：高版本优先 signingInfo，Android 9/10 回退 signatures。
+     */
+    private val archiveSignatureFlags: Int
+        get() {
+            @Suppress("DEPRECATION")
+            val legacy = PackageManager.GET_SIGNATURES
+            return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                legacy or PackageManager.GET_SIGNING_CERTIFICATES
+            } else {
+                legacy
+            }
+        }
+
     fun installedPackage(): PackageInfo = packageManager.getPackageInfo(context.packageName, signatureFlags)
 
+    @Suppress("DEPRECATION")
     fun isOfficial(info: PackageInfo): Boolean {
+        // Android 9/10 解析 APK 文件时 signingInfo 可能为空，回退到 signatures 证书列表。
         val signers = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            info.signingInfo?.apkContentsSigners
+            info.signingInfo?.apkContentsSigners ?: info.signatures
         } else {
-            @Suppress("DEPRECATION")
             info.signatures
         } ?: return false
         return signers.size == 1 && sha256(signers.single().toByteArray()) == BuildConfig.RELEASE_CERTIFICATE_SHA256
@@ -259,7 +276,7 @@ internal class UpdateDownloads(
     private fun verifyApk(file: File, manifest: UpdateManifest) {
         require(file.isFile && file.length() == manifest.sizeBytes) { "安装包大小不符" }
         require(sha256(file) == manifest.sha256) { "安装包 SHA-256 校验失败" }
-        val archive = packageManager.getPackageArchiveInfo(file.path, signatureFlags)
+        val archive = packageManager.getPackageArchiveInfo(file.path, archiveSignatureFlags)
         require(archive != null && archive.packageName == context.packageName && isOfficial(archive)) {
             "安装包的包名或签名不匹配"
         }
