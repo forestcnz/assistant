@@ -1290,8 +1290,10 @@ object FloatyManager {
                         })
                     }
                     // 末行只有一个任务时补一个等宽占位，避免单个任务被拉伸占满整行。
+                    // 占位高度必须与任务格一样用 MATCH_PARENT：固定高度会让 LinearLayout
+                    // 认定该行不是全部 MATCH_PARENT，最终把行高收成占位高度，单项任务被压成 1px。
                     if (names.size < columns) {
-                        row.addView(Space(context), LinearLayout.LayoutParams(0, 1, 1f).apply {
+                        row.addView(Space(context), LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f).apply {
                             marginStart = columnGap
                         })
                     }
